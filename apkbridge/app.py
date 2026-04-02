@@ -223,16 +223,26 @@ def logcat():
 
     text_filter = request.args.get("filter", "").strip().lower()
     errors_only = request.args.get("errors_only", "0") in {"1", "true", "yes", "on"}
+    include_crash = request.args.get("include_crash", "1") in {"1", "true", "yes", "on"}
 
     try:
         logcat_args = ["logcat", "-d", "-v", "time"]
         if errors_only:
             logcat_args.extend(["*:E"])
-        logs = adb(*logcat_args)
-        lines = [line for line in logs.splitlines() if line.strip()]
-        if text_filter:
-            lines = [line for line in lines if text_filter in line.lower()]
 
-        return jsonify({"ok": True, "entries": lines[-limit:]})
+        combined_lines = [line for line in adb(*logcat_args).splitlines() if line.strip()]
+
+        # The crash buffer keeps Java/Kotlin fatal exception stacks even when
+        # the main buffer is noisy and the interesting lines scroll out.
+        if include_crash:
+            crash_lines = [line for line in adb("logcat", "-d", "-b", "crash", "-v", "time").splitlines() if line.strip()]
+            if crash_lines:
+                combined_lines.append("--------- crash buffer ---------")
+                combined_lines.extend(crash_lines)
+
+        if text_filter:
+            combined_lines = [line for line in combined_lines if text_filter in line.lower()]
+
+        return jsonify({"ok": True, "entries": combined_lines[-limit:]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

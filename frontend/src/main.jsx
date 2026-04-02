@@ -20,6 +20,7 @@ function App() {
   const [browserData, setBrowserData] = useState({ directories: [], apks: [], cwd: "", parent: null });
   const [logFilter, setLogFilter] = useState("");
   const [errorsOnly, setErrorsOnly] = useState(false);
+  const [includeCrashBuffer, setIncludeCrashBuffer] = useState(true);
   const [logsPaused, setLogsPaused] = useState(false);
   const [logLimit, setLogLimit] = useState(100);
   const [logEntries, setLogEntries] = useState([]);
@@ -40,6 +41,7 @@ function App() {
           limit: String(logLimit),
           filter: logFilter,
           errors_only: errorsOnly ? "1" : "0",
+          include_crash: includeCrashBuffer ? "1" : "0",
         });
         const data = await parseJsonResponse(await fetch(`/api/logcat?${query.toString()}`), "/api/logcat");
         setLogEntries(data.entries || []);
@@ -51,7 +53,7 @@ function App() {
     loadLogs();
     const id = setInterval(loadLogs, 2500);
     return () => clearInterval(id);
-  }, [logFilter, errorsOnly, logsPaused, logLimit]);
+  }, [logFilter, errorsOnly, includeCrashBuffer, logsPaused, logLimit]);
 
   useEffect(() => {
     function onMove(e) {
@@ -387,6 +389,14 @@ function App() {
                   onChange={(e) => setErrorsOnly(e.target.checked)}
                 />
                 Errors only
+              </label>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={includeCrashBuffer}
+                  onChange={(e) => setIncludeCrashBuffer(e.target.checked)}
+                />
+                Crash buffer
               </label>
               <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
                 Rows

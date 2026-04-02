@@ -183,11 +183,7 @@ jobs:
             bash -l -s <<'REMOTE'
           set -euo pipefail
           cd "${COMPOSE_DIR}"
-          if docker compose version > /dev/null 2>&1; then
-            docker compose up -d --remove-orphans --pull never
-          else
-            docker-compose up -d --remove-orphans --no-pull
-          fi
+          docker compose up -d --remove-orphans
           echo "    docker compose deploy complete."
           REMOTE
 

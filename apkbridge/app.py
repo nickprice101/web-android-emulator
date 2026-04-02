@@ -16,6 +16,8 @@ def run(cmd, timeout=90):
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+    except FileNotFoundError as e:
+        return 127, "", str(e)
     except subprocess.TimeoutExpired:
         return 1, "", "ADB Timeout"
 

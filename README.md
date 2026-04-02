@@ -27,11 +27,11 @@ The Docker compose config pins public DNS resolvers (`1.1.1.1`, `8.8.8.8`) on al
 
 This matches Google’s own WebRTC sample expectations: a webserver, a gRPC web proxy, and either open WebRTC UDP ports or a configured TURN service.
 
-There is action workfile (deploy.yml) to support deployment. It needs the appropriate SECRETS (ADB, custom TURN secret, and server SSH credentials) to be set up (see the script).
+There is a workspace action script (deploy.yml) to support deployment. It needs the appropriate SECRETS (ADB, custom TURN secret, and server SSH credentials) to be set up (see the script to better understand).
 
 ## TURN server
 
-TURN aserver files are not included in the repostiory, instead the instrucitons are included below.
+TURN server files are not included in the repostiory, instead the instructoons are included below.
 
 Create a folder on the Pi:
 

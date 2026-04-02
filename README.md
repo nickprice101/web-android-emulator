@@ -12,12 +12,12 @@ Based on a self-hosted dockerised solution using the depreciated (Jan 2026) Goog
 * tiny APK bridge API container
 
 ### Raspberry Pi (or other device)
-*self-hosted coturn TURN server on public 443/tcp
-*cloudflared
+* self-hosted coturn TURN server on public 443/tcp
+* cloudflared
 
 ### Cloudflare
 * emu.yourdomain.com published through Cloudflare Tunnel
-*turn.yourdomain.com as a normal DNS-only A record
+* turn.yourdomain.com as a normal DNS-only A record
 
 This matches Google’s own WebRTC sample expectations: a webserver, a gRPC web proxy, and either open WebRTC UDP ports or a configured TURN service.
 

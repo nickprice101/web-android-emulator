@@ -69,7 +69,8 @@ jobs:
           with open("docker-compose.yml", "r") as fh:
               content = fh.read()
 
-          # Capture the leading whitespace so the replacement works at any indentation level
+          # Capture the leading whitespace so the replacement works at any indentation level.
+          # ADB_KEY must be the full PEM key including -----BEGIN/END PRIVATE KEY----- lines.
           def replace_adb_key(match):
               indent = match.group(1)
               return "\n".join(indent + line for line in adb_key.splitlines())

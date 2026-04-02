@@ -26,6 +26,7 @@ function App() {
   const [logEntries, setLogEntries] = useState([]);
   const lastSeenLogRef = useRef(null);
   const [leftPanePercent, setLeftPanePercent] = useState(35);
+  const [streamMode, setStreamMode] = useState("png");
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
 
   useEffect(() => {
@@ -285,6 +286,13 @@ function App() {
         <button onClick={fullscreen}>Fullscreen</button>
         <button onClick={reconnect}>Reconnect</button>
         <button onClick={() => browse("")}>Browse APKs</button>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+          Stream
+          <select value={streamMode} onChange={(e) => setStreamMode(e.target.value)}>
+            <option value="png">PNG</option>
+            <option value="webrtc">WebRTC</option>
+          </select>
+        </label>
         <input type="file" accept=".apk,application/vnd.android.package-archive" onChange={uploadApk} disabled={busy} />
         <input
           type="text"
@@ -328,7 +336,7 @@ function App() {
             <Emulator
               ref={emuRef}
               uri={window.location.origin}
-              view="png"
+              view={streamMode}
               muted={true}
               width={layout.width}
               height={layout.height}

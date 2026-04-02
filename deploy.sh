@@ -26,50 +26,55 @@ trap 'rm -f "${SSH_KEY_FILE}"' EXIT
 echo "${SSH_B64}" | base64 --decode > "${SSH_KEY_FILE}"
 chmod 600 "${SSH_KEY_FILE}"
 
-SSH_OPTS="-i ${SSH_KEY_FILE} -o StrictHostKeyChecking=no -o BatchMode=yes"
+# NOTE: StrictHostKeyChecking is disabled for automated deployments. For
+# production use, replace 'no' with 'yes' and supply a known_hosts file.
+SSH_OPTS=(-i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=no -o BatchMode=yes)
 
 # ── Upload repository files (excluding *.md) ─────────────────────────────────
 echo "==> Uploading files to ${SSH_USER}@${SSH_IP}:${SSH_PATH} ..."
 
 # Ensure the destination directory exists
-# shellcheck disable=SC2029
-ssh ${SSH_OPTS} "${SSH_USER}@${SSH_IP}" "mkdir -p '${SSH_PATH}'"
+ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_IP}" "mkdir -p '${SSH_PATH}'"
 
 rsync -az \
   --exclude='*.md' \
   --exclude='.git/' \
-  -e "ssh ${SSH_OPTS}" \
+  -e "ssh ${SSH_OPTS[*]}" \
   ./ \
   "${SSH_USER}@${SSH_IP}:${SSH_PATH}/"
 
 echo "    Upload complete."
 
 # ── Build Docker images from sub-directory Dockerfiles ───────────────────────
+# Compute image name prefix locally and pass it into the remote environment.
+IMAGE_PREFIX="$(basename "${SSH_PATH}")"
+
 for dir in frontend api; do
-  # shellcheck disable=SC2029
-  ssh ${SSH_OPTS} "${SSH_USER}@${SSH_IP}" bash <<REMOTE
+  ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_IP}" \
+    TARGET="${SSH_PATH}/${dir}" IMAGE_TAG="${IMAGE_PREFIX}-${dir}:latest" \
+    bash -s <<'REMOTE'
 set -euo pipefail
-TARGET="${SSH_PATH}/${dir}"
-if [ ! -d "\${TARGET}" ]; then
-  echo "    [${dir}] Directory not found, skipping."
+if [ ! -d "${TARGET}" ]; then
+  echo "    [$(basename "${TARGET}")] Directory not found, skipping."
   exit 0
 fi
-if [ ! -f "\${TARGET}/Dockerfile" ]; then
-  echo "    [${dir}] No Dockerfile found, skipping."
+if [ ! -f "${TARGET}/Dockerfile" ]; then
+  echo "    [$(basename "${TARGET}")] No Dockerfile found, skipping."
   exit 0
 fi
-echo "    [${dir}] Building Docker image ..."
-docker build -t "$(basename "${SSH_PATH}")-${dir}:latest" "\${TARGET}"
-echo "    [${dir}] Build complete."
+echo "    [$(basename "${TARGET}")] Building Docker image ${IMAGE_TAG} ..."
+docker build -t "${IMAGE_TAG}" "${TARGET}"
+echo "    [$(basename "${TARGET}")] Build complete."
 REMOTE
 done
 
 # ── Build the compose stack ───────────────────────────────────────────────────
 echo "==> Running 'docker compose build' on root docker-compose.yml ..."
-# shellcheck disable=SC2029
-ssh ${SSH_OPTS} "${SSH_USER}@${SSH_IP}" bash <<REMOTE
+ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_IP}" \
+  COMPOSE_DIR="${SSH_PATH}" \
+  bash -s <<'REMOTE'
 set -euo pipefail
-cd "${SSH_PATH}"
+cd "${COMPOSE_DIR}"
 docker compose build
 echo "    docker compose build complete."
 REMOTE

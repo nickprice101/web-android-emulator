@@ -97,7 +97,7 @@ jobs:
               -o BatchMode=yes \
               "${SSH_USER}@${SSH_IP}" \
               TARGET="${SSH_PATH}/${dir}" IMAGE_TAG="${IMAGE_PREFIX}-${dir}:latest" \
-              bash -s <<'REMOTE'
+              bash -l -s <<'REMOTE'
           set -euo pipefail
           if [ ! -d "${TARGET}" ]; then
             echo "    [$(basename "${TARGET}")] Directory not found, skipping."
@@ -120,11 +120,11 @@ jobs:
             -o BatchMode=yes \
             "${SSH_USER}@${SSH_IP}" \
             COMPOSE_DIR="${SSH_PATH}" \
-            bash -s <<'REMOTE'
+            bash -l -s <<'REMOTE'
           set -euo pipefail
           cd "${COMPOSE_DIR}"
-          docker-compose build
-          echo "    docker-compose build complete."
+          docker compose build
+          echo "    docker compose build complete."
           REMOTE
 
       - name: Clean up SSH key

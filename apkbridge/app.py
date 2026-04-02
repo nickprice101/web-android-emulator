@@ -52,6 +52,43 @@ def launch_package(pkg):
     return adb("shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1")
 
 
+def detect_package_name(apk_path):
+    apk = str(apk_path)
+    probes = [
+        (["aapt", "dump", "badging", apk], "badging"),
+        (["apkanalyzer", "manifest", "application-id", apk], "plain"),
+    ]
+
+    for cmd, mode in probes:
+        rc, out, err = run(cmd)
+        if rc != 0:
+            continue
+
+        text = out.strip() or err.strip()
+        if not text:
+            continue
+
+        if mode == "badging":
+            for line in text.splitlines():
+                line = line.strip()
+                if not line.startswith("package:"):
+                    continue
+                marker = "name='"
+                idx = line.find(marker)
+                if idx == -1:
+                    continue
+                start = idx + len(marker)
+                end = line.find("'", start)
+                if end > start:
+                    return line[start:end]
+        else:
+            pkg = text.splitlines()[0].strip()
+            if pkg:
+                return pkg
+
+    return ""
+
+
 @app.get("/health")
 def health():
     try:
@@ -75,6 +112,21 @@ def browse_apks():
         dirs = [{"name": x.name, "path": str(x.relative_to(WORKSPACE_ROOT))} for x in entries if x.is_dir()]
         apks = [{"name": x.name, "path": str(x.relative_to(WORKSPACE_ROOT))} for x in entries if x.suffix.lower() == ".apk"]
         return jsonify({"ok": True, "cwd": cwd, "parent": parent, "directories": dirs, "apks": apks})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.get("/apk-package")
+def apk_package():
+    rel = request.args.get("path", "").strip()
+    if not rel:
+        return jsonify({"error": "Missing apk path"}), 400
+    try:
+        apk = safe_workspace_path(rel)
+        if apk.suffix.lower() != ".apk" or not apk.is_file():
+            return jsonify({"error": "Invalid APK path"}), 400
+        package = detect_package_name(apk)
+        return jsonify({"ok": True, "package": package})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -155,11 +207,11 @@ def logcat():
     errors_only = request.args.get("errors_only", "0") in {"1", "true", "yes", "on"}
 
     try:
-        logs = adb("logcat", "-d", "-v", "time")
-        lines = [line for line in logs.splitlines() if line.strip()]
-
+        logcat_args = ["logcat", "-d", "-v", "time"]
         if errors_only:
-            lines = [line for line in lines if " e " in line.lower()]
+            logcat_args.extend(["*:E"])
+        logs = adb(*logcat_args)
+        lines = [line for line in logs.splitlines() if line.strip()]
         if text_filter:
             lines = [line for line in lines if text_filter in line.lower()]
 

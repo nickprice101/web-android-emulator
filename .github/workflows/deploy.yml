@@ -50,6 +50,37 @@ jobs:
             "${SSH_USER}@${SSH_IP}" \
             "mkdir -p '${SSH_PATH}'"
 
+      - name: Inject secrets into configuration
+        env:
+          ADB_KEY: ${{ secrets.ADB_KEY }}
+          TURN_KEY: ${{ secrets.TURN_KEY }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, re
+
+          adb_key = os.environ.get("ADB_KEY", "").strip()
+          turn_key = os.environ.get("TURN_KEY", "").strip()
+
+          if not adb_key:
+              raise SystemExit("Error: ADB_KEY secret is not set")
+          if not turn_key:
+              raise SystemExit("Error: TURN_KEY secret is not set")
+
+          with open("docker-compose.yml", "r") as fh:
+              content = fh.read()
+
+          # Capture the leading whitespace so the replacement works at any indentation level
+          def replace_adb_key(match):
+              indent = match.group(1)
+              return "\n".join(indent + line for line in adb_key.splitlines())
+
+          content = re.sub(r"^( *)PLACEHOLDER_ADB_KEY$", replace_adb_key, content, flags=re.MULTILINE)
+          content = content.replace("PLACEHOLDER_TURN_KEY", turn_key)
+
+          with open("docker-compose.yml", "w") as fh:
+              fh.write(content)
+          PYEOF
+
       - name: Upload repository files
         run: |
           rsync -az \

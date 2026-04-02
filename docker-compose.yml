@@ -2,6 +2,7 @@ version: "3.8"
 
 services:
   emulator:
+    container_name: google-emu-emulator
     image: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:30.1.2
     privileged: true
     devices:
@@ -28,6 +29,7 @@ services:
           - emulator
 
   frontend:
+    container_name: google-emu-frontend
     build:
       context: ./frontend
     image: google-emu-frontend:latest
@@ -43,6 +45,7 @@ services:
           - frontend
 
   apkbridge:
+    container_name: google-emu-apkbridge
     build:
       context: ./apkbridge
     image: google-emu-apkbridge:latest
@@ -69,6 +72,7 @@ services:
           - apkbridge
 
   envoy:
+    container_name: google-emu-envoy
     image: envoyproxy/envoy:v1.31-latest
     depends_on:
       - emulator

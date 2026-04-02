@@ -91,6 +91,26 @@ def detect_package_name(apk_path):
     return ""
 
 
+def list_installed_packages():
+    lines = adb("shell", "pm", "list", "packages").splitlines()
+    packages = set()
+    for line in lines:
+        cleaned = line.strip()
+        if cleaned.startswith("package:"):
+            pkg = cleaned.split("package:", 1)[1].strip()
+            if pkg:
+                packages.add(pkg)
+    return packages
+
+
+def infer_installed_package(previous_packages):
+    current_packages = list_installed_packages()
+    new_packages = sorted(current_packages - previous_packages)
+    if new_packages:
+        return new_packages[-1]
+    return ""
+
+
 @app.get("/health")
 def health():
     try:
@@ -141,12 +161,15 @@ def install():
     pkg = request.form.get("package", "").strip()
     tmp_path = None
     try:
+        before_packages = list_installed_packages()
         with tempfile.NamedTemporaryFile(suffix=".apk", delete=False) as tmp:
             f.save(tmp.name)
             tmp_path = tmp.name
         detected_pkg = detect_package_name(tmp_path)
         final_pkg = pkg or detected_pkg
         out = adb("install", "-r", "-t", "-g", tmp_path)
+        if not final_pkg:
+            final_pkg = infer_installed_package(before_packages)
         return jsonify(
             {
                 "ok": True,
@@ -169,11 +192,14 @@ def install():
 def install_built():
     data = request.get_json(force=True, silent=True) or {}
     try:
+        before_packages = list_installed_packages()
         apk = safe_workspace_path(data.get("relative_path", ""))
         pkg = data.get("package", "").strip()
         detected_pkg = detect_package_name(apk)
         final_pkg = pkg or detected_pkg
         out = adb("install", "-r", "-t", "-g", str(apk))
+        if not final_pkg:
+            final_pkg = infer_installed_package(before_packages)
         return jsonify(
             {
                 "ok": True,
@@ -226,6 +252,7 @@ def logcat():
     text_filter = request.args.get("filter", "").strip().lower()
     errors_only = request.args.get("errors_only", "0") in {"1", "true", "yes", "on"}
     include_crash = request.args.get("include_crash", "1") in {"1", "true", "yes", "on"}
+    fatal_only = request.args.get("fatal_only", "0") in {"1", "true", "yes", "on"}
 
     try:
         logcat_args = ["logcat", "-d", "-v", "time"]
@@ -241,6 +268,17 @@ def logcat():
             if crash_lines:
                 combined_lines.append("--------- crash buffer ---------")
                 combined_lines.extend(crash_lines)
+
+        if fatal_only:
+            fatal_timestamps = set()
+            for line in combined_lines:
+                if "FATAL EXCEPTION" in line:
+                    fatal_timestamps.add(line[:18])
+
+            if fatal_timestamps:
+                combined_lines = [line for line in combined_lines if line[:18] in fatal_timestamps]
+            else:
+                combined_lines = []
 
         if text_filter:
             combined_lines = [line for line in combined_lines if text_filter in line.lower()]

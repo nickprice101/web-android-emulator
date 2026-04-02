@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Emulator } from "android-emulator-webrtc/emulator";
 
@@ -21,7 +21,7 @@ function App() {
   const [browserData, setBrowserData] = useState({ directories: [], apks: [], cwd: "", parent: null });
   const [logFilter, setLogFilter] = useState("");
   const [errorsOnly, setErrorsOnly] = useState(false);
-  const [includeCrashBuffer, setIncludeCrashBuffer] = useState(true);
+  const [fatalOnly, setFatalOnly] = useState(false);
   const [logsPaused, setLogsPaused] = useState(false);
   const [logLimit, setLogLimit] = useState(100);
   const [logEntries, setLogEntries] = useState([]);
@@ -39,44 +39,51 @@ function App() {
   useEffect(() => {
     lastSeenLogRef.current = null;
     setLogEntries([]);
-  }, [logFilter, errorsOnly, includeCrashBuffer, logLimit]);
+  }, [logFilter, errorsOnly, fatalOnly, logLimit]);
+
+  const loadLogs = useCallback(async (forceRefresh = false) => {
+    if (logsPaused && !forceRefresh) return;
+    try {
+      const query = new URLSearchParams({
+        limit: String(logLimit),
+        filter: logFilter,
+        errors_only: errorsOnly ? "1" : "0",
+        include_crash: "1",
+        fatal_only: fatalOnly ? "1" : "0",
+      });
+      const data = await parseJsonResponse(await fetch(`/api/logcat?${query.toString()}`), "/api/logcat");
+      const incoming = Array.isArray(data.entries) ? data.entries : [];
+      const lastSeen = lastSeenLogRef.current;
+      let nextEntries = incoming;
+
+      if (lastSeen !== null) {
+        const lastSeenIdx = incoming.lastIndexOf(lastSeen);
+        nextEntries = lastSeenIdx >= 0 ? incoming.slice(lastSeenIdx + 1) : incoming;
+      }
+
+      if (incoming.length > 0) {
+        lastSeenLogRef.current = incoming[incoming.length - 1];
+      }
+
+      if (nextEntries.length > 0) {
+        setLogEntries((prev) => [...prev, ...nextEntries]);
+      }
+    } catch (e) {
+      setMessage(`Log stream error: ${e.message}`);
+    }
+  }, [errorsOnly, fatalOnly, logFilter, logLimit, logsPaused]);
 
   useEffect(() => {
-    async function loadLogs() {
-      if (logsPaused) return;
-      try {
-        const query = new URLSearchParams({
-          limit: String(logLimit),
-          filter: logFilter,
-          errors_only: errorsOnly ? "1" : "0",
-          include_crash: includeCrashBuffer ? "1" : "0",
-        });
-        const data = await parseJsonResponse(await fetch(`/api/logcat?${query.toString()}`), "/api/logcat");
-        const incoming = Array.isArray(data.entries) ? data.entries : [];
-        const lastSeen = lastSeenLogRef.current;
-        let nextEntries = incoming;
-
-        if (lastSeen !== null) {
-          const lastSeenIdx = incoming.lastIndexOf(lastSeen);
-          nextEntries = lastSeenIdx >= 0 ? incoming.slice(lastSeenIdx + 1) : incoming;
-        }
-
-        if (incoming.length > 0) {
-          lastSeenLogRef.current = incoming[incoming.length - 1];
-        }
-
-        if (nextEntries.length > 0) {
-          setLogEntries((prev) => [...prev, ...nextEntries]);
-        }
-      } catch (e) {
-        setMessage(`Log stream error: ${e.message}`);
-      }
-    }
-
     loadLogs();
     const id = setInterval(loadLogs, 2500);
     return () => clearInterval(id);
-  }, [logFilter, errorsOnly, includeCrashBuffer, logsPaused, logLimit]);
+  }, [loadLogs]);
+
+  useEffect(() => {
+    if (logsPaused) {
+      loadLogs(true);
+    }
+  }, [loadLogs, logsPaused, logLimit]);
 
   useEffect(() => {
     function onMove(e) {
@@ -435,10 +442,10 @@ function App() {
               <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
                 <input
                   type="checkbox"
-                  checked={includeCrashBuffer}
-                  onChange={(e) => setIncludeCrashBuffer(e.target.checked)}
+                  checked={fatalOnly}
+                  onChange={(e) => setFatalOnly(e.target.checked)}
                 />
-                Crash buffer
+                FATAL
               </label>
               <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
                 Rows

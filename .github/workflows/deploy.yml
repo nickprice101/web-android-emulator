@@ -150,7 +150,7 @@ jobs:
             exit 0
           fi
           echo "    [$(basename "${TARGET}")] Building Docker image ${IMAGE_TAG} ..."
-          docker build -t "${IMAGE_TAG}" "${TARGET}"
+          docker build --no-cache -t "${IMAGE_TAG}" "${TARGET}"
           echo "    [$(basename "${TARGET}")] Build complete."
           REMOTE
           done
@@ -168,7 +168,7 @@ jobs:
           if docker compose version > /dev/null 2>&1; then
             docker compose build
           else
-            docker-compose build --no-pull
+            docker-compose build
           fi
           echo "    docker compose build complete."
           REMOTE

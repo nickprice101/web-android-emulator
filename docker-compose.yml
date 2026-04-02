@@ -35,7 +35,7 @@ services:
           - frontend
 
   apkbridge:
-    image: google-emu-apkbridge:v5
+    image: google-emu-apkbridge:latest
     environment:
       ADB_TARGET: "emulator:5555"
       WORKSPACE_ROOT: "/workspace"

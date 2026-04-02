@@ -416,6 +416,9 @@ function App() {
               <button onClick={() => setLogsPaused((prev) => !prev)}>
                 {logsPaused ? "Resume logs" : "Pause logs"}
               </button>
+              <button onClick={() => setLogEntries([])} disabled={logEntries.length === 0}>
+                Clear logs
+              </button>
             </div>
             <div
               style={{

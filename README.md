@@ -5,6 +5,10 @@ Based on a self-hosted dockerised solution using the depreciated (Jan 2026) Goog
 
 IMPORTANT NOTE: To enable WebRTC set — view="png" → view="webrtc" in main.jsx
 
+## Internet access defaults
+
+The Docker compose config pins public DNS resolvers (`1.1.1.1`, `8.8.8.8`) on all services and starts the emulator with an explicit `-dns-server` list. This keeps both the Linux containers and the Android guest able to resolve and reach external hosts for realistic app testing.
+
 ## Example Architecture with Cloudflare
 
 ### Server

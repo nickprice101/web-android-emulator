@@ -10,7 +10,7 @@ services:
     environment:
       ADBKEY: |
         PLACEHOLDER_ADB_KEY
-      EMULATOR_PARAMS: "-grpc 8554 -no-snapshot-load -wipe-data -no-audio -partition-size 4096 -feature -Wifi"
+      EMULATOR_PARAMS: "-grpc 8554 -no-snapshot-load -wipe-data -no-audio -partition-size 4096 -dns-server 1.1.1.1,8.8.8.8"
       TURN: >-
         {"iceServers":[{"urls":["turns:turn.corsicanescape.com:443?transport=tcp"],"username":"emuuser","credential":"PLACEHOLDER_TURN_KEY"}]}
     expose:
@@ -19,6 +19,9 @@ services:
     ports:
       - "15555:5555"
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
       google-emu:
         aliases:
@@ -31,6 +34,9 @@ services:
     ports:
       - "18081:80"
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
       google-emu:
         aliases:
@@ -54,6 +60,9 @@ services:
     depends_on:
       - emulator
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
       google-emu:
         aliases:
@@ -71,6 +80,9 @@ services:
     volumes:
       - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
       google-emu:
         aliases:

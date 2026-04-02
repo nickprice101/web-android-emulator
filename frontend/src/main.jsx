@@ -143,16 +143,28 @@ function App() {
     const fd = new FormData();
     fd.append("apk", file);
     fd.append("package", packageName);
-    await callApi("/api/install", { method: "POST", body: fd });
+    const data = await callApi("/api/install", { method: "POST", body: fd });
+    if (data.package) {
+      setPackageName(data.package);
+      setMessage(`Ready to launch! Installed ${file.name} as ${data.package}`);
+    } else {
+      setMessage(`Ready to launch! Installed ${file.name}`);
+    }
     ev.target.value = "";
   }
 
-  async function installBuiltApk() {
-    await callApi("/api/install-built", {
+  async function installBuiltApk(path, initialPackage = "") {
+    const data = await callApi("/api/install-built", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ relative_path: builtPath, package: packageName }),
+      body: JSON.stringify({ relative_path: path, package: initialPackage || packageName }),
     });
+    if (data.package) {
+      setPackageName(data.package);
+      setMessage(`Ready to launch! Installed ${path} as ${data.package}`);
+    } else {
+      setMessage(`Ready to launch! Installed ${path}`);
+    }
   }
 
   async function launchApp() {
@@ -254,11 +266,10 @@ function App() {
         <input
           type="text"
           value={builtPath}
-          onChange={(e) => setBuiltPath(e.target.value)}
           placeholder="APK path under workspace"
           style={{ width: 200 }}
+          readOnly
         />
-        <button onClick={installBuiltApk} disabled={busy || !builtPath}>Install APK</button>
       </div>
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
@@ -271,9 +282,13 @@ function App() {
             justifyContent: "center",
             padding: 8,
             overflow: "hidden",
+            userSelect: "none",
+            WebkitUserSelect: "none",
           }}
         >
           <div
+            onMouseDown={(e) => e.preventDefault()}
+            onDragStart={(e) => e.preventDefault()}
             style={{
               width: layout.width,
               height: layout.height,
@@ -283,6 +298,8 @@ function App() {
               overflow: "hidden",
               borderRadius: 18,
               background: "#000",
+              userSelect: "none",
+              WebkitUserSelect: "none",
             }}
           >
             <Emulator
@@ -335,14 +352,15 @@ function App() {
             </div>
           </div>
 
-          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
-            <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Emulator state</div>
-            <div style={{ color: stateColor(emuState), fontWeight: 600 }}>{emuState}</div>
-          </div>
-
-          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
-            <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Bridge API</div>
-            <div style={{ color: stateColor(apiState), fontWeight: 600 }}>{apiState}</div>
+          <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+            <div style={{ flex: 1, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Emulator state</div>
+              <div style={{ color: stateColor(emuState), fontWeight: 600 }}>{emuState}</div>
+            </div>
+            <div style={{ flex: 1, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Bridge API</div>
+              <div style={{ color: stateColor(apiState), fontWeight: 600 }}>{apiState}</div>
+            </div>
           </div>
 
           <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>

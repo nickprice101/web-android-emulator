@@ -1,0 +1,103 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      SSH_IP: ${{ secrets.SSH_IP }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PATH: ${{ secrets.SSH_PATH }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up SSH key and known_hosts
+        env:
+          SSH_B64: ${{ secrets.SSH_B64 }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          SSH_KEY_FILE="$(mktemp)"
+          printf '%s' "${SSH_B64}" | base64 --decode > "${SSH_KEY_FILE}"
+          chmod 600 "${SSH_KEY_FILE}"
+          echo "SSH_KEY_FILE=${SSH_KEY_FILE}" >> "$GITHUB_ENV"
+
+          KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
+          mkdir -p "${HOME}/.ssh"
+          chmod 700 "${HOME}/.ssh"
+          if [[ -n "${SSH_KNOWN_HOSTS}" ]]; then
+            printf '%s\n' "${SSH_KNOWN_HOSTS}" >> "${KNOWN_HOSTS_FILE}"
+            echo "SSH_STRICT=yes" >> "$GITHUB_ENV"
+          else
+            echo "WARNING: SSH_KNOWN_HOSTS secret is not set; host key verification is disabled." >&2
+            echo "SSH_STRICT=no" >> "$GITHUB_ENV"
+          fi
+
+      - name: Ensure destination directory exists
+        run: |
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            "mkdir -p '${SSH_PATH}'"
+
+      - name: Upload repository files
+        run: |
+          rsync -az \
+            --exclude='*.md' \
+            --exclude='.git/' \
+            -e "ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=${SSH_STRICT} -o BatchMode=yes" \
+            ./ \
+            "${SSH_USER}@${SSH_IP}:${SSH_PATH}/"
+
+      - name: Build Docker images for sub-directories
+        run: |
+          IMAGE_PREFIX="$(basename "${SSH_PATH}")"
+          for dir in frontend api; do
+            ssh -i "${SSH_KEY_FILE}" \
+              -o StrictHostKeyChecking="${SSH_STRICT}" \
+              -o BatchMode=yes \
+              "${SSH_USER}@${SSH_IP}" \
+              TARGET="${SSH_PATH}/${dir}" IMAGE_TAG="${IMAGE_PREFIX}-${dir}:latest" \
+              bash -s <<'REMOTE'
+          set -euo pipefail
+          if [ ! -d "${TARGET}" ]; then
+            echo "    [$(basename "${TARGET}")] Directory not found, skipping."
+            exit 0
+          fi
+          if [ ! -f "${TARGET}/Dockerfile" ]; then
+            echo "    [$(basename "${TARGET}")] No Dockerfile found, skipping."
+            exit 0
+          fi
+          echo "    [$(basename "${TARGET}")] Building Docker image ${IMAGE_TAG} ..."
+          docker build -t "${IMAGE_TAG}" "${TARGET}"
+          echo "    [$(basename "${TARGET}")] Build complete."
+          REMOTE
+          done
+
+      - name: Build docker compose stack
+        run: |
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            COMPOSE_DIR="${SSH_PATH}" \
+            bash -s <<'REMOTE'
+          set -euo pipefail
+          cd "${COMPOSE_DIR}"
+          docker compose build
+          echo "    docker compose build complete."
+          REMOTE
+
+      - name: Clean up SSH key
+        if: always()
+        run: shred -u "${SSH_KEY_FILE}" 2>/dev/null || rm -f "${SSH_KEY_FILE}"

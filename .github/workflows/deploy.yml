@@ -123,7 +123,11 @@ jobs:
             bash -l -s <<'REMOTE'
           set -euo pipefail
           cd "${COMPOSE_DIR}"
-          docker compose build
+          if docker compose version > /dev/null 2>&1; then
+            docker compose build
+          else
+            docker-compose build
+          fi
           echo "    docker compose build complete."
           REMOTE
 

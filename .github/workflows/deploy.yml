@@ -47,6 +47,48 @@ jobs:
             "${SSH_USER}@${SSH_IP}" \
             "mkdir -p '${SSH_PATH}'"
 
+      - name: Check Docker version on remote
+        run: |
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            bash -l -s <<'REMOTE'
+          set -euo pipefail
+          echo "=== docker version ==="
+          docker version || echo "docker version failed"
+          echo "=== docker info ==="
+          docker info || echo "docker info failed"
+          echo "=== compose availability ==="
+          docker compose version 2>/dev/null \
+            || docker-compose version 2>/dev/null \
+            || echo "No compose available"
+          REMOTE
+
+      - name: Install docker-compose if missing
+        run: |
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            bash -l -s <<'REMOTE'
+          set -euo pipefail
+          if docker compose version > /dev/null 2>&1 || docker-compose version > /dev/null 2>&1; then
+            echo "Docker Compose already available, skipping install."
+            exit 0
+          fi
+          echo "Installing docker-compose standalone binary..."
+          COMPOSE_VERSION="$(curl -fsSL https://api.github.com/repos/docker/compose/releases/latest \
+            | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+          ARCH="$(uname -m)"
+          curl -fsSL \
+            "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${ARCH}" \
+            -o /usr/local/bin/docker-compose
+          chmod +x /usr/local/bin/docker-compose
+          docker-compose version
+          echo "docker-compose installed at /usr/local/bin/docker-compose"
+          REMOTE
+
       - name: Inject secrets into configuration
         env:
           ADB_KEY: ${{ secrets.ADB_KEY }}

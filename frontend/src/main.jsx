@@ -7,6 +7,7 @@ const EMULATOR_ASPECT = 1080 / 1920;
 function App() {
   const emuRef = useRef(null);
   const wrapRef = useRef(null);
+  const browserSectionRef = useRef(null);
   const isResizingRef = useRef(false);
 
   const [emuState, setEmuState] = useState("connecting");
@@ -164,6 +165,7 @@ function App() {
   async function uploadApk(ev) {
     const file = ev.target.files?.[0];
     if (!file) return;
+    setMessage(`Installing ${file.name}…`);
     const fd = new FormData();
     fd.append("apk", file);
     fd.append("package", packageName);
@@ -178,6 +180,7 @@ function App() {
   }
 
   async function installBuiltApk(path, initialPackage = "") {
+    setMessage(`Installing ${path}…`);
     const data = await callApi("/api/install-built", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -216,6 +219,9 @@ function App() {
       setBrowserData(data);
       setBrowserPath(data.cwd || "");
       setBrowserOpen(true);
+      requestAnimationFrame(() => {
+        browserSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     } catch (e) {
       setMessage(`Browse error: ${e.message}`);
     }
@@ -224,18 +230,25 @@ function App() {
   async function selectApk(path) {
     setBuiltPath(path);
     setBrowserOpen(false);
-    setMessage(`Selected ${path}`);
+    setMessage(`Selected ${path}. Checking package details…`);
+    let detectedPackage = "";
     try {
       const details = await parseJsonResponse(
         await fetch(`/api/apk-package?path=${encodeURIComponent(path)}`),
         "/api/apk-package"
       );
       if (details.package) {
+        detectedPackage = details.package;
         setPackageName(details.package);
-        setMessage(`Selected ${path} (${details.package})`);
+        setMessage(`Selected ${path} (${details.package}). Installing…`);
       }
     } catch (e) {
-      setMessage(`Selected ${path}. Package lookup failed: ${e.message}`);
+      setMessage(`Selected ${path}. Package lookup failed: ${e.message}. Installing anyway…`);
+    }
+    try {
+      await installBuiltApk(path, detectedPackage);
+    } catch {
+      // installBuiltApk already reports the error via Last message
     }
   }
 
@@ -477,7 +490,7 @@ function App() {
           </div>
 
           {browserOpen && (
-            <div style={{ padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+            <div ref={browserSectionRef} style={{ padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                 <div style={{ fontSize: 12, color: "#a8b3c7" }}>
                   Browse /workspace{browserPath ? `/${browserPath}` : ""}

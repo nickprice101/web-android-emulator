@@ -142,8 +142,17 @@ def install():
         with tempfile.NamedTemporaryFile(suffix=".apk", delete=False) as tmp:
             f.save(tmp.name)
             tmp_path = tmp.name
+        detected_pkg = detect_package_name(tmp_path)
+        final_pkg = pkg or detected_pkg
         out = adb("install", "-r", "-t", "-g", tmp_path)
-        return jsonify({"ok": True, "message": out, "launch": launch_package(pkg) if pkg else None})
+        return jsonify(
+            {
+                "ok": True,
+                "message": out,
+                "package": final_pkg,
+                "launch": launch_package(final_pkg) if final_pkg else None,
+            }
+        )
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
     finally:
@@ -160,8 +169,17 @@ def install_built():
     try:
         apk = safe_workspace_path(data.get("relative_path", ""))
         pkg = data.get("package", "").strip()
+        detected_pkg = detect_package_name(apk)
+        final_pkg = pkg or detected_pkg
         out = adb("install", "-r", "-t", "-g", str(apk))
-        return jsonify({"ok": True, "message": out, "launch": launch_package(pkg) if pkg else None})
+        return jsonify(
+            {
+                "ok": True,
+                "message": out,
+                "package": final_pkg,
+                "launch": launch_package(final_pkg) if final_pkg else None,
+            }
+        )
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

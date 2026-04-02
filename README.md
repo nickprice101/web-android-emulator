@@ -1,4 +1,4 @@
-# Web-based Android Emualtor
+# Web-based Android Emulator (Pixel approximation)
 Designed for app development without the need for Android Studio or similar to be installed. Can be incorporated into AI/vibe-coding workflows.
 
 Based on a self-hosted dockerised solution using the depreciated (Jan 2026) Google emulator docker image with a bespoke frontend pasted on top.

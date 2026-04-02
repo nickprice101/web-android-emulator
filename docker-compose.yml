@@ -9,12 +9,10 @@ services:
     shm_size: "4gb"
     environment:
       ADBKEY: |
-        -----BEGIN PRIVATE KEY-----
-        ENTER KEY HERE
-        -----END PRIVATE KEY-----
+        PLACEHOLDER_ADB_KEY
       EMULATOR_PARAMS: "-grpc 8554 -no-snapshot-load -wipe-data -no-audio -partition-size 4096 -feature -Wifi"
       TURN: >-
-        {"iceServers":[{"urls":["turns:turn.corsicanescape.com:443?transport=tcp"],"username":"emuuser","credential":"XXX"}]}
+        {"iceServers":[{"urls":["turns:turn.corsicanescape.com:443?transport=tcp"],"username":"emuuser","credential":"PLACEHOLDER_TURN_KEY"}]}
     expose:
       - "8554"
       - "5555"
@@ -43,9 +41,7 @@ services:
       WORKSPACE_ROOT: "/workspace"
       DEFAULT_PACKAGE: 
       ADBKEY: |
-        -----BEGIN PRIVATE KEY-----
-        ENTER KEY HERE
-        -----END PRIVATE KEY-----
+        PLACEHOLDER_ADB_KEY
     volumes:
       - /mnt/user/documents/github:/workspace
     expose:

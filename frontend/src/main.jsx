@@ -24,6 +24,7 @@ function App() {
   const [logsPaused, setLogsPaused] = useState(false);
   const [logLimit, setLogLimit] = useState(100);
   const [logEntries, setLogEntries] = useState([]);
+  const lastSeenLogRef = useRef(null);
   const [leftPanePercent, setLeftPanePercent] = useState(35);
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
 
@@ -32,6 +33,11 @@ function App() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  useEffect(() => {
+    lastSeenLogRef.current = null;
+    setLogEntries([]);
+  }, [logFilter, errorsOnly, includeCrashBuffer, logLimit]);
 
   useEffect(() => {
     async function loadLogs() {
@@ -44,7 +50,22 @@ function App() {
           include_crash: includeCrashBuffer ? "1" : "0",
         });
         const data = await parseJsonResponse(await fetch(`/api/logcat?${query.toString()}`), "/api/logcat");
-        setLogEntries(data.entries || []);
+        const incoming = Array.isArray(data.entries) ? data.entries : [];
+        const lastSeen = lastSeenLogRef.current;
+        let nextEntries = incoming;
+
+        if (lastSeen !== null) {
+          const lastSeenIdx = incoming.lastIndexOf(lastSeen);
+          nextEntries = lastSeenIdx >= 0 ? incoming.slice(lastSeenIdx + 1) : incoming;
+        }
+
+        if (incoming.length > 0) {
+          lastSeenLogRef.current = incoming[incoming.length - 1];
+        }
+
+        if (nextEntries.length > 0) {
+          setLogEntries((prev) => [...prev, ...nextEntries]);
+        }
       } catch (e) {
         setMessage(`Log stream error: ${e.message}`);
       }
@@ -416,8 +437,18 @@ function App() {
               <button onClick={() => setLogsPaused((prev) => !prev)}>
                 {logsPaused ? "Resume logs" : "Pause logs"}
               </button>
-              <button onClick={() => setLogEntries([])} disabled={logEntries.length === 0}>
-                Clear logs
+              <button
+                onClick={() =>
+                  setLogEntries((prev) => {
+                    if (prev.length > 0) {
+                      lastSeenLogRef.current = prev[prev.length - 1];
+                    }
+                    return [];
+                  })
+                }
+                disabled={logEntries.length === 0}
+              >
+                Clear
               </button>
             </div>
             <div

@@ -20,8 +20,10 @@ function App() {
   const [browserData, setBrowserData] = useState({ directories: [], apks: [], cwd: "", parent: null });
   const [logFilter, setLogFilter] = useState("");
   const [errorsOnly, setErrorsOnly] = useState(false);
+  const [logsPaused, setLogsPaused] = useState(false);
+  const [logLimit, setLogLimit] = useState(100);
   const [logEntries, setLogEntries] = useState([]);
-  const [leftPanePercent, setLeftPanePercent] = useState(30);
+  const [leftPanePercent, setLeftPanePercent] = useState(35);
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
 
   useEffect(() => {
@@ -32,9 +34,10 @@ function App() {
 
   useEffect(() => {
     async function loadLogs() {
+      if (logsPaused) return;
       try {
         const query = new URLSearchParams({
-          limit: "100",
+          limit: String(logLimit),
           filter: logFilter,
           errors_only: errorsOnly ? "1" : "0",
         });
@@ -48,7 +51,7 @@ function App() {
     loadLogs();
     const id = setInterval(loadLogs, 2500);
     return () => clearInterval(id);
-  }, [logFilter, errorsOnly]);
+  }, [logFilter, errorsOnly, logsPaused, logLimit]);
 
   useEffect(() => {
     function onMove(e) {
@@ -182,10 +185,22 @@ function App() {
     }
   }
 
-  function selectApk(path) {
+  async function selectApk(path) {
     setBuiltPath(path);
     setBrowserOpen(false);
     setMessage(`Selected ${path}`);
+    try {
+      const details = await parseJsonResponse(
+        await fetch(`/api/apk-package?path=${encodeURIComponent(path)}`),
+        "/api/apk-package"
+      );
+      if (details.package) {
+        setPackageName(details.package);
+        setMessage(`Selected ${path} (${details.package})`);
+      }
+    } catch (e) {
+      setMessage(`Selected ${path}. Package lookup failed: ${e.message}`);
+    }
   }
 
   function fullscreen() {
@@ -227,9 +242,9 @@ function App() {
           flexShrink: 0,
         }}
       >
-        <button onClick={() => sendKey("GoBack")} title="Back" aria-label="Back">◁</button>
-        <button onClick={() => sendKey("GoHome")} title="Home" aria-label="Home">◯</button>
-        <button onClick={() => sendKey("AppSwitch")} title="Recents" aria-label="Recents">□</button>
+        <button onClick={() => sendKey("GoBack")} title="Back" aria-label="Back" style={{ fontSize: 20, lineHeight: 1 }}>◁</button>
+        <button onClick={() => sendKey("GoHome")} title="Home" aria-label="Home" style={{ fontSize: 20, lineHeight: 1 }}>◯</button>
+        <button onClick={() => sendKey("AppSwitch")} title="Recents" aria-label="Recents" style={{ fontSize: 20, lineHeight: 1 }}>□</button>
         <button onClick={wakeDevice} disabled={busy}>Wake</button>
         <button onClick={rebootDevice} disabled={busy}>Reboot</button>
         <button onClick={fullscreen}>Fullscreen</button>
@@ -336,7 +351,9 @@ function App() {
           </div>
 
           <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
-            <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Android system logs (live, last 100)</div>
+            <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>
+              Android system logs ({logsPaused ? "paused" : "live"}, last {logLimit})
+            </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
               <input
                 type="text"
@@ -353,6 +370,24 @@ function App() {
                 />
                 Errors only
               </label>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+                Rows
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={logLimit}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    if (Number.isNaN(next)) return;
+                    setLogLimit(Math.max(1, Math.min(500, next)));
+                  }}
+                  style={{ width: 72 }}
+                />
+              </label>
+              <button onClick={() => setLogsPaused((prev) => !prev)}>
+                {logsPaused ? "Resume logs" : "Pause logs"}
+              </button>
             </div>
             <div
               style={{

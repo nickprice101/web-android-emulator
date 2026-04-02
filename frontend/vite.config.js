@@ -2,9 +2,10 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   resolve: {
-    alias: {
-      events: "events",
-    },
+    alias: [
+      { find: /^android-emulator-webrtc$/, replacement: "android-emulator-webrtc/dist/index.js" },
+      { find: "events", replacement: "events" },
+    ],
   },
   optimizeDeps: {
     include: [
@@ -12,8 +13,6 @@ export default defineConfig({
       "react-dom",
       "events",
       "@babel/runtime/helpers/interopRequireDefault",
-      "android-emulator-webrtc",
-      "android-emulator-webrtc/emulator",
     ],
   },
   build: {

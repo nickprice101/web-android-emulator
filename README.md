@@ -3,6 +3,8 @@ Designed for app development without the need for Android Studio or similar to b
 
 Based on a self-hosted dockerised solution using the depreciated (Jan 2026) Google emulator docker image with a bespoke frontend pasted on top.
 
+IMPORTANT NOTE: To enable WebRTC set — view="png" → view="webrtc" in main.jsx
+
 ## Example Architecture with Cloudflare
 
 ### Server

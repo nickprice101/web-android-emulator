@@ -173,6 +173,24 @@ jobs:
           echo "    docker compose build complete."
           REMOTE
 
+      - name: Deploy docker compose stack
+        run: |
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            COMPOSE_DIR="${SSH_PATH}" \
+            bash -l -s <<'REMOTE'
+          set -euo pipefail
+          cd "${COMPOSE_DIR}"
+          if docker compose version > /dev/null 2>&1; then
+            docker compose up -d --remove-orphans
+          else
+            docker-compose up -d --remove-orphans
+          fi
+          echo "    docker compose deploy complete."
+          REMOTE
+
       - name: Clean up SSH key
         if: always()
         run: shred -u "${SSH_KEY_FILE}" 2>/dev/null || rm -f "${SSH_KEY_FILE}"

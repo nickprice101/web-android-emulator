@@ -1,26 +1,31 @@
-Repostiory with the files needed to create a self-hosted web-based android emulator. Based on the depreciated (Jan 2026) Google docker image. 
+# Web-based Android Emualtor
+Designed for app development without the need for Android Studio or similar to be installed. Can be incorporated into AI/vibe-coding workflows.
 
-Example Architecture with Cloudflare
+Based on a self-hosted dockerised solution using the depreciated (Jan 2026) Google emulator docker image with a bespoke frontend pasted on top.
 
-Server
+## Example Architecture with Cloudflare
+
+### Server
 Google Android emulator container
 Envoy proxy
 tiny frontend container
 tiny APK bridge API container
 
-Raspberry Pi (or other device)
+### Raspberry Pi (or other device)
 self-hosted coturn TURN server on public 443/tcp
 cloudflared
 
-Cloudflare
+### Cloudflare
 emu.yourdomain.com published through Cloudflare Tunnel
 turn.yourdomain.com as a normal DNS-only A record
 
 This matches Google’s own WebRTC sample expectations: a webserver, a gRPC web proxy, and either open WebRTC UDP ports or a configured TURN service.
 
-The docker files are included in this repository, for the TURN server install...
+There is action workfile (deploy.yml) to support deployment. It needs the appropriate SECRETS (ADB, custom TURN secret, and server SSH credentials) to be set up (see the script).
 
-TURN server
+## TURN server
+
+TURN aserver files are not included in the repostiory, instead the instrucitons are included below.
 
 Create a folder on the Pi:
 

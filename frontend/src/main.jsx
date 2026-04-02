@@ -200,24 +200,18 @@ function App() {
   async function selectApk(path) {
     setBuiltPath(path);
     setBrowserOpen(false);
-    setMessage(`Installing ${path}…`);
-    let detectedPackage = "";
+    setMessage(`Selected ${path}`);
     try {
       const details = await parseJsonResponse(
         await fetch(`/api/apk-package?path=${encodeURIComponent(path)}`),
         "/api/apk-package"
       );
       if (details.package) {
-        detectedPackage = details.package;
         setPackageName(details.package);
+        setMessage(`Selected ${path} (${details.package})`);
       }
     } catch (e) {
-      setMessage(`Installing ${path}. Package lookup failed before install: ${e.message}`);
-    }
-    try {
-      await installBuiltApk(path, detectedPackage);
-    } catch {
-      // callApi already updates status message
+      setMessage(`Selected ${path}. Package lookup failed: ${e.message}`);
     }
   }
 

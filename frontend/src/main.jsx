@@ -9,6 +9,7 @@ function App() {
   const wrapRef = useRef(null);
   const browserSectionRef = useRef(null);
   const isResizingRef = useRef(false);
+  const isLogResizingRef = useRef(false);
 
   const [emuState, setEmuState] = useState("connecting");
   const [apiState, setApiState] = useState("checking");
@@ -25,6 +26,7 @@ function App() {
   const [logsPaused, setLogsPaused] = useState(false);
   const [logLimit, setLogLimit] = useState(100);
   const [logEntries, setLogEntries] = useState([]);
+  const [logPaneHeight, setLogPaneHeight] = useState(260);
   const lastSeenLogRef = useRef(null);
   const [leftPanePercent, setLeftPanePercent] = useState(35);
   const [streamMode, setStreamMode] = useState("png");
@@ -87,14 +89,24 @@ function App() {
 
   useEffect(() => {
     function onMove(e) {
-      if (!isResizingRef.current) return;
-      const width = window.innerWidth || 1;
-      const next = (e.clientX / width) * 100;
-      setLeftPanePercent(Math.max(20, Math.min(60, next)));
+      if (isResizingRef.current) {
+        const width = window.innerWidth || 1;
+        const next = (e.clientX / width) * 100;
+        setLeftPanePercent(Math.max(20, Math.min(60, next)));
+      }
+      if (isLogResizingRef.current) {
+        const viewportHeight = window.innerHeight || 1;
+        const maxLogHeight = Math.max(180, Math.round(viewportHeight * 0.65));
+        setLogPaneHeight((prev) => {
+          const next = prev - e.movementY;
+          return Math.max(120, Math.min(maxLogHeight, next));
+        });
+      }
     }
 
     function onUp() {
       isResizingRef.current = false;
+      isLogResizingRef.current = false;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     }
@@ -483,7 +495,7 @@ function App() {
               style={{
                 fontFamily: "monospace",
                 fontSize: 12,
-                maxHeight: 260,
+                height: logPaneHeight,
                 overflow: "auto",
                 background: "#0f1218",
                 border: "1px solid #2b313d",
@@ -493,6 +505,33 @@ function App() {
               }}
             >
               {logEntries.length === 0 ? "No log entries." : logEntries.join("\n")}
+            </div>
+            <div
+              onMouseDown={(e) => {
+                e.preventDefault();
+                isLogResizingRef.current = true;
+                document.body.style.cursor = "row-resize";
+                document.body.style.userSelect = "none";
+              }}
+              style={{
+                marginTop: 8,
+                height: 10,
+                cursor: "row-resize",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              title="Drag to resize log window height"
+              aria-label="Resize log window"
+            >
+              <div
+                style={{
+                  width: 48,
+                  height: 4,
+                  borderRadius: 999,
+                  background: "#3a4355",
+                }}
+              />
             </div>
           </div>
 

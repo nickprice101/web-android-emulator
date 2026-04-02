@@ -126,8 +126,8 @@ jobs:
             bash -s <<'REMOTE'
           set -euo pipefail
           cd "${COMPOSE_DIR}"
-          docker-compose build
-          echo "    docker-compose build complete."
+          docker compose build
+          echo "    docker compose build complete."
           REMOTE
 
       - name: Clean up SSH key

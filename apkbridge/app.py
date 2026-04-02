@@ -142,3 +142,27 @@ def reboot():
         return jsonify({"ok": True, "message": out or "Rebooting..."})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.get("/logcat")
+def logcat():
+    try:
+        limit = max(1, min(500, int(request.args.get("limit", "100"))))
+    except ValueError:
+        limit = 100
+
+    text_filter = request.args.get("filter", "").strip().lower()
+    errors_only = request.args.get("errors_only", "0") in {"1", "true", "yes", "on"}
+
+    try:
+        logs = adb("logcat", "-d", "-v", "time")
+        lines = [line for line in logs.splitlines() if line.strip()]
+
+        if errors_only:
+            lines = [line for line in lines if " e " in line.lower()]
+        if text_filter:
+            lines = [line for line in lines if text_filter in line.lower()]
+
+        return jsonify({"ok": True, "entries": lines[-limit:]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500

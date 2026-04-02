@@ -133,7 +133,7 @@ jobs:
       - name: Build Docker images for sub-directories
         run: |
           IMAGE_PREFIX="$(basename "${SSH_PATH}")"
-          for dir in frontend api; do
+          for dir in frontend apkbridge; do
             ssh -i "${SSH_KEY_FILE}" \
               -o StrictHostKeyChecking="${SSH_STRICT}" \
               -o BatchMode=yes \

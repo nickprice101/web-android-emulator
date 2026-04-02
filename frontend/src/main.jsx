@@ -7,6 +7,7 @@ const EMULATOR_ASPECT = 1080 / 1920;
 function App() {
   const emuRef = useRef(null);
   const wrapRef = useRef(null);
+  const isResizingRef = useRef(false);
 
   const [emuState, setEmuState] = useState("connecting");
   const [apiState, setApiState] = useState("checking");
@@ -17,12 +18,58 @@ function App() {
   const [browserOpen, setBrowserOpen] = useState(false);
   const [browserPath, setBrowserPath] = useState("");
   const [browserData, setBrowserData] = useState({ directories: [], apks: [], cwd: "", parent: null });
+  const [logFilter, setLogFilter] = useState("");
+  const [errorsOnly, setErrorsOnly] = useState(false);
+  const [logEntries, setLogEntries] = useState([]);
+  const [leftPanePercent, setLeftPanePercent] = useState(30);
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
 
   useEffect(() => {
     const onResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    async function loadLogs() {
+      try {
+        const query = new URLSearchParams({
+          limit: "100",
+          filter: logFilter,
+          errors_only: errorsOnly ? "1" : "0",
+        });
+        const data = await parseJsonResponse(await fetch(`/api/logcat?${query.toString()}`), "/api/logcat");
+        setLogEntries(data.entries || []);
+      } catch (e) {
+        setMessage(`Log stream error: ${e.message}`);
+      }
+    }
+
+    loadLogs();
+    const id = setInterval(loadLogs, 2500);
+    return () => clearInterval(id);
+  }, [logFilter, errorsOnly]);
+
+  useEffect(() => {
+    function onMove(e) {
+      if (!isResizingRef.current) return;
+      const width = window.innerWidth || 1;
+      const next = (e.clientX / width) * 100;
+      setLeftPanePercent(Math.max(20, Math.min(60, next)));
+    }
+
+    function onUp() {
+      isResizingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
   }, []);
 
   async function parseJsonResponse(resp, label) {
@@ -150,10 +197,10 @@ function App() {
   }
 
   const layout = useMemo(() => {
-    const rightPanel = browserOpen ? 620 : 320;
+    const leftPanel = Math.max(220, Math.round((viewport.width * leftPanePercent) / 100));
     // 48px accounts for padding around the emulator container
     const availableHeight = Math.max(240, viewport.height - 48);
-    const availableWidth = Math.max(200, viewport.width - rightPanel - 32);
+    const availableWidth = Math.max(180, leftPanel - 32);
 
     let height = availableHeight;
     let width = Math.round(height * EMULATOR_ASPECT);
@@ -164,7 +211,7 @@ function App() {
     }
 
     return { width, height };
-  }, [viewport, browserOpen]);
+  }, [viewport, leftPanePercent]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
@@ -180,22 +227,14 @@ function App() {
           flexShrink: 0,
         }}
       >
-        <button onClick={() => sendKey("GoHome")}>Home</button>
-        <button onClick={() => sendKey("GoBack")}>Back</button>
-        <button onClick={() => sendKey("AppSwitch")}>Recents</button>
+        <button onClick={() => sendKey("GoBack")} title="Back" aria-label="Back">◁</button>
+        <button onClick={() => sendKey("GoHome")} title="Home" aria-label="Home">◯</button>
+        <button onClick={() => sendKey("AppSwitch")} title="Recents" aria-label="Recents">□</button>
         <button onClick={wakeDevice} disabled={busy}>Wake</button>
         <button onClick={rebootDevice} disabled={busy}>Reboot</button>
         <button onClick={fullscreen}>Fullscreen</button>
         <button onClick={reconnect}>Reconnect</button>
         <button onClick={() => browse("")}>Browse APKs</button>
-        <input
-          type="text"
-          value={packageName}
-          onChange={(e) => setPackageName(e.target.value)}
-          placeholder="Package name"
-          style={{ width: 220 }}
-        />
-        <button onClick={launchApp} disabled={busy || !packageName}>Launch</button>
         <input type="file" accept=".apk,application/vnd.android.package-archive" onChange={uploadApk} disabled={busy} />
         <input
           type="text"
@@ -211,7 +250,7 @@ function App() {
         <div
           ref={wrapRef}
           style={{
-            flex: 1,
+            width: `${leftPanePercent}%`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -234,7 +273,7 @@ function App() {
             <Emulator
               ref={emuRef}
               uri={window.location.origin}
-              view="webrtc"
+              view="png"
               muted={true}
               width={layout.width}
               height={layout.height}
@@ -245,15 +284,42 @@ function App() {
         </div>
 
         <div
+          onMouseDown={() => {
+            isResizingRef.current = true;
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none";
+          }}
           style={{
-            width: browserOpen ? 620 : 320,
-            borderLeft: "1px solid #2b313d",
+            width: 6,
+            cursor: "col-resize",
+            background: "#2b313d",
+            flexShrink: 0,
+          }}
+        />
+
+        <div
+          style={{
+            width: `${100 - leftPanePercent}%`,
             background: "#171a21",
             padding: 14,
             overflow: "auto",
             flexShrink: 0,
           }}
         >
+          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+            <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Package name</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                type="text"
+                value={packageName}
+                onChange={(e) => setPackageName(e.target.value)}
+                placeholder="com.example.app"
+                style={{ flex: 1 }}
+              />
+              <button onClick={launchApp} disabled={busy || !packageName}>Launch</button>
+            </div>
+          </div>
+
           <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Emulator state</div>
             <div style={{ color: stateColor(emuState), fontWeight: 600 }}>{emuState}</div>
@@ -267,6 +333,42 @@ function App() {
           <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Last message</div>
             <div style={{ whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: 12 }}>{message}</div>
+          </div>
+
+          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+            <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Android system logs (live, last 100)</div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
+              <input
+                type="text"
+                value={logFilter}
+                onChange={(e) => setLogFilter(e.target.value)}
+                placeholder="Filter text (e.g. package name)"
+                style={{ flex: 1 }}
+              />
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={errorsOnly}
+                  onChange={(e) => setErrorsOnly(e.target.checked)}
+                />
+                Errors only
+              </label>
+            </div>
+            <div
+              style={{
+                fontFamily: "monospace",
+                fontSize: 12,
+                maxHeight: 260,
+                overflow: "auto",
+                background: "#0f1218",
+                border: "1px solid #2b313d",
+                borderRadius: 8,
+                padding: 8,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {logEntries.length === 0 ? "No log entries." : logEntries.join("\n")}
+            </div>
           </div>
 
           {browserOpen && (

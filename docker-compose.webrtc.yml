@@ -1,0 +1,135 @@
+version: "3.8"
+
+services:
+  emulator-webrtc:
+    container_name: google-emu-emulator-webrtc
+    build:
+      context: ./emulator
+    image: google-emu-emulator-webrtc:latest
+    privileged: true
+    devices:
+      - /dev/kvm:/dev/kvm
+    shm_size: "4gb"
+    environment:
+      ADBKEY: |
+        PLACEHOLDER_ADB_KEY
+      EMULATOR_PARAMS: "-grpc 8554 -no-snapshot-load -wipe-data -no-audio -partition-size 4096 -dns-server 1.1.1.1,8.8.8.8"
+      TURN_HOST: "turn.corsicanescape.com"
+      TURN_PORT: "443"
+      TURN_PROTOCOL: "tcp"
+      TURN_SCHEME: "turns"
+      TURN_SECRET: "PLACEHOLDER_TURN_KEY"
+      TURN_TTL: "86400"
+      TURN_USERNAME_SUFFIX: "emuuser"
+    expose:
+      - "8554"
+      - "5555"
+    ports:
+      - "16555:5555"
+    restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    networks:
+      google-emu-webrtc:
+        aliases:
+          - emulator-webrtc
+
+  frontend-webrtc:
+    container_name: google-emu-frontend-webrtc
+    build:
+      context: ./frontend
+    image: google-emu-frontend-webrtc:latest
+    ports:
+      - "18082:80"
+    restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    networks:
+      google-emu-webrtc:
+        aliases:
+          - frontend-webrtc
+
+  apkbridge-webrtc:
+    container_name: google-emu-apkbridge-webrtc
+    build:
+      context: ./apkbridge
+    image: google-emu-apkbridge-webrtc:latest
+    environment:
+      ADB_TARGET: "emulator-webrtc:5555"
+      WORKSPACE_ROOT: "/workspace"
+      ADBKEY: |
+        PLACEHOLDER_ADB_KEY
+    volumes:
+      - /mnt/user/documents/github:/workspace
+    expose:
+      - "5000"
+    ports:
+      - "15010:5000"
+    depends_on:
+      - emulator-webrtc
+    restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    networks:
+      google-emu-webrtc:
+        aliases:
+          - apkbridge-webrtc
+
+  bridge-webrtc:
+    container_name: google-emu-bridge-webrtc
+    build:
+      context: ./bridge-webrtc
+    image: google-emu-bridge-webrtc:latest
+    environment:
+      PORT: "8090"
+      CAPTURE_MODE: "stub"
+      TURN_HOST: "turn.corsicanescape.com"
+      TURN_PORT: "443"
+      TURN_PROTOCOL: "tcp"
+      TURN_SCHEME: "turns"
+      TURN_SECRET: "PLACEHOLDER_TURN_KEY"
+      TURN_TTL: "86400"
+      TURN_USERNAME_SUFFIX: "emuuser"
+    expose:
+      - "8090"
+    ports:
+      - "18090:8090"
+    depends_on:
+      - emulator-webrtc
+    restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    networks:
+      google-emu-webrtc:
+        aliases:
+          - bridge-webrtc
+
+  envoy-webrtc:
+    container_name: google-emu-envoy-webrtc
+    image: envoyproxy/envoy:v1.31-latest
+    depends_on:
+      - emulator-webrtc
+      - frontend-webrtc
+      - apkbridge-webrtc
+      - bridge-webrtc
+    ports:
+      - "18088:8080"
+      - "19911:9901"
+    volumes:
+      - ./envoy.webrtc.yaml:/etc/envoy/envoy.yaml:ro
+    restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    networks:
+      google-emu-webrtc:
+        aliases:
+          - envoy-webrtc
+
+networks:
+  google-emu-webrtc:
+    driver: bridge

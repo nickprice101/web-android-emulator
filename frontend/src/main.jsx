@@ -10,7 +10,13 @@ async function parseJsonResponse(resp, label) {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error(`${label} returned non-JSON: ${text.slice(0, 200)}`);
+    const snippet = text.slice(0, 200);
+    if (snippet.includes("no healthy upstream")) {
+      throw new Error(
+        `${label} is unavailable because Envoy has no healthy bridge-webrtc upstream. The bridge container likely failed to start or is still booting.`
+      );
+    }
+    throw new Error(`${label} returned non-JSON: ${snippet}`);
   }
   if (!resp.ok) {
     throw new Error(data.error || data.message || `${label} failed (${resp.status})`);

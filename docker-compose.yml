@@ -40,8 +40,8 @@ services:
     build:
       context: ./frontend
     image: google-emu-frontend:latest
-    ports:
-      - "18081:80"
+    expose:
+      - "80"
     restart: unless-stopped
     dns:
       - 1.1.1.1
@@ -65,8 +65,6 @@ services:
       - /mnt/user/documents/github:/workspace
     expose:
       - "5000"
-    ports:
-      - "15000:5000"
     depends_on:
       - emulator
     restart: unless-stopped
@@ -78,6 +76,34 @@ services:
         aliases:
           - apkbridge
 
+  bridge-webrtc:
+    container_name: google-emu-bridge-webrtc
+    build:
+      context: ./bridge-webrtc
+    image: google-emu-bridge-webrtc:latest
+    environment:
+      PORT: "8090"
+      CAPTURE_MODE: "stub"
+      TURN_HOST: "turn.corsicanescape.com"
+      TURN_PORT: "443"
+      TURN_PROTOCOL: "tcp"
+      TURN_SCHEME: "turns"
+      TURN_SECRET: "PLACEHOLDER_TURN_KEY"
+      TURN_TTL: "86400"
+      TURN_USERNAME_SUFFIX: "emuuser"
+    expose:
+      - "8090"
+    depends_on:
+      - emulator
+    restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    networks:
+      google-emu:
+        aliases:
+          - bridge-webrtc
+
   envoy:
     container_name: google-emu-envoy
     image: envoyproxy/envoy:v1.31-latest
@@ -85,9 +111,9 @@ services:
       - emulator
       - frontend
       - apkbridge
+      - bridge-webrtc
     ports:
       - "18080:8080"
-      - "19901:9901"
     volumes:
       - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
     restart: unless-stopped

@@ -3,7 +3,7 @@ Designed for app development without the need for Android Studio or similar to b
 
 Based on a self-hosted dockerised solution using the depreciated (Jan 2026) Google emulator docker image with a bespoke frontend pasted on top.
 
-NOTE: PNG stream is default. The legacy Google bridge remains available for PNG rendering, while the custom `webrtc` overlay in this fork introduces a new HTTPS REST plus SSE signaling path for a future self-managed WebRTC bridge.
+NOTE: PNG stream is default. The legacy Google bridge remains available for PNG rendering, while the custom `bridge-webrtc` service now lives inside the main stack and exposes a new HTTPS REST plus SSE signaling path for a future self-managed WebRTC bridge.
 
 The emulator container generates short-lived coturn REST credentials at startup from the shared `TURN_KEY` secret. The browser receives an ephemeral TURN username/password pair, not the long-lived shared secret.
 
@@ -11,7 +11,7 @@ Those credentials are minted when the emulator container starts, so `TURN_TTL` s
 
 ## Robust WebRTC fork path
 
-This fork now includes a parallel `webrtc` stack that does not rely on WebSockets for signaling. Instead, it is designed around:
+This fork now includes a custom bridge path that does not rely on WebSockets for signaling. Instead, it is designed around:
 
 * HTTPS `POST` requests for SDP/session creation
 * optional Server-Sent Events for status updates
@@ -25,27 +25,30 @@ The current custom bridge lives in `bridge-webrtc/` and is intentionally scaffol
 
 This keeps the repo moving toward a corporate-firewall-friendly architecture without pretending the browser video path is complete today.
 
-### Overlay ports and suffixed containers
+### Minimal exposed ports
 
-The new overlay uses `-webrtc` suffixed services and separate host ports so it can coexist with the existing stack:
+The default stack is now consolidated back to the minimum externally useful ports:
 
-* `google-emu-emulator-webrtc` -> `16555:5555`
-* `google-emu-frontend-webrtc` -> `18082:80`
-* `google-emu-apkbridge-webrtc` -> `15010:5000`
-* `google-emu-bridge-webrtc` -> `18090:8090`
-* `google-emu-envoy-webrtc` -> `18088:8080`
-* Envoy admin -> `19911:9901`
+* `18080` -> Envoy entrypoint for the UI, PNG bridge, APK API, and `/bridge/...` custom WebRTC signaling
+* `15555` -> ADB access to the emulator when you need direct debugging from the host
 
-Start the overlay with:
+Everything else stays internal on the Docker network:
+
+* `frontend` on port `80`
+* `apkbridge` on port `5000`
+* `bridge-webrtc` on port `8090`
+* emulator gRPC on port `8554`
+
+Start the stack with:
 
 ```
-docker compose -f docker-compose.webrtc.yml up --build
+docker compose up --build
 ```
 
 Then browse to:
 
 ```
-http://YOUR_HOST:18088
+http://YOUR_HOST:18080
 ```
 
 PNG mode should remain usable immediately. Custom WebRTC mode will exercise the new bridge contract and expose the remaining media-pipeline work clearly in the UI.

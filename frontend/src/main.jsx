@@ -30,6 +30,7 @@ function App() {
   const lastSeenLogRef = useRef(null);
   const [leftPanePercent, setLeftPanePercent] = useState(35);
   const [streamMode, setStreamMode] = useState("png");
+  const [webrtcNotice, setWebrtcNotice] = useState("");
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
 
   useEffect(() => {
@@ -151,6 +152,15 @@ function App() {
     }
     checkHealth();
   }, []);
+
+  useEffect(() => {
+    if (streamMode !== "webrtc" || emuState !== "disconnected") return;
+    const nextMessage =
+      "WebRTC stream disconnected, so the view fell back to PNG. This usually means the browser could not keep an ICE path alive, so check TURN credentials or expose reachable relay/media ports.";
+    setWebrtcNotice(nextMessage);
+    setMessage(nextMessage);
+    setStreamMode("png");
+  }, [emuState, streamMode]);
 
   const stateColor = (s) =>
     s === "connected" || s === "ready"
@@ -279,6 +289,14 @@ function App() {
     window.location.reload();
   }
 
+  function handleStreamModeChange(nextMode) {
+    if (nextMode === "webrtc") {
+      setWebrtcNotice("");
+      setMessage("Attempting WebRTC stream...");
+    }
+    setStreamMode(nextMode);
+  }
+
   const layout = useMemo(() => {
     const leftPanel = Math.max(220, Math.round((viewport.width * leftPanePercent) / 100));
     // 48px accounts for padding around the emulator container
@@ -320,7 +338,7 @@ function App() {
         <button onClick={() => browse("")}>Browse APKs</button>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           Stream
-          <select value={streamMode} onChange={(e) => setStreamMode(e.target.value)}>
+          <select value={streamMode} onChange={(e) => handleStreamModeChange(e.target.value)}>
             <option value="png">PNG</option>
             <option value="webrtc">WebRTC</option>
           </select>
@@ -430,6 +448,23 @@ function App() {
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Last message</div>
             <div style={{ whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: 12 }}>{message}</div>
           </div>
+
+          {webrtcNotice && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: 12,
+                border: "1px solid #6b4f1d",
+                borderRadius: 12,
+                background: "#2a2112",
+                color: "#f3d9a4",
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              {webrtcNotice}
+            </div>
+          )}
 
           <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>

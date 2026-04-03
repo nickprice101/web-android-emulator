@@ -4,6 +4,248 @@ import { Emulator } from "android-emulator-webrtc/emulator";
 
 const EMULATOR_ASPECT = 1080 / 1920;
 
+async function parseJsonResponse(resp, label) {
+  const text = await resp.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`${label} returned non-JSON: ${text.slice(0, 200)}`);
+  }
+  if (!resp.ok) {
+    throw new Error(data.error || data.message || `${label} failed (${resp.status})`);
+  }
+  return data;
+}
+
+function mapPeerState(state) {
+  switch (state) {
+    case "connected":
+      return "connected";
+    case "connecting":
+      return "connecting";
+    case "completed":
+      return "connected";
+    default:
+      return "disconnected";
+  }
+}
+
+function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
+  const videoRef = useRef(null);
+  const peerRef = useRef(null);
+  const sessionRef = useRef(null);
+  const eventSourceRef = useRef(null);
+  const [bridgeState, setBridgeState] = useState("idle");
+  const [sessionState, setSessionState] = useState("idle");
+  const [notes, setNotes] = useState([]);
+
+  useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function start() {
+      try {
+        setBridgeState("checking");
+        setSessionState("initializing");
+        onStateChange("connecting");
+
+        const health = await parseJsonResponse(await fetch("/bridge/health"), "/bridge/health");
+        if (!health.ok) {
+          throw new Error("Custom bridge health check failed.");
+        }
+
+        const config = await parseJsonResponse(await fetch("/bridge/api/config"), "/bridge/api/config");
+        if (cancelled) {
+          return;
+        }
+
+        setBridgeState("ready");
+        setNotes(Array.isArray(config.notes) ? config.notes : []);
+
+        const peer = new RTCPeerConnection(config.rtcConfiguration || {});
+        peerRef.current = peer;
+        peer.addTransceiver("video", { direction: "recvonly" });
+
+        peer.ontrack = (event) => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = event.streams[0];
+          }
+        };
+
+        peer.onconnectionstatechange = () => {
+          const nextState = mapPeerState(peer.connectionState);
+          setSessionState(peer.connectionState || "unknown");
+          onStateChange(nextState);
+        };
+
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+
+        const sessionResp = await fetch("/bridge/api/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: offer.type,
+            sdp: offer.sdp,
+          }),
+        });
+
+        const sessionText = await sessionResp.text();
+        let session;
+        try {
+          session = JSON.parse(sessionText);
+        } catch {
+          throw new Error(`Bridge session returned non-JSON: ${sessionText.slice(0, 200)}`);
+        }
+
+        if (session.id) {
+          sessionRef.current = session.id;
+        }
+
+        if (session.eventStreamUrl) {
+          const source = new EventSource(session.eventStreamUrl);
+          eventSourceRef.current = source;
+          source.addEventListener("status", (event) => {
+            try {
+              const payload = JSON.parse(event.data);
+              if (payload.state) {
+                setSessionState(payload.state);
+              }
+            } catch {
+              // ignore malformed status events
+            }
+          });
+        }
+
+        if (!sessionResp.ok) {
+          throw new Error(session.error || `Bridge session failed (${sessionResp.status})`);
+        }
+
+        if (!session.answer?.sdp || !session.answer?.type) {
+          throw new Error("Bridge session created but no SDP answer was returned.");
+        }
+
+        await peer.setRemoteDescription(session.answer);
+        setSessionState("answer-applied");
+        onMessage("Custom WebRTC session established.");
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setBridgeState("error");
+        setSessionState("failed");
+        onStateChange("disconnected");
+        onMessage(`Custom WebRTC bridge: ${error.message}`);
+      }
+    }
+
+    start();
+
+    return () => {
+      cancelled = true;
+      eventSourceRef.current?.close();
+      eventSourceRef.current = null;
+
+      if (sessionRef.current) {
+        fetch(`/bridge/api/session/${sessionRef.current}`, { method: "DELETE" }).catch(() => {});
+        sessionRef.current = null;
+      }
+
+      if (peerRef.current) {
+        peerRef.current.close();
+        peerRef.current = null;
+      }
+    };
+  }, [active, onMessage, onStateChange]);
+
+  return (
+    <div
+      style={{
+        width,
+        height,
+        borderRadius: 18,
+        background: "#05070b",
+        color: "#d7dfed",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        border: "1px solid #202634",
+      }}
+    >
+      <div
+        style={{
+          padding: "10px 12px",
+          borderBottom: "1px solid #202634",
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          fontSize: 12,
+        }}
+      >
+        <span>Custom WebRTC bridge</span>
+        <span>
+          bridge: {bridgeState} | session: {sessionState}
+        </span>
+      </div>
+
+      <div style={{ flex: 1, position: "relative", background: "#000" }}>
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            display: "block",
+            background: "#000",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: 360,
+              padding: 14,
+              background: "rgba(10, 12, 18, 0.88)",
+              border: "1px solid #3b465b",
+              borderRadius: 14,
+              fontSize: 12,
+              lineHeight: 1.6,
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Bridge scaffold active</div>
+            <div>
+              This fork now uses HTTPS REST plus SSE for signaling. The next step is wiring a real media
+              capture pipeline into `bridge-webrtc`.
+            </div>
+            {notes.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                {notes.map((note) => (
+                  <div key={note}>- {note}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const emuRef = useRef(null);
   const wrapRef = useRef(null);
@@ -14,7 +256,7 @@ function App() {
   const [emuState, setEmuState] = useState("connecting");
   const [apiState, setApiState] = useState("checking");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("Starting…");
+  const [message, setMessage] = useState("Starting...");
   const [builtPath, setBuiltPath] = useState("");
   const [packageName, setPackageName] = useState("");
   const [browserOpen, setBrowserOpen] = useState(false);
@@ -71,8 +313,8 @@ function App() {
       if (nextEntries.length > 0) {
         setLogEntries((prev) => [...prev, ...nextEntries]);
       }
-    } catch (e) {
-      setMessage(`Log stream error: ${e.message}`);
+    } catch (error) {
+      setMessage(`Log stream error: ${error.message}`);
     }
   }, [errorsOnly, fatalOnly, logFilter, logLimit, logsPaused]);
 
@@ -89,17 +331,17 @@ function App() {
   }, [loadLogs, logsPaused, logLimit]);
 
   useEffect(() => {
-    function onMove(e) {
+    function onMove(event) {
       if (isResizingRef.current) {
         const width = window.innerWidth || 1;
-        const next = (e.clientX / width) * 100;
+        const next = (event.clientX / width) * 100;
         setLeftPanePercent(Math.max(20, Math.min(60, next)));
       }
       if (isLogResizingRef.current) {
         const viewportHeight = window.innerHeight || 1;
         const maxLogHeight = Math.max(180, Math.round(viewportHeight * 0.65));
         setLogPaneHeight((prev) => {
-          const next = prev - e.movementY;
+          const next = prev - event.movementY;
           return Math.max(120, Math.min(maxLogHeight, next));
         });
       }
@@ -120,20 +362,6 @@ function App() {
     };
   }, []);
 
-  async function parseJsonResponse(resp, label) {
-    const text = await resp.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(`${label} returned non-JSON: ${text.slice(0, 200)}`);
-    }
-    if (!resp.ok) {
-      throw new Error(data.error || data.message || `${label} failed (${resp.status})`);
-    }
-    return data;
-  }
-
   useEffect(() => {
     async function checkHealth() {
       try {
@@ -145,37 +373,20 @@ function App() {
           setApiState("error");
           setMessage("Bridge API: device not connected");
         }
-      } catch (e) {
+      } catch (error) {
         setApiState("error");
-        setMessage(`Bridge API error: ${e.message}`);
+        setMessage(`Bridge API error: ${error.message}`);
       }
     }
     checkHealth();
   }, []);
 
-  useEffect(() => {
-    if (streamMode !== "webrtc" || emuState !== "disconnected") return;
-    const nextMessage =
-      "WebRTC stream disconnected, so the view fell back to PNG. This usually means the browser could not keep an ICE path alive, so check TURN credentials or expose reachable relay/media ports.";
-    setWebrtcNotice(nextMessage);
-    setMessage(nextMessage);
-    setStreamMode("png");
-  }, [emuState, streamMode]);
-
-  const stateColor = (s) =>
-    s === "connected" || s === "ready"
+  const stateColor = (state) =>
+    state === "connected" || state === "ready"
       ? "#3fb950"
-      : s === "connecting" || s === "checking"
-      ? "#d29922"
-      : "#f85149";
-
-  function sendKey(name) {
-    try {
-      emuRef.current?.sendKey?.(name);
-    } catch (e) {
-      setMessage(`Key send failed: ${e.message}`);
-    }
-  }
+      : state === "connecting" || state === "checking" || state === "initializing"
+        ? "#d29922"
+        : "#f85149";
 
   async function callApi(path, options = {}) {
     setBusy(true);
@@ -183,33 +394,50 @@ function App() {
       const data = await parseJsonResponse(await fetch(path, options), path);
       setMessage(data.launch || data.message || JSON.stringify(data));
       return data;
-    } catch (e) {
-      setMessage(`${path} failed: ${e.message}`);
-      throw e;
+    } catch (error) {
+      setMessage(`${path} failed: ${error.message}`);
+      throw error;
     } finally {
       setBusy(false);
     }
   }
 
-  async function uploadApk(ev) {
-    const file = ev.target.files?.[0];
+  async function sendKey(name) {
+    try {
+      if (streamMode === "png") {
+        emuRef.current?.sendKey?.(name);
+        return;
+      }
+
+      await callApi("/api/input-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: name }),
+      });
+    } catch (error) {
+      setMessage(`Key send failed: ${error.message}`);
+    }
+  }
+
+  async function uploadApk(event) {
+    const file = event.target.files?.[0];
     if (!file) return;
-    setMessage(`Installing ${file.name}…`);
-    const fd = new FormData();
-    fd.append("apk", file);
-    fd.append("package", packageName);
-    const data = await callApi("/api/install", { method: "POST", body: fd });
+    setMessage(`Installing ${file.name}...`);
+    const formData = new FormData();
+    formData.append("apk", file);
+    formData.append("package", packageName);
+    const data = await callApi("/api/install", { method: "POST", body: formData });
     if (data.package) {
       setPackageName(data.package);
-      setMessage(`Ready to launch! Installed ${file.name} as ${data.package}`);
+      setMessage(`Ready to launch. Installed ${file.name} as ${data.package}`);
     } else {
-      setMessage(`Ready to launch! Installed ${file.name}`);
+      setMessage(`Ready to launch. Installed ${file.name}`);
     }
-    ev.target.value = "";
+    event.target.value = "";
   }
 
   async function installBuiltApk(path, initialPackage = "") {
-    setMessage(`Installing ${path}…`);
+    setMessage(`Installing ${path}...`);
     const data = await callApi("/api/install-built", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -217,9 +445,9 @@ function App() {
     });
     if (data.package) {
       setPackageName(data.package);
-      setMessage(`Ready to launch! Installed ${path} as ${data.package}`);
+      setMessage(`Ready to launch. Installed ${path} as ${data.package}`);
     } else {
-      setMessage(`Ready to launch! Installed ${path}`);
+      setMessage(`Ready to launch. Installed ${path}`);
     }
   }
 
@@ -251,15 +479,15 @@ function App() {
       requestAnimationFrame(() => {
         browserSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
-    } catch (e) {
-      setMessage(`Browse error: ${e.message}`);
+    } catch (error) {
+      setMessage(`Browse error: ${error.message}`);
     }
   }
 
   async function selectApk(path) {
     setBuiltPath(path);
     setBrowserOpen(false);
-    setMessage(`Selected ${path}. Checking package details…`);
+    setMessage(`Selected ${path}. Checking package details...`);
     let detectedPackage = "";
     try {
       const details = await parseJsonResponse(
@@ -269,15 +497,15 @@ function App() {
       if (details.package) {
         detectedPackage = details.package;
         setPackageName(details.package);
-        setMessage(`Selected ${path} (${details.package}). Installing…`);
+        setMessage(`Selected ${path} (${details.package}). Installing...`);
       }
-    } catch (e) {
-      setMessage(`Selected ${path}. Package lookup failed: ${e.message}. Installing anyway…`);
+    } catch (error) {
+      setMessage(`Selected ${path}. Package lookup failed: ${error.message}. Installing anyway...`);
     }
     try {
       await installBuiltApk(path, detectedPackage);
     } catch {
-      // installBuiltApk already reports the error via Last message
+      // installBuiltApk already reports the error via message state
     }
   }
 
@@ -292,14 +520,14 @@ function App() {
   function handleStreamModeChange(nextMode) {
     if (nextMode === "webrtc") {
       setWebrtcNotice("");
-      setMessage("Attempting WebRTC stream...");
+      setEmuState("connecting");
+      setMessage("Attempting custom WebRTC session...");
     }
     setStreamMode(nextMode);
   }
 
   const layout = useMemo(() => {
     const leftPanel = Math.max(220, Math.round((viewport.width * leftPanePercent) / 100));
-    // 48px accounts for padding around the emulator container
     const availableHeight = Math.max(240, viewport.height - 48);
     const availableWidth = Math.max(180, leftPanel - 32);
 
@@ -328,9 +556,9 @@ function App() {
           flexShrink: 0,
         }}
       >
-        <button onClick={() => sendKey("GoBack")} title="Back" aria-label="Back" style={{ fontSize: 20, lineHeight: 1 }}>◁</button>
-        <button onClick={() => sendKey("GoHome")} title="Home" aria-label="Home" style={{ fontSize: 20, lineHeight: 1 }}>◯</button>
-        <button onClick={() => sendKey("AppSwitch")} title="Recents" aria-label="Recents" style={{ fontSize: 20, lineHeight: 1 }}>□</button>
+        <button onClick={() => sendKey("GoBack")} title="Back" aria-label="Back">Back</button>
+        <button onClick={() => sendKey("GoHome")} title="Home" aria-label="Home">Home</button>
+        <button onClick={() => sendKey("AppSwitch")} title="Recents" aria-label="Recents">Recents</button>
         <button onClick={wakeDevice} disabled={busy}>Wake</button>
         <button onClick={rebootDevice} disabled={busy}>Reboot</button>
         <button onClick={fullscreen}>Fullscreen</button>
@@ -338,9 +566,9 @@ function App() {
         <button onClick={() => browse("")}>Browse APKs</button>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           Stream
-          <select value={streamMode} onChange={(e) => handleStreamModeChange(e.target.value)}>
+          <select value={streamMode} onChange={(event) => handleStreamModeChange(event.target.value)}>
             <option value="png">PNG</option>
-            <option value="webrtc">WebRTC</option>
+            <option value="webrtc">Custom WebRTC</option>
           </select>
         </label>
         <input type="file" accept=".apk,application/vnd.android.package-archive" onChange={uploadApk} disabled={busy} />
@@ -368,8 +596,8 @@ function App() {
           }}
         >
           <div
-            onMouseDown={(e) => e.preventDefault()}
-            onDragStart={(e) => e.preventDefault()}
+            onMouseDown={(event) => event.preventDefault()}
+            onDragStart={(event) => event.preventDefault()}
             style={{
               width: layout.width,
               height: layout.height,
@@ -383,16 +611,29 @@ function App() {
               WebkitUserSelect: "none",
             }}
           >
-            <Emulator
-              ref={emuRef}
-              uri={window.location.origin}
-              view={streamMode}
-              muted={true}
-              width={layout.width}
-              height={layout.height}
-              onStateChange={(s) => setEmuState(s)}
-              onError={(e) => setMessage(`Emulator error: ${String(e)}`)}
-            />
+            {streamMode === "png" ? (
+              <Emulator
+                ref={emuRef}
+                uri={window.location.origin}
+                view="png"
+                muted={true}
+                width={layout.width}
+                height={layout.height}
+                onStateChange={(state) => setEmuState(state)}
+                onError={(error) => setMessage(`Emulator error: ${String(error)}`)}
+              />
+            ) : (
+              <CustomWebrtcPane
+                active={streamMode === "webrtc"}
+                width={layout.width}
+                height={layout.height}
+                onStateChange={setEmuState}
+                onMessage={(nextMessage) => {
+                  setMessage(nextMessage);
+                  setWebrtcNotice(nextMessage);
+                }}
+              />
+            )}
           </div>
         </div>
 
@@ -425,7 +666,7 @@ function App() {
               <input
                 type="text"
                 value={packageName}
-                onChange={(e) => setPackageName(e.target.value)}
+                onChange={(event) => setPackageName(event.target.value)}
                 placeholder="com.example.app"
                 style={{ flex: 1 }}
               />
@@ -474,7 +715,7 @@ function App() {
               <input
                 type="text"
                 value={logFilter}
-                onChange={(e) => setLogFilter(e.target.value)}
+                onChange={(event) => setLogFilter(event.target.value)}
                 placeholder="Filter text (e.g. package name)"
                 style={{ flex: 1 }}
               />
@@ -482,7 +723,7 @@ function App() {
                 <input
                   type="checkbox"
                   checked={errorsOnly}
-                  onChange={(e) => setErrorsOnly(e.target.checked)}
+                  onChange={(event) => setErrorsOnly(event.target.checked)}
                 />
                 Errors only
               </label>
@@ -490,7 +731,7 @@ function App() {
                 <input
                   type="checkbox"
                   checked={fatalOnly}
-                  onChange={(e) => setFatalOnly(e.target.checked)}
+                  onChange={(event) => setFatalOnly(event.target.checked)}
                 />
                 FATAL
               </label>
@@ -501,8 +742,8 @@ function App() {
                   min={1}
                   max={500}
                   value={logLimit}
-                  onChange={(e) => {
-                    const next = Number(e.target.value);
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
                     if (Number.isNaN(next)) return;
                     setLogLimit(Math.max(1, Math.min(500, next)));
                   }}
@@ -542,8 +783,8 @@ function App() {
               {logEntries.length === 0 ? "No log entries." : logEntries.join("\n")}
             </div>
             <div
-              onMouseDown={(e) => {
-                e.preventDefault();
+              onMouseDown={(event) => {
+                event.preventDefault();
                 isLogResizingRef.current = true;
                 document.body.style.cursor = "row-resize";
                 document.body.style.userSelect = "none";
@@ -590,10 +831,10 @@ function App() {
                 {browserData.directories.length === 0 ? (
                   <div style={{ fontSize: 12, color: "#999" }}>No subdirectories</div>
                 ) : (
-                  browserData.directories.map((d) => (
-                    <div key={d.path} style={{ marginBottom: 6 }}>
-                      <button onClick={() => browse(d.path)} style={{ width: "100%", textAlign: "left" }}>
-                        📁 {d.name}
+                  browserData.directories.map((directory) => (
+                    <div key={directory.path} style={{ marginBottom: 6 }}>
+                      <button onClick={() => browse(directory.path)} style={{ width: "100%", textAlign: "left" }}>
+                        [DIR] {directory.name}
                       </button>
                     </div>
                   ))
@@ -605,10 +846,10 @@ function App() {
                 {browserData.apks.length === 0 ? (
                   <div style={{ fontSize: 12, color: "#999" }}>No APKs here</div>
                 ) : (
-                  browserData.apks.map((a) => (
-                    <div key={a.path} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                      <button onClick={() => selectApk(a.path)} style={{ flex: 1, textAlign: "left" }}>
-                        📦 {a.name}
+                  browserData.apks.map((apk) => (
+                    <div key={apk.path} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                      <button onClick={() => selectApk(apk.path)} style={{ flex: 1, textAlign: "left" }}>
+                        [APK] {apk.name}
                       </button>
                     </div>
                   ))

@@ -105,20 +105,21 @@ jobs:
           if not turn_key:
               raise SystemExit("Error: TURN_KEY secret is not set")
 
-          with open("docker-compose.yml", "r") as fh:
-              content = fh.read()
-
           # Capture the leading whitespace so the replacement works at any indentation level.
           # ADB_KEY must be the full PEM key including -----BEGIN/END PRIVATE KEY----- lines.
           def replace_adb_key(match):
               indent = match.group(1)
               return "\n".join(indent + line for line in adb_key.splitlines())
 
-          content = re.sub(r"^( *)PLACEHOLDER_ADB_KEY$", replace_adb_key, content, flags=re.MULTILINE)
-          content = content.replace("PLACEHOLDER_TURN_KEY", turn_key)
-
-          with open("docker-compose.yml", "w") as fh:
-              fh.write(content)
+          for compose_path in ("docker-compose.yml", "docker-compose.webrtc.yml"):
+              if not os.path.exists(compose_path):
+                  continue
+              with open(compose_path, "r", encoding="utf-8") as fh:
+                  content = fh.read()
+              content = re.sub(r"^( *)PLACEHOLDER_ADB_KEY$", replace_adb_key, content, flags=re.MULTILINE)
+              content = content.replace("PLACEHOLDER_TURN_KEY", turn_key)
+              with open(compose_path, "w", encoding="utf-8") as fh:
+                  fh.write(content)
           PYEOF
 
       - name: Upload repository files
@@ -133,7 +134,7 @@ jobs:
       - name: Build Docker images for sub-directories
         run: |
           IMAGE_PREFIX="$(basename "${SSH_PATH}")"
-          for dir in frontend apkbridge; do
+          for dir in frontend apkbridge bridge-webrtc; do
             ssh -i "${SSH_KEY_FILE}" \
               -o StrictHostKeyChecking="${SSH_STRICT}" \
               -o BatchMode=yes \
@@ -155,7 +156,7 @@ jobs:
           REMOTE
           done
 
-      - name: Build docker compose stack
+      - name: Build docker compose stacks
         run: |
           ssh -i "${SSH_KEY_FILE}" \
             -o StrictHostKeyChecking="${SSH_STRICT}" \
@@ -166,14 +167,14 @@ jobs:
           set -euo pipefail
           cd "${COMPOSE_DIR}"
           if docker compose version > /dev/null 2>&1; then
-            docker compose build
+            docker compose -f docker-compose.yml -f docker-compose.webrtc.yml build
           else
-            docker-compose build
+            docker-compose -f docker-compose.yml -f docker-compose.webrtc.yml build
           fi
-          echo "    docker compose build complete."
+          echo "    docker compose builds complete."
           REMOTE
 
-      - name: Deploy docker compose stack
+      - name: Deploy docker compose stacks
         run: |
           ssh -i "${SSH_KEY_FILE}" \
             -o StrictHostKeyChecking="${SSH_STRICT}" \
@@ -184,9 +185,9 @@ jobs:
           set -euo pipefail
           cd "${COMPOSE_DIR}"
           if docker compose version > /dev/null 2>&1; then
-            docker compose up -d --remove-orphans
+            docker compose -f docker-compose.yml -f docker-compose.webrtc.yml up -d --remove-orphans
           else
-            docker-compose up -d --remove-orphans
+            docker-compose -f docker-compose.yml -f docker-compose.webrtc.yml up -d --remove-orphans
           fi
           echo "    docker compose deploy complete."
           REMOTE

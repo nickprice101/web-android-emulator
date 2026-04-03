@@ -10,6 +10,13 @@ app = Flask(__name__)
 ADB_TARGET = os.environ.get("ADB_TARGET", "emulator:5555")
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace")).resolve()
 KEY_MAP = {"HOME": "3", "BACK": "4", "RECENTS": "187", "POWER": "26", "MENU": "82"}
+KEY_NAME_MAP = {
+    "GoHome": KEY_MAP["HOME"],
+    "GoBack": KEY_MAP["BACK"],
+    "AppSwitch": KEY_MAP["RECENTS"],
+    "Power": KEY_MAP["POWER"],
+    "Menu": KEY_MAP["MENU"],
+}
 
 
 def run(cmd, timeout=90):
@@ -229,6 +236,20 @@ def wake():
     try:
         wake_and_unlock()
         return jsonify({"ok": True, "message": "Device woken"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/input-key")
+def input_key():
+    data = request.get_json(force=True, silent=True) or {}
+    key_name = data.get("key", "").strip()
+    key_code = KEY_NAME_MAP.get(key_name)
+    if not key_code:
+        return jsonify({"error": f"Unsupported key '{key_name}'"}), 400
+    try:
+        out = adb("shell", "input", "keyevent", key_code)
+        return jsonify({"ok": True, "message": out or f"Sent {key_name}"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

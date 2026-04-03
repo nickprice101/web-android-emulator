@@ -24,27 +24,64 @@ async function parseJsonResponse(resp, label) {
   return data;
 }
 
-function mapPeerState(state) {
-  switch (state) {
-    case "connected":
-      return "connected";
-    case "connecting":
-      return "connecting";
-    case "completed":
-      return "connected";
-    default:
-      return "disconnected";
+function mapBridgeSessionState(sessionState, hasVideo) {
+  if (hasVideo || sessionState === "connected" || sessionState === "media-ready") {
+    return "connected";
   }
+
+  if (["failed", "disconnected", "closed", "expired", "media-failed"].includes(sessionState)) {
+    return "disconnected";
+  }
+
+  return "connecting";
 }
 
-function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
+function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inputRef }) {
   const videoRef = useRef(null);
   const peerRef = useRef(null);
   const sessionRef = useRef(null);
   const eventSourceRef = useRef(null);
+  const gestureRef = useRef(null);
   const [bridgeState, setBridgeState] = useState("idle");
   const [sessionState, setSessionState] = useState("idle");
+  const [sessionInfo, setSessionInfo] = useState(null);
   const [notes, setNotes] = useState([]);
+  const [sessionMessage, setSessionMessage] = useState("");
+  const [logs, setLogs] = useState([]);
+  const [hasVideo, setHasVideo] = useState(false);
+
+  const sendSessionInput = useCallback(
+    async (payload) => {
+      if (!sessionRef.current) {
+        throw new Error("WebRTC session is not ready yet.");
+      }
+
+      const response = await fetch(`/bridge/api/session/${sessionRef.current}/input`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      return parseJsonResponse(response, "/bridge/api/session/:id/input");
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!inputRef) {
+      return undefined;
+    }
+    inputRef.current = sendSessionInput;
+    return () => {
+      if (inputRef.current === sendSessionInput) {
+        inputRef.current = null;
+      }
+    };
+  }, [inputRef, sendSessionInput]);
+
+  useEffect(() => {
+    onStateChange(mapBridgeSessionState(sessionState, hasVideo));
+  }, [hasVideo, onStateChange, sessionState]);
 
   useEffect(() => {
     if (!active) {
@@ -57,6 +94,10 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
       try {
         setBridgeState("checking");
         setSessionState("initializing");
+        setSessionInfo(null);
+        setSessionMessage("Checking custom bridge health...");
+        setHasVideo(false);
+        setLogs([]);
         onStateChange("connecting");
 
         const health = await parseJsonResponse(await fetch("/bridge/health"), "/bridge/health");
@@ -71,6 +112,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
 
         setBridgeState("ready");
         setNotes(Array.isArray(config.notes) ? config.notes : []);
+        setSessionMessage("Creating browser offer...");
 
         const peer = new RTCPeerConnection(config.rtcConfiguration || {});
         peerRef.current = peer;
@@ -80,12 +122,12 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
           if (videoRef.current) {
             videoRef.current.srcObject = event.streams[0];
           }
+          setHasVideo(true);
+          setSessionMessage("Remote emulator video track attached.");
         };
 
         peer.onconnectionstatechange = () => {
-          const nextState = mapPeerState(peer.connectionState);
           setSessionState(peer.connectionState || "unknown");
-          onStateChange(nextState);
         };
 
         const offer = await peer.createOffer();
@@ -111,6 +153,12 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
         if (session.id) {
           sessionRef.current = session.id;
         }
+        setSessionInfo(session);
+        setSessionState(session.state || "created");
+        setSessionMessage(session.message || "Session created.");
+        if (Array.isArray(session.recentLogs)) {
+          setLogs(session.recentLogs.slice(-6));
+        }
 
         if (session.eventStreamUrl) {
           const source = new EventSource(session.eventStreamUrl);
@@ -118,11 +166,26 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
           source.addEventListener("status", (event) => {
             try {
               const payload = JSON.parse(event.data);
+              setSessionInfo(payload);
               if (payload.state) {
                 setSessionState(payload.state);
               }
+              if (payload.message) {
+                setSessionMessage(payload.message);
+              }
+              if (Array.isArray(payload.recentLogs)) {
+                setLogs(payload.recentLogs.slice(-6));
+              }
             } catch {
               // ignore malformed status events
+            }
+          });
+          source.addEventListener("log", (event) => {
+            try {
+              const payload = JSON.parse(event.data);
+              setLogs((previous) => [...previous, payload].slice(-6));
+            } catch {
+              // ignore malformed log events
             }
           });
         }
@@ -136,14 +199,15 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
         }
 
         await peer.setRemoteDescription(session.answer);
-        setSessionState("answer-applied");
-        onMessage("Custom WebRTC session established.");
+        setSessionState(session.state || "answer-applied");
+        onMessage(session.message || "Custom WebRTC signaling completed. Waiting for media.");
       } catch (error) {
         if (cancelled) {
           return;
         }
         setBridgeState("error");
         setSessionState("failed");
+        setSessionMessage(error.message);
         onStateChange("disconnected");
         onMessage(`Custom WebRTC bridge: ${error.message}`);
       }
@@ -153,6 +217,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
 
     return () => {
       cancelled = true;
+      gestureRef.current = null;
       eventSourceRef.current?.close();
       eventSourceRef.current = null;
 
@@ -167,6 +232,57 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
       }
     };
   }, [active, onMessage, onStateChange]);
+
+  const handlePointerDown = useCallback((event) => {
+    if (!active) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    gestureRef.current = {
+      startXRatio: (event.clientX - rect.left) / Math.max(1, rect.width),
+      startYRatio: (event.clientY - rect.top) / Math.max(1, rect.height),
+      pointerId: event.pointerId,
+      startedAt: Date.now(),
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, [active]);
+
+  const handlePointerUp = useCallback(async (event) => {
+    const gesture = gestureRef.current;
+    gestureRef.current = null;
+    if (!gesture) {
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const endXRatio = (event.clientX - rect.left) / Math.max(1, rect.width);
+    const endYRatio = (event.clientY - rect.top) / Math.max(1, rect.height);
+    const deltaX = endXRatio - gesture.startXRatio;
+    const deltaY = endYRatio - gesture.startYRatio;
+    const durationMs = Date.now() - gesture.startedAt;
+
+    try {
+      if (Math.abs(deltaX) < 0.015 && Math.abs(deltaY) < 0.015) {
+        await sendSessionInput({
+          type: "tap",
+          xRatio: gesture.startXRatio,
+          yRatio: gesture.startYRatio,
+        });
+      } else {
+        await sendSessionInput({
+          type: "swipe",
+          startXRatio: gesture.startXRatio,
+          startYRatio: gesture.startYRatio,
+          endXRatio,
+          endYRatio,
+          durationMs: Math.max(120, durationMs),
+        });
+      }
+    } catch (error) {
+      onMessage(`Custom WebRTC input failed: ${error.message}`);
+    }
+  }, [onMessage, sendSessionInput]);
 
   return (
     <div
@@ -192,18 +308,23 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
           fontSize: 12,
         }}
       >
-        <span>Custom WebRTC bridge</span>
+        <span>Custom WebRTC bridge (low latency)</span>
         <span>
           bridge: {bridgeState} | session: {sessionState}
         </span>
       </div>
 
-      <div style={{ flex: 1, position: "relative", background: "#000" }}>
+      <div
+        style={{ flex: 1, position: "relative", background: "#000" }}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+      >
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted
+          onLoadedMetadata={() => setHasVideo(true)}
           style={{
             width: "100%",
             height: "100%",
@@ -212,39 +333,82 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage }) {
             background: "#000",
           }}
         />
+        {!hasVideo && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              pointerEvents: "none",
+            }}
+          >
+            <div
+              style={{
+                maxWidth: 420,
+                padding: 16,
+                background: "rgba(10, 12, 18, 0.9)",
+                border: "1px solid #3b465b",
+                borderRadius: 14,
+                fontSize: 12,
+                lineHeight: 1.6,
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Preparing low-latency stream</div>
+              <div>{sessionMessage || "Waiting for custom bridge media..."}</div>
+              {notes.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  {notes.map((note) => (
+                    <div key={note}>- {note}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div
           style={{
             position: "absolute",
-            inset: 0,
+            left: 12,
+            right: 12,
+            bottom: 12,
             display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
+            justifyContent: "space-between",
+            gap: 12,
             pointerEvents: "none",
           }}
         >
           <div
             style={{
-              maxWidth: 360,
-              padding: 14,
-              background: "rgba(10, 12, 18, 0.88)",
-              border: "1px solid #3b465b",
-              borderRadius: 14,
-              fontSize: 12,
-              lineHeight: 1.6,
+              maxWidth: "55%",
+              padding: "8px 10px",
+              background: "rgba(6, 8, 12, 0.78)",
+              borderRadius: 10,
+              fontSize: 11,
+              color: "#d7dfed",
             }}
           >
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>Bridge scaffold active</div>
+            {sessionMessage || "Connecting..."}
+          </div>
+          <div
+            style={{
+              minWidth: 180,
+              padding: "8px 10px",
+              background: "rgba(6, 8, 12, 0.78)",
+              borderRadius: 10,
+              fontSize: 11,
+              color: "#d7dfed",
+            }}
+          >
             <div>
-              This fork now uses HTTPS REST plus SSE for signaling. The next step is wiring a real media
-              capture pipeline into `bridge-webrtc`.
+              frames: {sessionInfo?.media?.framesDelivered ?? 0}
+              {sessionInfo?.media?.width && sessionInfo?.media?.height
+                ? ` | ${sessionInfo.media.width}x${sessionInfo.media.height}`
+                : ""}
             </div>
-            {notes.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                {notes.map((note) => (
-                  <div key={note}>- {note}</div>
-                ))}
-              </div>
-            )}
+            {logs[logs.length - 1] && <div>{logs[logs.length - 1].message}</div>}
           </div>
         </div>
       </div>
@@ -256,6 +420,7 @@ function App() {
   const emuRef = useRef(null);
   const wrapRef = useRef(null);
   const browserSectionRef = useRef(null);
+  const webrtcInputRef = useRef(null);
   const isResizingRef = useRef(false);
   const isLogResizingRef = useRef(false);
 
@@ -277,7 +442,7 @@ function App() {
   const [logPaneHeight, setLogPaneHeight] = useState(260);
   const lastSeenLogRef = useRef(null);
   const [leftPanePercent, setLeftPanePercent] = useState(35);
-  const [streamMode, setStreamMode] = useState("png");
+  const [streamMode, setStreamMode] = useState("webrtc");
   const [webrtcNotice, setWebrtcNotice] = useState("");
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
 
@@ -412,6 +577,12 @@ function App() {
     try {
       if (streamMode === "png") {
         emuRef.current?.sendKey?.(name);
+        return;
+      }
+
+      if (webrtcInputRef.current) {
+        await webrtcInputRef.current({ type: "key", key: name });
+        setMessage(`Sent ${name} through custom WebRTC bridge`);
         return;
       }
 
@@ -573,8 +744,8 @@ function App() {
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           Stream
           <select value={streamMode} onChange={(event) => handleStreamModeChange(event.target.value)}>
-            <option value="png">PNG</option>
             <option value="webrtc">Custom WebRTC</option>
+            <option value="png">PNG</option>
           </select>
         </label>
         <input type="file" accept=".apk,application/vnd.android.package-archive" onChange={uploadApk} disabled={busy} />
@@ -634,6 +805,7 @@ function App() {
                 width={layout.width}
                 height={layout.height}
                 onStateChange={setEmuState}
+                inputRef={webrtcInputRef}
                 onMessage={(nextMessage) => {
                   setMessage(nextMessage);
                   setWebrtcNotice(nextMessage);

@@ -65,6 +65,37 @@ jobs:
             || echo "No compose available"
           REMOTE
 
+      - name: Install Docker Engine if missing
+        run: |
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            bash -l -s <<'REMOTE'
+          set -euo pipefail
+          if command -v docker > /dev/null 2>&1; then
+            echo "Docker already installed, skipping engine install."
+            exit 0
+          fi
+
+          if ! command -v curl > /dev/null 2>&1; then
+            echo "curl is required to bootstrap Docker." >&2
+            exit 1
+          fi
+
+          if command -v sudo > /dev/null 2>&1; then
+            curl -fsSL https://get.docker.com | sudo sh
+            sudo systemctl enable --now docker
+            sudo usermod -aG docker "${USER}" || true
+          else
+            curl -fsSL https://get.docker.com | sh
+            systemctl enable --now docker
+            usermod -aG docker "${USER}" || true
+          fi
+
+          docker version
+          REMOTE
+
       - name: Install docker-compose if missing
         run: |
           ssh -i "${SSH_KEY_FILE}" \
@@ -111,7 +142,7 @@ jobs:
               indent = match.group(1)
               return "\n".join(indent + line for line in adb_key.splitlines())
 
-          for compose_path in ("docker-compose.yml", "docker-compose.webrtc.yml"):
+          for compose_path in ("docker-compose.yml",):
               if not os.path.exists(compose_path):
                   continue
               with open(compose_path, "r", encoding="utf-8") as fh:
@@ -131,32 +162,7 @@ jobs:
             ./ \
             "${SSH_USER}@${SSH_IP}:${SSH_PATH}/"
 
-      - name: Build Docker images for sub-directories
-        run: |
-          IMAGE_PREFIX="$(basename "${SSH_PATH}")"
-          for dir in frontend apkbridge bridge-webrtc; do
-            ssh -i "${SSH_KEY_FILE}" \
-              -o StrictHostKeyChecking="${SSH_STRICT}" \
-              -o BatchMode=yes \
-              "${SSH_USER}@${SSH_IP}" \
-              TARGET="${SSH_PATH}/${dir}" IMAGE_TAG="${IMAGE_PREFIX}-${dir}:latest" \
-              bash -l -s <<'REMOTE'
-          set -euo pipefail
-          if [ ! -d "${TARGET}" ]; then
-            echo "    [$(basename "${TARGET}")] Directory not found, skipping."
-            exit 0
-          fi
-          if [ ! -f "${TARGET}/Dockerfile" ]; then
-            echo "    [$(basename "${TARGET}")] No Dockerfile found, skipping."
-            exit 0
-          fi
-          echo "    [$(basename "${TARGET}")] Building Docker image ${IMAGE_TAG} ..."
-          docker build --no-cache -t "${IMAGE_TAG}" "${TARGET}"
-          echo "    [$(basename "${TARGET}")] Build complete."
-          REMOTE
-          done
-
-      - name: Build docker compose stacks
+      - name: Build full docker compose stack
         run: |
           ssh -i "${SSH_KEY_FILE}" \
             -o StrictHostKeyChecking="${SSH_STRICT}" \
@@ -167,14 +173,14 @@ jobs:
           set -euo pipefail
           cd "${COMPOSE_DIR}"
           if docker compose version > /dev/null 2>&1; then
-            docker compose -f docker-compose.yml -f docker-compose.webrtc.yml build
+            docker compose build --no-cache
           else
-            docker-compose -f docker-compose.yml -f docker-compose.webrtc.yml build
+            docker-compose build --no-cache
           fi
           echo "    docker compose builds complete."
           REMOTE
 
-      - name: Deploy docker compose stacks
+      - name: Launch full docker compose stack
         run: |
           ssh -i "${SSH_KEY_FILE}" \
             -o StrictHostKeyChecking="${SSH_STRICT}" \
@@ -185,11 +191,28 @@ jobs:
           set -euo pipefail
           cd "${COMPOSE_DIR}"
           if docker compose version > /dev/null 2>&1; then
-            docker compose -f docker-compose.yml -f docker-compose.webrtc.yml up -d --remove-orphans
+            docker compose up -d --remove-orphans
           else
-            docker-compose -f docker-compose.yml -f docker-compose.webrtc.yml up -d --remove-orphans
+            docker-compose up -d --remove-orphans
           fi
           echo "    docker compose deploy complete."
+          REMOTE
+
+      - name: Verify deployed services
+        run: |
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            COMPOSE_DIR="${SSH_PATH}" \
+            bash -l -s <<'REMOTE'
+          set -euo pipefail
+          cd "${COMPOSE_DIR}"
+          if docker compose version > /dev/null 2>&1; then
+            docker compose ps
+          else
+            docker-compose ps
+          fi
           REMOTE
 
       - name: Clean up SSH key

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { Emulator } from "android-emulator-webrtc/emulator";
 
 const EMULATOR_ASPECT = 1080 / 1920;
+const RAW_FRAME_URL = "/api/frame";
 
 async function parseJsonResponse(resp, label) {
   const text = await resp.text();
@@ -445,6 +446,8 @@ function App() {
   const [streamMode, setStreamMode] = useState("webrtc");
   const [webrtcNotice, setWebrtcNotice] = useState("");
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
+  const [deviceInfo, setDeviceInfo] = useState(null);
+  const [framePreviewTick, setFramePreviewTick] = useState(0);
 
   const handleWebrtcMessage = useCallback((nextMessage) => {
     setMessage(nextMessage);
@@ -555,6 +558,37 @@ function App() {
       }
     }
     checkHealth();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDeviceInfo() {
+      try {
+        const info = await parseJsonResponse(await fetch("/api/device-info"), "/api/device-info");
+        if (!cancelled) {
+          setDeviceInfo(info);
+        }
+      } catch {
+        if (!cancelled) {
+          setDeviceInfo(null);
+        }
+      }
+    }
+
+    loadDeviceInfo();
+    const id = setInterval(loadDeviceInfo, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setFramePreviewTick(Date.now());
+    }, 2000);
+    return () => clearInterval(id);
   }, []);
 
   const stateColor = (state) =>
@@ -709,20 +743,24 @@ function App() {
   }
 
   const layout = useMemo(() => {
+    const deviceAspect =
+      deviceInfo?.screen?.width && deviceInfo?.screen?.height
+        ? deviceInfo.screen.width / deviceInfo.screen.height
+        : EMULATOR_ASPECT;
     const leftPanel = Math.max(220, Math.round((viewport.width * leftPanePercent) / 100));
     const availableHeight = Math.max(240, viewport.height - 48);
     const availableWidth = Math.max(180, leftPanel - 32);
 
     let height = availableHeight;
-    let width = Math.round(height * EMULATOR_ASPECT);
+    let width = Math.round(height * deviceAspect);
 
     if (width > availableWidth) {
       width = availableWidth;
-      height = Math.round(width / EMULATOR_ASPECT);
+      height = Math.round(width / deviceAspect);
     }
 
     return { width, height };
-  }, [viewport, leftPanePercent]);
+  }, [deviceInfo, viewport, leftPanePercent]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
@@ -886,6 +924,50 @@ function App() {
               {webrtcNotice}
             </div>
           )}
+
+          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+            <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Display diagnostics</div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+              <div style={{ flex: "1 1 220px", minWidth: 220 }}>
+                <div style={{ fontSize: 12, color: "#d7dfed", marginBottom: 6 }}>
+                  Raw ADB frame endpoint: <a href={RAW_FRAME_URL} target="_blank" rel="noreferrer">{RAW_FRAME_URL}</a>
+                </div>
+                <div style={{ fontSize: 12, color: "#a8b3c7", lineHeight: 1.6 }}>
+                  <div>
+                    Emulator screen:{" "}
+                    {deviceInfo?.screen?.width && deviceInfo?.screen?.height
+                      ? `${deviceInfo.screen.width}x${deviceInfo.screen.height}`
+                      : "unavailable"}
+                  </div>
+                  <div>
+                    WebRTC frame:{" "}
+                    {streamMode === "webrtc"
+                      ? webrtcNotice || "waiting for session status"
+                      : "switch to Custom WebRTC to compare"}
+                  </div>
+                  <div>
+                    Tip: if the preview below is visible but WebRTC stays black, the bug is in the bridge/render path.
+                  </div>
+                </div>
+              </div>
+              <div style={{ width: 160, flexShrink: 0 }}>
+                <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Raw screencap preview</div>
+                <img
+                  src={`${RAW_FRAME_URL}?t=${framePreviewTick}`}
+                  alt="Raw emulator frame"
+                  style={{
+                    width: "100%",
+                    aspectRatio: `${deviceInfo?.screen?.width || 1080} / ${deviceInfo?.screen?.height || 1920}`,
+                    objectFit: "contain",
+                    display: "block",
+                    background: "#000",
+                    border: "1px solid #2b313d",
+                    borderRadius: 10,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
 
           <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>

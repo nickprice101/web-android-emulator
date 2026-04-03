@@ -42,12 +42,20 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <rect x="560" y="318" width="842" height="104" rx="12" fill="#111823" stroke="#2B313D"/>
   <text x="578" y="344" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Last message</text>
   <text x="578" y="376" fill="#D7DFED" font-family="Consolas, monospace" font-size="14">Custom WebRTC session established. Tap and swipe controls are active.</text>
-  <rect x="560" y="440" width="842" height="388" rx="12" fill="#111823" stroke="#2B313D"/>
-  <text x="578" y="466" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Android system logs (live, last 100)</text>
-  <rect x="578" y="488" width="806" height="292" rx="10" fill="#0F1218" stroke="#2B313D"/>
-  <text x="596" y="520" fill="#D7DFED" font-family="Consolas, monospace" font-size="14">04-03 19:36:10.401 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN ...}</text>
-  <text x="596" y="546" fill="#D7DFED" font-family="Consolas, monospace" font-size="14">04-03 19:36:11.218 I chromium: [INFO:webrtc] connected via custom bridge</text>
-  <text x="596" y="572" fill="#D7DFED" font-family="Consolas, monospace" font-size="14">04-03 19:36:12.007 I InputDispatcher: Delivering pointer event to foreground app</text>
+  <rect x="560" y="440" width="842" height="158" rx="12" fill="#111823" stroke="#2B313D"/>
+  <text x="578" y="466" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Display diagnostics</text>
+  <text x="578" y="494" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">Raw ADB frame endpoint: /api/frame</text>
+  <text x="578" y="520" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Emulator screen: 1080x1920</text>
+  <text x="578" y="544" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC frame: Peer connection established. Waiting for first visible frame.</text>
+  <text x="578" y="568" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Tip: if the preview is visible but WebRTC stays black, the bug is in the bridge/render path.</text>
+  <rect x="1220" y="472" width="146" height="102" rx="10" fill="url(#screen)" stroke="#2B313D"/>
+  <text x="1228" y="590" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="11">Raw screencap preview</text>
+  <rect x="560" y="616" width="842" height="212" rx="12" fill="#111823" stroke="#2B313D"/>
+  <text x="578" y="642" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Android system logs (live, last 100)</text>
+  <rect x="578" y="664" width="806" height="116" rx="10" fill="#0F1218" stroke="#2B313D"/>
+  <text x="596" y="696" fill="#D7DFED" font-family="Consolas, monospace" font-size="14">04-03 19:36:10.401 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN ...}</text>
+  <text x="596" y="722" fill="#D7DFED" font-family="Consolas, monospace" font-size="14">04-03 19:36:11.218 I chromium: [INFO:webrtc] connected via custom bridge</text>
+  <text x="596" y="748" fill="#D7DFED" font-family="Consolas, monospace" font-size="14">04-03 19:36:12.007 I InputDispatcher: Delivering pointer event to foreground app</text>
   <defs>
     <linearGradient id="screen" x1="42" y1="146" x2="490" y2="834" gradientUnits="userSpaceOnUse">
       <stop stop-color="#2B3951"/>

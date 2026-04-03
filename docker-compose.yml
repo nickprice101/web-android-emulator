@@ -3,7 +3,9 @@ version: "3.8"
 services:
   emulator:
     container_name: google-emu-emulator
-    image: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:30.1.2
+    build:
+      context: ./emulator
+    image: google-emu-emulator:latest
     privileged: true
     devices:
       - /dev/kvm:/dev/kvm
@@ -12,8 +14,13 @@ services:
       ADBKEY: |
         PLACEHOLDER_ADB_KEY
       EMULATOR_PARAMS: "-grpc 8554 -no-snapshot-load -wipe-data -no-audio -partition-size 4096 -dns-server 1.1.1.1,8.8.8.8"
-      TURN: >-
-        {"iceServers":[{"urls":["turns:turn.corsicanescape.com:443?transport=tcp"],"username":"emuuser","credential":"PLACEHOLDER_TURN_KEY"}]}
+      TURN_HOST: "turn.corsicanescape.com"
+      TURN_PORT: "443"
+      TURN_PROTOCOL: "tcp"
+      TURN_SCHEME: "turns"
+      TURN_SECRET: "PLACEHOLDER_TURN_KEY"
+      TURN_TTL: "86400"
+      TURN_USERNAME_SUFFIX: "emuuser"
     expose:
       - "8554"
       - "5555"

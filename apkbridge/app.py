@@ -1,9 +1,10 @@
 import os
 import subprocess
 import tempfile
+import shlex
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 
 app = Flask(__name__)
 
@@ -36,6 +37,23 @@ def adb(*args):
     return out or err or "ok"
 
 
+def run_binary(cmd, timeout=30):
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=timeout)
+        return proc.returncode, proc.stdout, proc.stderr
+    except FileNotFoundError as e:
+        return 127, b"", str(e).encode("utf-8", errors="replace")
+    except subprocess.TimeoutExpired:
+        return 1, b"", b"ADB Timeout"
+
+
+def adb_binary(*args, timeout=30):
+    rc, out, err = run_binary(["adb", "-s", ADB_TARGET, *args], timeout=timeout)
+    if rc != 0:
+        raise RuntimeError((err or out or b"adb command failed").decode("utf-8", errors="replace"))
+    return out
+
+
 def safe_workspace_path(rel):
     # Reject absolute paths and directory-traversal components before resolving
     parts = Path(rel).parts
@@ -59,6 +77,93 @@ def wake_and_unlock():
 def launch_package(pkg):
     wake_and_unlock()
     return adb("shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1")
+
+
+def get_screen_size():
+    output = adb("shell", "wm", "size")
+    for line in output.splitlines():
+        cleaned = line.strip()
+        if ":" in cleaned:
+            cleaned = cleaned.split(":", 1)[1].strip()
+        if "x" not in cleaned:
+            continue
+        left, right = cleaned.lower().split("x", 1)
+        if left.isdigit() and right.isdigit():
+            return {"width": int(left), "height": int(right)}
+    raise RuntimeError("Unable to determine emulator screen size")
+
+
+def clamp_coordinate(value, maximum):
+    return max(0, min(int(round(float(value))), max(0, maximum - 1)))
+
+
+def shell_quote_text(value):
+    return shlex.quote(str(value))
+
+
+def execute_input_event(payload):
+    event_type = str(payload.get("type", "")).strip().lower()
+    if not event_type:
+        raise ValueError("Input payload requires a type")
+
+    if event_type == "key":
+        key_name = str(payload.get("key", "")).strip()
+        key_code = KEY_NAME_MAP.get(key_name)
+        if not key_code:
+            raise ValueError(f"Unsupported key '{key_name}'")
+        adb("shell", "input", "keyevent", key_code)
+        return {"message": f"Sent key {key_name}", "adb": ["shell", "input", "keyevent", key_code]}
+
+    if event_type == "text":
+        text = str(payload.get("text", ""))
+        if not text:
+            raise ValueError("Input text event requires non-empty text")
+        adb("shell", "sh", "-lc", f"input text {shell_quote_text(text)}")
+        return {"message": "Sent text input", "adb": ["shell", "input", "text", text]}
+
+    if event_type in {"tap", "swipe"}:
+        size = get_screen_size()
+        if event_type == "tap":
+            x = clamp_coordinate(payload.get("x"), size["width"])
+            y = clamp_coordinate(payload.get("y"), size["height"])
+            adb("shell", "input", "tap", str(x), str(y))
+            return {
+                "message": f"Tapped {x},{y}",
+                "adb": ["shell", "input", "tap", str(x), str(y)],
+                "screen": size,
+            }
+
+        start_x = clamp_coordinate(payload.get("startX"), size["width"])
+        start_y = clamp_coordinate(payload.get("startY"), size["height"])
+        end_x = clamp_coordinate(payload.get("endX"), size["width"])
+        end_y = clamp_coordinate(payload.get("endY"), size["height"])
+        duration_ms = max(50, min(5000, int(payload.get("durationMs", 250))))
+        adb(
+            "shell",
+            "input",
+            "swipe",
+            str(start_x),
+            str(start_y),
+            str(end_x),
+            str(end_y),
+            str(duration_ms),
+        )
+        return {
+            "message": f"Swiped {start_x},{start_y} -> {end_x},{end_y}",
+            "adb": [
+                "shell",
+                "input",
+                "swipe",
+                str(start_x),
+                str(start_y),
+                str(end_x),
+                str(end_y),
+                str(duration_ms),
+            ],
+            "screen": size,
+        }
+
+    raise ValueError(f"Unsupported input type '{event_type}'")
 
 
 def detect_package_name(apk_path):
@@ -243,15 +348,43 @@ def wake():
 @app.post("/input-key")
 def input_key():
     data = request.get_json(force=True, silent=True) or {}
-    key_name = data.get("key", "").strip()
-    key_code = KEY_NAME_MAP.get(key_name)
-    if not key_code:
-        return jsonify({"error": f"Unsupported key '{key_name}'"}), 400
     try:
-        out = adb("shell", "input", "keyevent", key_code)
-        return jsonify({"ok": True, "message": out or f"Sent {key_name}"})
+        result = execute_input_event({"type": "key", **data})
+        return jsonify({"ok": True, **result})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.post("/input-event")
+def input_event():
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        result = execute_input_event(data)
+        return jsonify({"ok": True, **result})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/frame")
+def frame():
+    try:
+        png = adb_binary("exec-out", "screencap", "-p", timeout=20)
+        return Response(png, mimetype="image/png")
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/device-info")
+def device_info():
+    try:
+        size = get_screen_size()
+        return jsonify({"ok": True, "screen": size, "target": ADB_TARGET})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.post("/reboot")

@@ -83,7 +83,9 @@ services:
     image: google-emu-bridge-webrtc:latest
     environment:
       PORT: "8090"
-      CAPTURE_MODE: "stub"
+      CAPTURE_MODE: "adb-screencap"
+      CAPTURE_FPS: "6"
+      APKBRIDGE_BASE_URL: "http://apkbridge:5000"
       TURN_HOST: "turn.corsicanescape.com"
       TURN_PORT: "443"
       TURN_PROTOCOL: "tcp"
@@ -101,6 +103,7 @@ services:
       start_period: 20s
     depends_on:
       - emulator
+      - apkbridge
     restart: unless-stopped
     dns:
       - 1.1.1.1

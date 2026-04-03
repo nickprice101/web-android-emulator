@@ -5,6 +5,10 @@ Based on a self-hosted dockerised solution using the depreciated (Jan 2026) Goog
 
 NOTE: PNG stream is default, to enable WebRTC use the option in the header menu.
 
+The emulator container generates short-lived coturn REST credentials at startup from the shared `TURN_KEY` secret. The browser receives an ephemeral TURN username/password pair, not the long-lived shared secret.
+
+Those credentials are minted when the emulator container starts, so `TURN_TTL` should be longer than your expected emulator uptime between restarts.
+
 ## Internet access defaults
 
 The Docker compose config pins public DNS resolvers (`1.1.1.1`, `8.8.8.8`) on all services and starts the emulator with an explicit `-dns-server` list. This keeps both the Linux containers and the Android guest able to resolve and reach external hosts for realistic app testing.
@@ -24,6 +28,8 @@ The Docker compose config pins public DNS resolvers (`1.1.1.1`, `8.8.8.8`) on al
 ### Cloudflare
 * emu.yourdomain.com published through Cloudflare Tunnel
 * turn.yourdomain.com as a normal DNS-only A record
+
+This repository is configured for TURN-over-TLS on `443/tcp` with coturn REST auth (`use-auth-secret`) and TCP relay ports on `49160-49200/tcp`.
 
 This matches Google’s own WebRTC sample expectations: a webserver, a gRPC web proxy, and either open WebRTC UDP ports or a configured TURN service.
 
@@ -91,6 +97,13 @@ max-port=49200
 simple-log
 no-cli
 ```
+
+The stack's `TURN_KEY` deployment secret must exactly match coturn's `static-auth-secret` value.
+
+Router port forwarding is only one half of the path. If the Pi runs its own firewall (`ufw`, `iptables`, `nftables`, etc.), allow these inbound ports there too:
+
+* `443/tcp`
+* `49160-49200/tcp`
 
 Replace:
 

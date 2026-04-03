@@ -1,6 +1,9 @@
 import { createHmac, randomUUID } from "node:crypto";
 import http from "node:http";
 import { URL } from "node:url";
+import wrtc from "@roamhq/wrtc";
+
+const { RTCPeerConnection, RTCSessionDescription } = wrtc;
 
 const port = Number.parseInt(process.env.PORT || "8090", 10);
 const captureMode = process.env.CAPTURE_MODE || "stub";
@@ -13,6 +16,7 @@ const turnTtl = Number.parseInt(process.env.TURN_TTL || "86400", 10);
 const turnUsernameSuffix = process.env.TURN_USERNAME_SUFFIX || "emuuser";
 
 const sessions = new Map();
+const answerTimeoutMs = Number.parseInt(process.env.WEBRTC_ANSWER_TIMEOUT_MS || "10000", 10);
 
 function sendJson(res, status, payload) {
   res.writeHead(status, {
@@ -78,6 +82,10 @@ function sessionPayload(session) {
     state: session.state,
     mode: session.mode,
     message: session.message,
+    hasAnswer: Boolean(session.answer),
+    peerConnectionState: session.peerConnectionState || "new",
+    iceConnectionState: session.iceConnectionState || "new",
+    iceGatheringState: session.iceGatheringState || "new",
     eventStreamUrl: `/bridge/api/session/${session.id}/events`,
     deleteUrl: `/bridge/api/session/${session.id}`,
     inputUrl: `/bridge/api/session/${session.id}/input`,
@@ -89,17 +97,183 @@ function createSession(offer) {
   const session = {
     id,
     createdAt: new Date().toISOString(),
-    state: captureMode === "stub" ? "awaiting-capture-pipeline" : "initializing",
+    state: "initializing",
     mode: captureMode,
     message:
       captureMode === "stub"
-        ? "Custom bridge signaling is live, but the media capture pipeline is not implemented yet. Add a capture source before expecting browser video."
-        : "Session created.",
+        ? "Negotiating WebRTC session. The bridge can answer SDP, but no media capture pipeline is attached yet."
+        : "Negotiating WebRTC session.",
     offer,
+    answer: null,
+    peer: null,
+    peerConnectionState: "new",
+    iceConnectionState: "new",
+    iceGatheringState: "new",
     listeners: new Set(),
   };
   sessions.set(id, session);
   return session;
+}
+
+function broadcastSessionStatus(session) {
+  const payload = sessionPayload(session);
+  for (const listener of session.listeners) {
+    sendSse(listener, "status", payload);
+  }
+}
+
+function setSessionState(session, state, message) {
+  session.state = state;
+  if (message) {
+    session.message = message;
+  }
+  broadcastSessionStatus(session);
+}
+
+function attachPeerObservers(session) {
+  const { peer } = session;
+  if (!peer) {
+    return;
+  }
+
+  peer.onicegatheringstatechange = () => {
+    session.iceGatheringState = peer.iceGatheringState || "unknown";
+    broadcastSessionStatus(session);
+  };
+
+  peer.oniceconnectionstatechange = () => {
+    session.iceConnectionState = peer.iceConnectionState || "unknown";
+    broadcastSessionStatus(session);
+  };
+
+  peer.onconnectionstatechange = () => {
+    session.peerConnectionState = peer.connectionState || "unknown";
+
+    let nextState = session.state;
+    let nextMessage = session.message;
+
+    switch (peer.connectionState) {
+      case "connecting":
+        nextState = "connecting";
+        nextMessage = "WebRTC answer applied. Waiting for the peer connection to finish connecting.";
+        break;
+      case "connected":
+        nextState = captureMode === "stub" ? "connected-no-media" : "connected";
+        nextMessage =
+          captureMode === "stub"
+            ? "Peer connection established. Media is still absent until the capture pipeline is implemented."
+            : "Peer connection established.";
+        break;
+      case "failed":
+        nextState = "failed";
+        nextMessage = "Peer connection failed after SDP negotiation.";
+        break;
+      case "disconnected":
+        nextState = "disconnected";
+        nextMessage = "Peer connection disconnected.";
+        break;
+      case "closed":
+        nextState = "closed";
+        nextMessage = "Peer connection closed.";
+        break;
+      default:
+        break;
+    }
+
+    setSessionState(session, nextState, nextMessage);
+  };
+}
+
+function waitForIceGatheringComplete(peer, timeoutMs = answerTimeoutMs) {
+  if (peer.iceGatheringState === "complete") {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ICE gathering after ${timeoutMs}ms.`));
+    }, timeoutMs);
+
+    function cleanup() {
+      clearTimeout(timeout);
+      peer.removeEventListener("icegatheringstatechange", onChange);
+    }
+
+    function onChange() {
+      if (peer.iceGatheringState === "complete") {
+        cleanup();
+        resolve();
+      }
+    }
+
+    peer.addEventListener("icegatheringstatechange", onChange);
+  });
+}
+
+async function buildAnswer(session) {
+  const peer = new RTCPeerConnection({
+    iceServers: buildIceServers(),
+    iceTransportPolicy: "all",
+  });
+
+  session.peer = peer;
+  attachPeerObservers(session);
+
+  setSessionState(
+    session,
+    "applying-offer",
+    "Applying browser SDP offer on the bridge peer connection."
+  );
+
+  await peer.setRemoteDescription(new RTCSessionDescription(session.offer));
+
+  setSessionState(
+    session,
+    "creating-answer",
+    captureMode === "stub"
+      ? "Creating SDP answer without media tracks. Milestone 2 will attach a video source."
+      : "Creating SDP answer."
+  );
+
+  const answer = await peer.createAnswer();
+  await peer.setLocalDescription(answer);
+  await waitForIceGatheringComplete(peer);
+
+  session.answer = {
+    type: peer.localDescription?.type || answer.type,
+    sdp: peer.localDescription?.sdp || answer.sdp,
+  };
+
+  setSessionState(
+    session,
+    captureMode === "stub" ? "answered-no-media" : "answered",
+    captureMode === "stub"
+      ? "SDP answer created successfully. The session is live, but no media capture pipeline is attached yet."
+      : "SDP answer created successfully."
+  );
+
+  return session.answer;
+}
+
+function closeSession(session, state = "closed", message = "Session closed.") {
+  if (!session) {
+    return;
+  }
+
+  if (session.peer) {
+    session.peer.onconnectionstatechange = null;
+    session.peer.oniceconnectionstatechange = null;
+    session.peer.onicegatheringstatechange = null;
+    session.peer.close();
+    session.peer = null;
+  }
+
+  session.peerConnectionState = "closed";
+  session.iceConnectionState = "closed";
+  session.iceGatheringState = "complete";
+  session.state = state;
+  session.message = message;
 }
 
 function handleOptions(res) {
@@ -158,7 +332,8 @@ const server = http.createServer(async (req, res) => {
       },
       notes: [
         "This bridge uses HTTPS requests plus optional Server-Sent Events for corporate-firewall-friendly signaling.",
-        "Media capture is scaffolded but not implemented in this fork yet.",
+        "The bridge now creates a real SDP answer and keeps a live RTCPeerConnection per browser session.",
+        "Media capture is still scaffolded, so milestone 1 can validate signaling before milestone 2 adds video.",
       ],
     });
     return;
@@ -173,20 +348,12 @@ const server = http.createServer(async (req, res) => {
       }
 
       const session = createSession({ type: body.type, sdp: body.sdp });
-      const payload = {
-        ok: false,
+      const answer = await buildAnswer(session);
+      sendJson(res, 201, {
+        ok: true,
         ...sessionPayload(session),
-        error:
-          captureMode === "stub"
-            ? "Bridge session created, but answering SDP is disabled until a media capture pipeline is implemented."
-            : "Bridge session created.",
-      };
-
-      for (const listener of session.listeners) {
-        sendSse(listener, "status", sessionPayload(session));
-      }
-
-      sendJson(res, captureMode === "stub" ? 501 : 201, payload);
+        answer,
+      });
     } catch (error) {
       sendJson(res, 400, { ok: false, error: error.message });
     }
@@ -239,6 +406,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "DELETE" && !action) {
+      closeSession(session, "closed", "Session deleted by client.");
       for (const listener of session.listeners) {
         sendSse(listener, "closed", { id: sessionId, state: "closed" });
         listener.end();

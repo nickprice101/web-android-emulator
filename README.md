@@ -27,7 +27,9 @@ The Docker compose config pins public DNS resolvers (`1.1.1.1`, `8.8.8.8`) on al
 
 This matches Google’s own WebRTC sample expectations: a webserver, a gRPC web proxy, and either open WebRTC UDP ports or a configured TURN service.
 
-There is a workspace action script (deploy.yml) to support deployment. It needs the appropriate SECRETS (ADB, custom TURN secret, and server SSH credentials) to be set up (see the script to better understand).
+There is a workspace action script (deploy.yml) to support deployment. It needs the appropriate secrets (ADB, the Coturn `static-auth-secret`, and server SSH credentials) to be set up.
+
+For TURN, set `TURN_KEY` to the same value as Coturn's `static-auth-secret`. The deploy workflow converts that shared secret into the timed TURN username/password pair required by `use-auth-secret`. `TURN_SECRET` is also accepted as an optional alias if you ever want to rename the secret later.
 
 ## TURN server
 

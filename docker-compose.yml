@@ -13,7 +13,7 @@ services:
         PLACEHOLDER_ADB_KEY
       EMULATOR_PARAMS: "-grpc 8554 -no-snapshot-load -wipe-data -no-audio -partition-size 4096 -dns-server 1.1.1.1,8.8.8.8"
       TURN: >-
-        {"iceServers":[{"urls":["turns:turn.corsicanescape.com:443?transport=tcp"],"username":"emuuser","credential":"PLACEHOLDER_TURN_KEY"}]}
+        {"iceServers":[{"urls":["turns:turn.corsicanescape.com:443?transport=tcp"],"username":"PLACEHOLDER_TURN_USERNAME","credential":"PLACEHOLDER_TURN_CREDENTIAL"}]}
     expose:
       - "8554"
       - "5555"

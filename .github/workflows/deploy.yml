@@ -93,17 +93,26 @@ jobs:
         env:
           ADB_KEY: ${{ secrets.ADB_KEY }}
           TURN_KEY: ${{ secrets.TURN_KEY }}
+          TURN_SECRET: ${{ secrets.TURN_SECRET }}
         run: |
           python3 - <<'PYEOF'
-          import os, re
+          import base64, hashlib, hmac, os, re, time
 
           adb_key = os.environ.get("ADB_KEY", "").strip()
-          turn_key = os.environ.get("TURN_KEY", "").strip()
+          turn_secret = os.environ.get("TURN_KEY", "").strip() or os.environ.get("TURN_SECRET", "").strip()
 
           if not adb_key:
               raise SystemExit("Error: ADB_KEY secret is not set")
-          if not turn_key:
-              raise SystemExit("Error: TURN_KEY secret is not set")
+          if not turn_secret:
+              raise SystemExit("Error: TURN_KEY (or optional TURN_SECRET alias) is not set")
+
+          # Coturn use-auth-secret expects a REST-style timed username and an HMAC-SHA1 credential.
+          # We give the deployed stack a long-lived token so it remains valid between deploys.
+          expiry = int(time.time()) + (365 * 24 * 60 * 60)
+          turn_username = f"{expiry}:emu"
+          turn_credential = base64.b64encode(
+              hmac.new(turn_secret.encode("utf-8"), turn_username.encode("utf-8"), hashlib.sha1).digest()
+          ).decode("ascii")
 
           with open("docker-compose.yml", "r") as fh:
               content = fh.read()
@@ -115,7 +124,8 @@ jobs:
               return "\n".join(indent + line for line in adb_key.splitlines())
 
           content = re.sub(r"^( *)PLACEHOLDER_ADB_KEY$", replace_adb_key, content, flags=re.MULTILINE)
-          content = content.replace("PLACEHOLDER_TURN_KEY", turn_key)
+          content = content.replace("PLACEHOLDER_TURN_USERNAME", turn_username)
+          content = content.replace("PLACEHOLDER_TURN_CREDENTIAL", turn_credential)
 
           with open("docker-compose.yml", "w") as fh:
               fh.write(content)

@@ -446,6 +446,11 @@ function App() {
   const [webrtcNotice, setWebrtcNotice] = useState("");
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
 
+  const handleWebrtcMessage = useCallback((nextMessage) => {
+    setMessage(nextMessage);
+    setWebrtcNotice(nextMessage);
+  }, []);
+
   useEffect(() => {
     const onResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
     window.addEventListener("resize", onResize);
@@ -806,10 +811,7 @@ function App() {
                 height={layout.height}
                 onStateChange={setEmuState}
                 inputRef={webrtcInputRef}
-                onMessage={(nextMessage) => {
-                  setMessage(nextMessage);
-                  setWebrtcNotice(nextMessage);
-                }}
+                onMessage={handleWebrtcMessage}
               />
             )}
           </div>

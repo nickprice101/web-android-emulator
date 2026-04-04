@@ -422,6 +422,128 @@ function parseCandidateDiagnostics(sdp) {
   return summary;
 }
 
+function normalizeCandidateLine(candidateLine) {
+  if (!candidateLine) {
+    return null;
+  }
+
+  return candidateLine.startsWith("a=") ? candidateLine : `a=${candidateLine}`;
+}
+
+function buildAnswerSdpWithGatheredCandidates(sdp, gatheredCandidates) {
+  if (!sdp || !Array.isArray(gatheredCandidates) || gatheredCandidates.length === 0) {
+    return sdp;
+  }
+
+  const lines = String(sdp).replace(/\r\n/g, "\n").split("\n");
+  const mediaSections = [];
+  let current = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+
+    if (line.startsWith("m=")) {
+      current = {
+        index: mediaSections.length,
+        start: index,
+        end: lines.length,
+        mid: null,
+        candidateSet: new Set(),
+        hasEndOfCandidates: false,
+      };
+      mediaSections.push(current);
+      if (mediaSections.length > 1) {
+        mediaSections[mediaSections.length - 2].end = index;
+      }
+      continue;
+    }
+
+    if (!current) {
+      continue;
+    }
+
+    if (line.startsWith("a=mid:")) {
+      current.mid = line.slice("a=mid:".length);
+      continue;
+    }
+
+    if (line.startsWith("a=candidate:")) {
+      current.candidateSet.add(line);
+      continue;
+    }
+
+    if (line === "a=end-of-candidates") {
+      current.hasEndOfCandidates = true;
+    }
+  }
+
+  if (mediaSections.length === 0) {
+    return sdp;
+  }
+
+  const pendingBySection = mediaSections.map(() => ({
+    candidates: [],
+    sawEndOfCandidates: false,
+  }));
+
+  for (const gathered of gatheredCandidates) {
+    if (!gathered) {
+      continue;
+    }
+
+    const section =
+      (gathered.sdpMid != null ? mediaSections.find((entry) => entry.mid === gathered.sdpMid) : null) ||
+      (Number.isInteger(gathered.sdpMLineIndex) ? mediaSections[gathered.sdpMLineIndex] : null) ||
+      mediaSections[0];
+
+    if (!section) {
+      continue;
+    }
+
+    const pending = pendingBySection[section.index];
+    const candidateLine = normalizeCandidateLine(gathered.candidate);
+    if (candidateLine && !section.candidateSet.has(candidateLine) && !pending.candidates.includes(candidateLine)) {
+      pending.candidates.push(candidateLine);
+    }
+
+    if (gathered.completed) {
+      pending.sawEndOfCandidates = true;
+    }
+  }
+
+  const output = [];
+  let cursor = 0;
+
+  for (const section of mediaSections) {
+    const pending = pendingBySection[section.index];
+    const sectionLines = lines.slice(section.start, section.end);
+    const candidateIndexes = sectionLines
+      .map((line, index) => ({ line: line.trim(), index }))
+      .filter((entry) => entry.line.startsWith("a=candidate:"))
+      .map((entry) => entry.index);
+    const insertionIndex =
+      candidateIndexes.length > 0 ? candidateIndexes[candidateIndexes.length - 1] + 1 : sectionLines.length;
+
+    output.push(...lines.slice(cursor, section.start));
+    cursor = section.end;
+
+    if (pending.candidates.length === 0 && (!pending.sawEndOfCandidates || section.hasEndOfCandidates)) {
+      output.push(...sectionLines);
+      continue;
+    }
+
+    output.push(...sectionLines.slice(0, insertionIndex));
+    output.push(...pending.candidates);
+    output.push(...sectionLines.slice(insertionIndex));
+    if (pending.sawEndOfCandidates && !section.hasEndOfCandidates) {
+      output.push("a=end-of-candidates");
+    }
+  }
+
+  output.push(...lines.slice(cursor));
+  return `${output.join("\r\n").replace(/\r\n+$/, "")}\r\n`;
+}
+
 function toServiceUrl(path) {
   return new URL(path, apkbridgeBaseUrl).toString();
 }
@@ -738,6 +860,7 @@ function createSession(offer) {
     logs: [],
     listeners: new Set(),
     cleanupTimer: null,
+    localIceCandidates: [],
     turnCandidateErrors: [],
     turnConnectivity: null,
     answerAttempts: [],
@@ -809,6 +932,27 @@ function attachPeerObservers(session) {
   if (!peer) {
     return;
   }
+
+  peer.onicecandidate = (event) => {
+    if (event.candidate?.candidate) {
+      session.localIceCandidates.push({
+        at: nowIso(),
+        candidate: event.candidate.candidate,
+        sdpMid: event.candidate.sdpMid ?? null,
+        sdpMLineIndex: Number.isInteger(event.candidate.sdpMLineIndex) ? event.candidate.sdpMLineIndex : null,
+        completed: false,
+      });
+      return;
+    }
+
+    session.localIceCandidates.push({
+      at: nowIso(),
+      candidate: null,
+      sdpMid: null,
+      sdpMLineIndex: null,
+      completed: true,
+    });
+  };
 
   peer.onicecandidateerror = (event) => {
     const entry = {
@@ -1166,6 +1310,7 @@ function translateInputPayload(session, payload) {
 async function buildAnswer(session) {
   async function attemptAnswer(iceTransportPolicy) {
     const priorErrorCount = session.turnCandidateErrors.length;
+    session.localIceCandidates = [];
     session.turnConnectivity = preferRelayTransport ? await probeTurnConnectivity() : null;
     if (session.turnConnectivity) {
       recordSessionLog(session, "info", "TURN connectivity preflight", session.turnConnectivity);
@@ -1213,7 +1358,7 @@ async function buildAnswer(session) {
 
     const localAnswer = {
       type: peer.localDescription?.type || answer.type,
-      sdp: peer.localDescription?.sdp || answer.sdp,
+      sdp: buildAnswerSdpWithGatheredCandidates(peer.localDescription?.sdp || answer.sdp, session.localIceCandidates),
     };
     const diagnostics = parseSdpDiagnostics(localAnswer.sdp);
     if (diagnostics) {

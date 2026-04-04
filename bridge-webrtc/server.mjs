@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { createHmac, randomUUID } from "node:crypto";
+import dns from "node:dns/promises";
 import http from "node:http";
+import net from "node:net";
+import tls from "node:tls";
 import { URL } from "node:url";
 import wrtc from "@roamhq/wrtc";
 
@@ -27,6 +30,7 @@ const turnUsernameSuffix = process.env.TURN_USERNAME_SUFFIX || "emuuser";
 const answerTimeoutMs = Number.parseInt(process.env.WEBRTC_ANSWER_TIMEOUT_MS || "10000", 10);
 const sessionIdleTimeoutMs = Number.parseInt(process.env.WEBRTC_SESSION_IDLE_TIMEOUT_MS || "300000", 10);
 const sessionRetentionMs = Number.parseInt(process.env.WEBRTC_SESSION_RETENTION_MS || "30000", 10);
+const turnProbeTimeoutMs = Math.max(1000, Number.parseInt(process.env.TURN_PROBE_TIMEOUT_MS || "4000", 10));
 const placeholderSecretPatterns = [/^PLACEHOLDER/i, /^REPLACE_ME/i, /^CHANGEME$/i];
 const hasConfiguredTurnSecret = Boolean(
   turnKey &&
@@ -130,6 +134,183 @@ function buildTurnWarnings() {
 }
 
 const turnWarnings = buildTurnWarnings();
+
+function probeErrorDetails(error) {
+  return {
+    code: error?.code || null,
+    message: error?.message || String(error),
+  };
+}
+
+async function probeTurnDns() {
+  try {
+    const records = await dns.lookup(turnHost, { all: true });
+    return {
+      ok: true,
+      addresses: records.map((record) => record.address),
+      family: records[0]?.family || null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      ...probeErrorDetails(error),
+    };
+  }
+}
+
+function connectTcp(host, portNumber) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({
+      host,
+      port: portNumber,
+      timeout: turnProbeTimeoutMs,
+    });
+
+    socket.once("connect", () => {
+      const details = {
+        ok: true,
+        localAddress: socket.localAddress || null,
+        localPort: socket.localPort || null,
+        remoteAddress: socket.remoteAddress || null,
+        remotePort: socket.remotePort || null,
+      };
+      socket.end();
+      resolve(details);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      reject(new Error(`Timed out after ${turnProbeTimeoutMs}ms`));
+    });
+    socket.once("error", (error) => {
+      socket.destroy();
+      reject(error);
+    });
+  });
+}
+
+async function probeTurnTcp() {
+  try {
+    return await connectTcp(turnHost, Number.parseInt(turnPort, 10) || 443);
+  } catch (error) {
+    return {
+      ok: false,
+      ...probeErrorDetails(error),
+    };
+  }
+}
+
+function handshakeTls(host, portNumber) {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect({
+      host,
+      port: portNumber,
+      servername: host,
+      timeout: turnProbeTimeoutMs,
+    });
+
+    socket.once("secureConnect", () => {
+      const certificate = socket.getPeerCertificate?.(true) || null;
+      const details = {
+        ok: socket.authorized,
+        authorized: socket.authorized,
+        authorizationError: socket.authorizationError || null,
+        protocol: socket.getProtocol?.() || null,
+        subject: certificate?.subject?.CN || null,
+        issuer: certificate?.issuer?.CN || null,
+      };
+      socket.end();
+      if (details.ok) {
+        resolve(details);
+        return;
+      }
+      reject(new Error(details.authorizationError || "TLS certificate was not authorized"));
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      reject(new Error(`Timed out after ${turnProbeTimeoutMs}ms`));
+    });
+    socket.once("error", (error) => {
+      socket.destroy();
+      reject(error);
+    });
+  });
+}
+
+async function probeTurnTls() {
+  if (turnScheme !== "turns") {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "TURN is not using TLS.",
+    };
+  }
+
+  try {
+    return await handshakeTls(turnHost, Number.parseInt(turnPort, 10) || 443);
+  } catch (error) {
+    return {
+      ok: false,
+      ...probeErrorDetails(error),
+    };
+  }
+}
+
+async function probeTurnConnectivity() {
+  if (!hasConfiguredTurnSecret) {
+    return null;
+  }
+
+  const dnsResult = await probeTurnDns();
+  const tcpResult = dnsResult.ok ? await probeTurnTcp() : null;
+  const tlsResult = dnsResult.ok && tcpResult?.ok ? await probeTurnTls() : null;
+
+  return {
+    at: nowIso(),
+    serverUrl: buildTurnServerUrl(),
+    dns: dnsResult,
+    tcp: tcpResult,
+    tls: tlsResult,
+  };
+}
+
+function summarizeTurnFailure(session, diagnostics) {
+  const candidateTypes = diagnostics?.candidateTypes || parseCandidateDiagnostics("");
+  const probe = session.turnConnectivity || null;
+  const recentErrors = (session.turnCandidateErrors || []).slice(-3);
+  const recentErrorText = recentErrors
+    .map((entry) => entry.errorText || entry.url || `ICE error ${entry.errorCode || "unknown"}`)
+    .join(" | ");
+
+  if (probe?.dns && !probe.dns.ok) {
+    return `DNS lookup failed for ${turnHost}: ${probe.dns.message}.`;
+  }
+
+  if (probe?.tcp && !probe.tcp.ok) {
+    return `TCP connect to ${turnHost}:${turnPort} failed: ${probe.tcp.message}.`;
+  }
+
+  if (probe?.tls && !probe.tls.ok) {
+    return `TLS handshake to ${turnHost}:${turnPort} failed: ${probe.tls.message}.`;
+  }
+
+  if (recentErrors.some((entry) => /host lookup/i.test(entry.errorText || ""))) {
+    return `TURN client reported a DNS or host lookup error after preflight. Recent ICE errors: ${recentErrorText}.`;
+  }
+
+  if (recentErrors.some((entry) => /tls|certificate|ssl/i.test(entry.errorText || ""))) {
+    return `TURN client reported a TLS failure after preflight. Recent ICE errors: ${recentErrorText}.`;
+  }
+
+  if (recentErrors.some((entry) => /create turn client socket/i.test(entry.errorText || ""))) {
+    return `TURN client socket setup failed after DNS/TCP${turnScheme === "turns" ? "/TLS" : ""} preflight passed. This usually points to TURN auth mismatch or blocked relay connectivity on 49160-49200/tcp.`;
+  }
+
+  if (probe?.dns?.ok && probe?.tcp?.ok && (probe?.tls?.ok || probe?.tls?.skipped) && (candidateTypes.relay ?? 0) === 0) {
+    return "TURN DNS/TCP/TLS preflight passed, but no relay candidate was allocated. This usually points to TURN auth mismatch or blocked relay ports 49160-49200/tcp.";
+  }
+
+  return recentErrorText ? `Recent ICE errors: ${recentErrorText}.` : null;
+}
 
 function parseCandidateDiagnostics(sdp) {
   const summary = {
@@ -377,16 +558,13 @@ function parseSdpDiagnostics(sdp) {
 function buildRelayFailureMessage(session, diagnostics) {
   const candidateTypes = diagnostics?.candidateTypes || parseCandidateDiagnostics("");
   const addresses = candidateTypes.addresses.slice(0, 4).join(", ");
-  const recentTurnErrors = (session.turnCandidateErrors || [])
-    .slice(-2)
-    .map((entry) => entry.errorText || entry.url || `ICE error ${entry.errorCode || "unknown"}`)
-    .join(" | ");
+  const failureSummary = summarizeTurnFailure(session, diagnostics);
   const details = [
     `TURN relay gathering failed for ${buildTurnServerUrl() || "the configured TURN server"}.`,
     candidateTypes.total > 0
       ? `The bridge only gathered non-relay candidates${addresses ? ` (${addresses})` : ""}.`
       : "The bridge gathered no ICE candidates at all while relay-only mode was enabled.",
-    recentTurnErrors ? `Recent ICE errors: ${recentTurnErrors}.` : null,
+    failureSummary,
     "Check coturn reachability on 443/tcp and 49160-49200/tcp, and verify TURN_KEY matches coturn static-auth-secret exactly.",
   ];
   return details.filter(Boolean).join(" ");
@@ -416,6 +594,7 @@ function sessionPayload(session) {
       trackAttached: session.media.trackAttached,
     },
     answerDiagnostics: session.answerDiagnostics || null,
+    turnConnectivity: session.turnConnectivity,
     turnCandidateErrors: session.turnCandidateErrors.slice(-5),
     recentLogs: session.logs.slice(-10),
     eventStreamUrl: `/bridge/api/session/${session.id}/events`,
@@ -513,6 +692,7 @@ function createSession(offer) {
     listeners: new Set(),
     cleanupTimer: null,
     turnCandidateErrors: [],
+    turnConnectivity: null,
   };
   sessions.set(id, session);
   scheduleSessionExpiry(session);
@@ -934,6 +1114,11 @@ function translateInputPayload(session, payload) {
 
 async function buildAnswer(session) {
   async function attemptAnswer(iceTransportPolicy) {
+    session.turnConnectivity = preferRelayTransport ? await probeTurnConnectivity() : null;
+    if (session.turnConnectivity) {
+      recordSessionLog(session, "info", "TURN connectivity preflight", session.turnConnectivity);
+    }
+
     const peer = new RTCPeerConnection({
       iceServers: buildIceServers(),
       iceTransportPolicy,

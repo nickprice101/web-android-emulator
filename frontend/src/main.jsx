@@ -78,6 +78,45 @@ function buildInboundVideoStats(reports) {
   };
 }
 
+function countSdpIceCandidates(sdp) {
+  if (!sdp) {
+    return 0;
+  }
+  const matches = String(sdp).match(/^a=candidate:/gm);
+  return matches ? matches.length : 0;
+}
+
+function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
+  if (!peer) {
+    return Promise.reject(new Error("RTCPeerConnection is not available"));
+  }
+
+  if (peer.iceGatheringState === "complete") {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for browser ICE gathering after ${timeoutMs}ms.`));
+    }, timeoutMs);
+
+    function cleanup() {
+      window.clearTimeout(timeout);
+      peer.removeEventListener("icegatheringstatechange", onChange);
+    }
+
+    function onChange() {
+      if (peer.iceGatheringState === "complete") {
+        cleanup();
+        resolve();
+      }
+    }
+
+    peer.addEventListener("icegatheringstatechange", onChange);
+  });
+}
+
 async function parseJsonResponse(resp, label) {
   const text = await resp.text();
   let data;
@@ -110,7 +149,7 @@ function mapBridgeSessionState(sessionState, hasVideo) {
   return "connecting";
 }
 
-function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inputRef }) {
+function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inputRef, onDiagnosticsChange }) {
   const videoRef = useRef(null);
   const peerRef = useRef(null);
   const sessionRef = useRef(null);
@@ -127,6 +166,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
   const [videoStats, setVideoStats] = useState(null);
   const [receiverStats, setReceiverStats] = useState(null);
   const [answerSdp, setAnswerSdp] = useState("");
+  const [offerSummary, setOfferSummary] = useState("Offer not created yet.");
 
   const sendSessionInput = useCallback(
     async (payload) => {
@@ -245,17 +285,33 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
           appendRuntimeEvent("ICE connection state changed", { state: peer.iceConnectionState || "unknown" });
         peer.onicegatheringstatechange = () =>
           appendRuntimeEvent("ICE gathering state changed", { state: peer.iceGatheringState || "unknown" });
+        peer.onicecandidateerror = (event) =>
+          appendRuntimeEvent("ICE candidate error", {
+            address: event.address || null,
+            port: event.port || null,
+            url: event.url || null,
+            errorCode: event.errorCode || null,
+            errorText: event.errorText || null,
+          });
 
         const offer = await peer.createOffer();
         await peer.setLocalDescription(offer);
-        appendRuntimeEvent("Browser SDP offer created", { type: offer.type });
+        setSessionMessage("Gathering browser ICE candidates...");
+        await waitForIceGatheringComplete(peer);
+        const localOffer = peer.localDescription || offer;
+        const localOfferCandidates = countSdpIceCandidates(localOffer.sdp);
+        setOfferSummary(`type=${localOffer.type} | candidates=${localOfferCandidates}`);
+        appendRuntimeEvent("Browser SDP offer created", {
+          type: localOffer.type,
+          iceCandidates: localOfferCandidates,
+        });
 
         const sessionResp = await fetch("/bridge/api/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            type: offer.type,
-            sdp: offer.sdp,
+            type: localOffer.type,
+            sdp: localOffer.sdp,
           }),
         });
 
@@ -446,6 +502,39 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
       .join(" | ");
   }, [sessionInfo]);
 
+  useEffect(() => {
+    if (!onDiagnosticsChange) {
+      return;
+    }
+
+    onDiagnosticsChange({
+      bridgeState,
+      sessionState,
+      sessionMessage,
+      sessionInfo,
+      logs,
+      runtimeEvents,
+      videoStats,
+      receiverStats,
+      answerSdp,
+      answerSummary,
+      offerSummary,
+    });
+  }, [
+    answerSdp,
+    answerSummary,
+    bridgeState,
+    logs,
+    offerSummary,
+    onDiagnosticsChange,
+    receiverStats,
+    runtimeEvents,
+    sessionInfo,
+    sessionMessage,
+    sessionState,
+    videoStats,
+  ]);
+
   const handlePointerDown = useCallback((event) => {
     if (!active) {
       return;
@@ -626,89 +715,6 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         </div>
       </div>
 
-      <div
-        style={{
-          borderTop: "1px solid #202634",
-          background: "#0a0e15",
-          padding: "10px 12px 12px",
-          display: "grid",
-          gridTemplateColumns: "1.15fr 0.85fr",
-          gap: 12,
-          minHeight: 170,
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 11, color: "#9db0cc", marginBottom: 6 }}>Live diagnostics</div>
-          <div style={{ fontSize: 11, lineHeight: 1.6, marginBottom: 8 }}>
-            <div>Answer: {answerSummary}</div>
-            <div>
-              RTP: packets {receiverStats?.packetsReceived ?? 0} | bytes {receiverStats?.bytesReceived ?? 0} | frames
-              decoded {receiverStats?.framesDecoded ?? 0}
-            </div>
-            <div>
-              Video: readyState {videoStats?.readyState ?? 0} | currentTime {videoStats?.currentTime ?? "0.00"} | size{" "}
-              {videoStats?.videoWidth ?? 0}x{videoStats?.videoHeight ?? 0}
-            </div>
-            <div>
-              Bridge: frames {sessionInfo?.media?.framesDelivered ?? 0} | first frame{" "}
-              {formatClockTime(sessionInfo?.media?.firstFrameAt)}
-            </div>
-          </div>
-          <div
-            style={{
-              maxHeight: 108,
-              overflow: "auto",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              fontSize: 10,
-              lineHeight: 1.45,
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-              padding: 8,
-              borderRadius: 10,
-              background: "#05070b",
-              border: "1px solid #202634",
-            }}
-          >
-            {answerSdp || "Answer SDP will appear here after session creation."}
-          </div>
-        </div>
-
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 11, color: "#9db0cc", marginBottom: 6 }}>Runtime events</div>
-          <div
-            style={{
-              maxHeight: 138,
-              overflow: "auto",
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-              fontSize: 10,
-              lineHeight: 1.45,
-            }}
-          >
-            {runtimeEvents.length === 0 && (
-              <div style={{ color: "#7e8ba3" }}>Session events will appear here once the browser starts negotiating.</div>
-            )}
-            {runtimeEvents.map((entry) => (
-              <div
-                key={`${entry.at}:${entry.message}`}
-                style={{
-                  padding: 8,
-                  borderRadius: 10,
-                  background: "#05070b",
-                  border: "1px solid #202634",
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}
-              >
-                [{formatClockTime(entry.at)}] {entry.message}
-                {entry.details ? ` ${JSON.stringify(entry.details)}` : ""}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -744,6 +750,7 @@ function App() {
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [framePreviewTick, setFramePreviewTick] = useState(0);
+  const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
 
   const handleWebrtcMessage = useCallback((nextMessage) => {
     setMessage(nextMessage);
@@ -1146,6 +1153,7 @@ function App() {
                 onStateChange={setEmuState}
                 inputRef={webrtcInputRef}
                 onMessage={handleWebrtcMessage}
+                onDiagnosticsChange={setWebrtcDiagnostics}
               />
             )}
           </div>
@@ -1264,6 +1272,94 @@ function App() {
               </div>
             </div>
           </div>
+
+          {streamMode === "webrtc" && (
+            <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Custom WebRTC diagnostics</div>
+              <div style={{ fontSize: 12, lineHeight: 1.7, color: "#d7dfed", marginBottom: 10 }}>
+                <div>Browser offer: {webrtcDiagnostics?.offerSummary || "Offer not created yet."}</div>
+                <div>Bridge answer: {webrtcDiagnostics?.answerSummary || "Answer SDP not available yet."}</div>
+                <div>
+                  Browser RTP: packets {webrtcDiagnostics?.receiverStats?.packetsReceived ?? 0} | bytes{" "}
+                  {webrtcDiagnostics?.receiverStats?.bytesReceived ?? 0} | frames decoded{" "}
+                  {webrtcDiagnostics?.receiverStats?.framesDecoded ?? 0}
+                </div>
+                <div>
+                  Browser video: readyState {webrtcDiagnostics?.videoStats?.readyState ?? 0} | currentTime{" "}
+                  {webrtcDiagnostics?.videoStats?.currentTime ?? "0.00"} | size{" "}
+                  {webrtcDiagnostics?.videoStats?.videoWidth ?? 0}x{webrtcDiagnostics?.videoStats?.videoHeight ?? 0}
+                </div>
+                <div>
+                  Bridge media: frames {webrtcDiagnostics?.sessionInfo?.media?.framesDelivered ?? 0} | first frame{" "}
+                  {formatClockTime(webrtcDiagnostics?.sessionInfo?.media?.firstFrameAt)}
+                </div>
+                <div>
+                  Bridge states: session {webrtcDiagnostics?.sessionInfo?.peerConnectionState || "new"} | ice{" "}
+                  {webrtcDiagnostics?.sessionInfo?.iceConnectionState || "new"} | gathering{" "}
+                  {webrtcDiagnostics?.sessionInfo?.iceGatheringState || "new"}
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, color: "#9db0cc", marginBottom: 6 }}>Runtime events</div>
+                  <div
+                    style={{
+                      maxHeight: 180,
+                      overflow: "auto",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      fontSize: 10,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {(webrtcDiagnostics?.runtimeEvents || []).length === 0 && (
+                      <div style={{ color: "#7e8ba3" }}>Session events will appear here once the browser starts negotiating.</div>
+                    )}
+                    {(webrtcDiagnostics?.runtimeEvents || []).map((entry) => (
+                      <div
+                        key={`${entry.at}:${entry.message}`}
+                        style={{
+                          padding: 8,
+                          borderRadius: 10,
+                          background: "#0f1218",
+                          border: "1px solid #2b313d",
+                          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        [{formatClockTime(entry.at)}] {entry.message}
+                        {entry.details ? ` ${JSON.stringify(entry.details)}` : ""}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, color: "#9db0cc", marginBottom: 6 }}>Answer SDP</div>
+                  <textarea
+                    readOnly
+                    value={webrtcDiagnostics?.answerSdp || "Answer SDP will appear here after session creation."}
+                    style={{
+                      width: "100%",
+                      minHeight: 180,
+                      resize: "vertical",
+                      fontSize: 10,
+                      lineHeight: 1.45,
+                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                      padding: 8,
+                      borderRadius: 10,
+                      color: "#d7dfed",
+                      background: "#0f1218",
+                      border: "1px solid #2b313d",
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>

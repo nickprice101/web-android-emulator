@@ -183,6 +183,92 @@ function writeToStream(stream, chunk) {
   });
 }
 
+function parseSdpDiagnostics(sdp) {
+  if (!sdp) {
+    return null;
+  }
+
+  const lines = String(sdp)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const mediaSections = [];
+  let current = null;
+
+  for (const line of lines) {
+    if (line.startsWith("m=")) {
+      const [, kind = "unknown", port = "0", protocol = "", ...formats] = line.slice(2).split(/\s+/);
+      current = {
+        kind,
+        port: Number.parseInt(port, 10) || 0,
+        protocol,
+        formats,
+        direction: "sendrecv",
+        mid: null,
+        msid: null,
+        trackId: null,
+        setup: null,
+        iceCandidates: 0,
+        rtcpMux: false,
+        codecs: [],
+      };
+      mediaSections.push(current);
+      continue;
+    }
+
+    if (!current) {
+      continue;
+    }
+
+    if (line.startsWith("a=sendrecv") || line.startsWith("a=sendonly") || line.startsWith("a=recvonly") || line.startsWith("a=inactive")) {
+      current.direction = line.slice(2);
+      continue;
+    }
+
+    if (line.startsWith("a=mid:")) {
+      current.mid = line.slice("a=mid:".length);
+      continue;
+    }
+
+    if (line.startsWith("a=msid:")) {
+      const [, streamId = "", trackId = ""] = line.slice("a=msid:".length).split(/\s+/, 2);
+      current.msid = streamId || null;
+      current.trackId = trackId || null;
+      continue;
+    }
+
+    if (line.startsWith("a=setup:")) {
+      current.setup = line.slice("a=setup:".length);
+      continue;
+    }
+
+    if (line === "a=rtcp-mux") {
+      current.rtcpMux = true;
+      continue;
+    }
+
+    if (line.startsWith("a=candidate:")) {
+      current.iceCandidates += 1;
+      continue;
+    }
+
+    if (line.startsWith("a=rtpmap:")) {
+      current.codecs.push(line.slice("a=rtpmap:".length));
+    }
+  }
+
+  return {
+    type: lines.find((line) => line.startsWith("a=group:BUNDLE")) ? "bundle" : "single",
+    hasVideoSection: mediaSections.some((section) => section.kind === "video"),
+    hasSendonlyOrSendrecvVideo: mediaSections.some(
+      (section) => section.kind === "video" && ["sendonly", "sendrecv"].includes(section.direction)
+    ),
+    totalIceCandidates: mediaSections.reduce((sum, section) => sum + section.iceCandidates, 0),
+    mediaSections,
+  };
+}
+
 function sessionPayload(session) {
   return {
     id: session.id,
@@ -206,6 +292,7 @@ function sessionPayload(session) {
       framesPerSecond: session.media.framesPerSecond,
       trackAttached: session.media.trackAttached,
     },
+    answerDiagnostics: session.answerDiagnostics || null,
     recentLogs: session.logs.slice(-10),
     eventStreamUrl: `/bridge/api/session/${session.id}/events`,
     deleteUrl: `/bridge/api/session/${session.id}`,
@@ -728,6 +815,10 @@ async function buildAnswer(session) {
     type: peer.localDescription?.type || answer.type,
     sdp: peer.localDescription?.sdp || answer.sdp,
   };
+  session.answerDiagnostics = parseSdpDiagnostics(session.answer.sdp);
+  if (session.answerDiagnostics) {
+    recordSessionLog(session, "info", "Created SDP answer diagnostics", session.answerDiagnostics);
+  }
 
   setSessionState(
     session,

@@ -228,6 +228,21 @@ function formatCandidateTypeSummary(candidateTypes) {
   ].join(" | ");
 }
 
+function formatAnswerAttemptSummary(attempts) {
+  const normalizedAttempts = Array.isArray(attempts) ? attempts : [];
+  if (normalizedAttempts.length === 0) {
+    return "No bridge ICE attempts recorded yet.";
+  }
+
+  return normalizedAttempts
+    .map((attempt, index) => {
+      const candidateSummary = formatCandidateTypeSummary(attempt?.diagnostics?.candidateTypes);
+      const errorCount = Array.isArray(attempt?.candidateErrors) ? attempt.candidateErrors.length : 0;
+      return `attempt ${index + 1}: ${attempt?.iceTransportPolicy || "unknown"} | ${candidateSummary} | errors ${errorCount}`;
+    })
+    .join("\n");
+}
+
 function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
   if (!peer) {
     return Promise.reject(new Error("RTCPeerConnection is not available"));
@@ -645,18 +660,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
   }, [answerSdp, sessionInfo]);
 
   const answerAttemptSummary = useMemo(() => {
-    const attempts = Array.isArray(sessionInfo?.answerAttempts) ? sessionInfo.answerAttempts : [];
-    if (attempts.length === 0) {
-      return "No bridge ICE attempts recorded yet.";
-    }
-
-    return attempts
-      .map((attempt, index) => {
-        const candidateSummary = formatCandidateTypeSummary(attempt?.diagnostics?.candidateTypes);
-        const errorCount = Array.isArray(attempt?.candidateErrors) ? attempt.candidateErrors.length : 0;
-        return `attempt ${index + 1}: ${attempt?.iceTransportPolicy || "unknown"} | ${candidateSummary} | errors ${errorCount}`;
-      })
-      .join("\n");
+    return formatAnswerAttemptSummary(sessionInfo?.answerAttempts);
   }, [sessionInfo]);
 
   useEffect(() => {
@@ -1610,7 +1614,7 @@ function App() {
                   <div style={{ fontSize: 11, color: "#9db0cc", marginBottom: 6 }}>Bridge ICE attempts</div>
                   <textarea
                     readOnly
-                    value={answerAttemptSummary}
+                    value={formatAnswerAttemptSummary(webrtcDiagnostics?.sessionInfo?.answerAttempts)}
                     style={{
                       width: "100%",
                       minHeight: 180,

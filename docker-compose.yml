@@ -18,7 +18,7 @@ services:
       TURN_PORT: "443"
       TURN_PROTOCOL: "tcp"
       TURN_SCHEME: "turns"
-      TURN_SECRET: "PLACEHOLDER_TURN_KEY"
+      TURN_KEY: "PLACEHOLDER_TURN_KEY"
       TURN_TTL: "86400"
       TURN_USERNAME_SUFFIX: "emuuser"
     expose:
@@ -90,7 +90,7 @@ services:
       TURN_PORT: "443"
       TURN_PROTOCOL: "tcp"
       TURN_SCHEME: "turns"
-      TURN_SECRET: "PLACEHOLDER_TURN_KEY"
+      TURN_KEY: "PLACEHOLDER_TURN_KEY"
       TURN_TTL: "86400"
       TURN_USERNAME_SUFFIX: "emuuser"
     expose:

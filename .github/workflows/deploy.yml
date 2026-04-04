@@ -123,9 +123,20 @@ jobs:
                   content = fh.read()
               content = re.sub(r"^( *)PLACEHOLDER_ADB_KEY$", replace_adb_key, content, flags=re.MULTILINE)
               content = content.replace("PLACEHOLDER_TURN_KEY", turn_key)
+              if "PLACEHOLDER_ADB_KEY" in content:
+                  raise SystemExit(f"Error: ADB placeholder still present in {compose_path} after injection")
+              if "PLACEHOLDER_TURN_KEY" in content:
+                  raise SystemExit(f"Error: TURN placeholder still present in {compose_path} after injection")
               with open(compose_path, "w", encoding="utf-8") as fh:
                   fh.write(content)
           PYEOF
+
+      - name: Verify rendered configuration on runner
+        run: |
+          if grep -R -n "PLACEHOLDER_ADB_KEY\|PLACEHOLDER_TURN_KEY" docker-compose.yml; then
+            echo "Rendered configuration still contains placeholders." >&2
+            exit 1
+          fi
 
       - name: Upload repository files
         run: |
@@ -135,6 +146,22 @@ jobs:
             -e "ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=${SSH_STRICT} -o BatchMode=yes" \
             ./ \
             "${SSH_USER}@${SSH_IP}:${SSH_PATH}/"
+
+      - name: Verify rendered configuration on remote
+        run: |
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            REMOTE_PATH="${SSH_PATH}/docker-compose.yml" \
+            bash -l -s <<'REMOTE'
+          set -euo pipefail
+          if grep -n "PLACEHOLDER_ADB_KEY\|PLACEHOLDER_TURN_KEY" "${REMOTE_PATH}"; then
+            echo "Remote docker-compose.yml still contains placeholders." >&2
+            exit 1
+          fi
+          echo "Remote docker-compose.yml placeholders cleared."
+          REMOTE
 
       - name: Build full docker compose stack
         run: |

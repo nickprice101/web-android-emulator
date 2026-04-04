@@ -26,6 +26,7 @@ const turnUsernameSuffix = process.env.TURN_USERNAME_SUFFIX || "emuuser";
 const answerTimeoutMs = Number.parseInt(process.env.WEBRTC_ANSWER_TIMEOUT_MS || "10000", 10);
 const sessionIdleTimeoutMs = Number.parseInt(process.env.WEBRTC_SESSION_IDLE_TIMEOUT_MS || "300000", 10);
 const sessionRetentionMs = Number.parseInt(process.env.WEBRTC_SESSION_RETENTION_MS || "30000", 10);
+const preferRelayTransport = Boolean(turnSecret && turnHost);
 
 const sessions = new Map();
 
@@ -792,7 +793,7 @@ function translateInputPayload(session, payload) {
 async function buildAnswer(session) {
   const peer = new RTCPeerConnection({
     iceServers: buildIceServers(),
-    iceTransportPolicy: "all",
+    iceTransportPolicy: preferRelayTransport ? "relay" : "all",
   });
 
   session.peer = peer;
@@ -916,11 +917,14 @@ const server = http.createServer(async (req, res) => {
       },
       rtcConfiguration: {
         iceServers: buildIceServers(),
-        iceTransportPolicy: "all",
+        iceTransportPolicy: preferRelayTransport ? "relay" : "all",
       },
       notes: [
         "The custom bridge now creates a live RTCPeerConnection per browser session and returns a real SDP answer.",
         "ICE remains non-trickle for now, so the bridge waits for gathering to complete before responding.",
+        preferRelayTransport
+          ? "TURN is configured, so the bridge requires relay candidates instead of advertising container-local host candidates."
+          : "TURN is not configured, so the bridge can only advertise local host candidates.",
         captureMode === "stub"
           ? "Media capture is disabled in stub mode."
           : "Video is captured from the emulator through apkbridge screencaps and piped into WebRTC.",

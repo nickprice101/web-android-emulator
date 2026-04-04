@@ -1,10 +1,4 @@
-import fs from "node:fs/promises";
-import path from "node:path";
-
-const outputArg = process.argv[2];
-const outputPath = path.resolve(outputArg || "artifacts/ui-layout.svg");
-
-const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
   <rect width="1440" height="900" fill="#11151C"/>
   <rect x="0" y="0" width="1440" height="58" fill="#171A21"/>
@@ -71,9 +65,3 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
     </linearGradient>
   </defs>
 </svg>
-`;
-
-await fs.mkdir(path.dirname(outputPath), { recursive: true });
-await fs.writeFile(outputPath, svg, "utf8");
-
-console.log(outputPath);

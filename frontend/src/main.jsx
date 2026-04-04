@@ -120,11 +120,17 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         peer.addTransceiver("video", { direction: "recvonly" });
 
         peer.ontrack = (event) => {
+          const stream = event.streams?.[0] || new MediaStream([event.track]);
           if (videoRef.current) {
-            videoRef.current.srcObject = event.streams[0];
+            videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(() => {});
           }
           setHasVideo(true);
-          setSessionMessage("Remote emulator video track attached.");
+          setSessionMessage(
+            event.streams?.length
+              ? "Remote emulator video track attached."
+              : "Remote emulator video track attached from a streamless bridge track."
+          );
         };
 
         peer.onconnectionstatechange = () => {

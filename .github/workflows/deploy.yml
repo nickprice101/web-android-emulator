@@ -104,11 +104,14 @@ jobs:
 
           adb_key = os.environ.get("ADB_KEY", "").strip()
           turn_key = os.environ.get("TURN_KEY", "").strip()
+          placeholder_patterns = ("PLACEHOLDER", "REPLACE_ME", "CHANGEME")
 
           if not adb_key:
               raise SystemExit("Error: ADB_KEY secret is not set")
           if not turn_key:
               raise SystemExit("Error: TURN_KEY secret is not set")
+          if turn_key.upper().startswith(placeholder_patterns):
+              raise SystemExit("Error: TURN_KEY still looks like a placeholder value")
 
           # Capture the leading whitespace so the replacement works at any indentation level.
           # ADB_KEY must be the full PEM key including -----BEGIN/END PRIVATE KEY----- lines.

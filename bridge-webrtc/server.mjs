@@ -102,6 +102,13 @@ function buildIceServers() {
   ];
 }
 
+function buildTurnServerUrl() {
+  if (!turnHost) {
+    return null;
+  }
+  return `${turnScheme}:${turnHost}:${turnPort}?transport=${turnProtocol}`;
+}
+
 function buildTurnWarnings() {
   const warnings = [];
 
@@ -123,6 +130,73 @@ function buildTurnWarnings() {
 }
 
 const turnWarnings = buildTurnWarnings();
+
+function parseCandidateDiagnostics(sdp) {
+  const summary = {
+    total: 0,
+    relay: 0,
+    srflx: 0,
+    host: 0,
+    prflx: 0,
+    loopbackHost: 0,
+    privateHost: 0,
+    publicHost: 0,
+    addresses: [],
+  };
+
+  if (!sdp) {
+    return summary;
+  }
+
+  const lines = String(sdp)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("a=candidate:"));
+
+  for (const line of lines) {
+    const parts = line.slice("a=candidate:".length).split(/\s+/);
+    const address = parts[4] || "";
+    const typeIndex = parts.indexOf("typ");
+    const candidateType = typeIndex >= 0 ? parts[typeIndex + 1] : "";
+
+    summary.total += 1;
+    if (address && !summary.addresses.includes(address)) {
+      summary.addresses.push(address);
+    }
+
+    switch (candidateType) {
+      case "relay":
+        summary.relay += 1;
+        break;
+      case "srflx":
+        summary.srflx += 1;
+        break;
+      case "prflx":
+        summary.prflx += 1;
+        break;
+      case "host":
+        summary.host += 1;
+        if (address === "::1" || address === "localhost" || /^127\./.test(address)) {
+          summary.loopbackHost += 1;
+        } else if (
+          /^10\./.test(address) ||
+          /^192\.168\./.test(address) ||
+          /^169\.254\./.test(address) ||
+          /^172\.(1[6-9]|2\d|3[0-1])\./.test(address) ||
+          /^(fc|fd|fe80)/i.test(address)
+        ) {
+          summary.privateHost += 1;
+        } else {
+          summary.publicHost += 1;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  return summary;
+}
 
 function toServiceUrl(path) {
   return new URL(path, apkbridgeBaseUrl).toString();
@@ -295,8 +369,27 @@ function parseSdpDiagnostics(sdp) {
       (section) => section.kind === "video" && ["sendonly", "sendrecv"].includes(section.direction)
     ),
     totalIceCandidates: mediaSections.reduce((sum, section) => sum + section.iceCandidates, 0),
+    candidateTypes: parseCandidateDiagnostics(sdp),
     mediaSections,
   };
+}
+
+function buildRelayFailureMessage(session, diagnostics) {
+  const candidateTypes = diagnostics?.candidateTypes || parseCandidateDiagnostics("");
+  const addresses = candidateTypes.addresses.slice(0, 4).join(", ");
+  const recentTurnErrors = (session.turnCandidateErrors || [])
+    .slice(-2)
+    .map((entry) => entry.errorText || entry.url || `ICE error ${entry.errorCode || "unknown"}`)
+    .join(" | ");
+  const details = [
+    `TURN relay gathering failed for ${buildTurnServerUrl() || "the configured TURN server"}.`,
+    candidateTypes.total > 0
+      ? `The bridge only gathered non-relay candidates${addresses ? ` (${addresses})` : ""}.`
+      : "The bridge gathered no ICE candidates at all while relay-only mode was enabled.",
+    recentTurnErrors ? `Recent ICE errors: ${recentTurnErrors}.` : null,
+    "Check coturn reachability on 443/tcp and 49160-49200/tcp, and verify TURN_KEY matches coturn static-auth-secret exactly.",
+  ];
+  return details.filter(Boolean).join(" ");
 }
 
 function sessionPayload(session) {
@@ -323,6 +416,7 @@ function sessionPayload(session) {
       trackAttached: session.media.trackAttached,
     },
     answerDiagnostics: session.answerDiagnostics || null,
+    turnCandidateErrors: session.turnCandidateErrors.slice(-5),
     recentLogs: session.logs.slice(-10),
     eventStreamUrl: `/bridge/api/session/${session.id}/events`,
     deleteUrl: `/bridge/api/session/${session.id}`,
@@ -418,6 +512,7 @@ function createSession(offer) {
     logs: [],
     listeners: new Set(),
     cleanupTimer: null,
+    turnCandidateErrors: [],
   };
   sessions.set(id, session);
   scheduleSessionExpiry(session);
@@ -485,12 +580,20 @@ function attachPeerObservers(session) {
   }
 
   peer.onicecandidateerror = (event) => {
-    recordSessionLog(session, "warn", "Bridge ICE candidate error", {
+    const entry = {
+      at: nowIso(),
       address: event.address || null,
       port: event.port || null,
       url: event.url || null,
       errorCode: event.errorCode || null,
       errorText: event.errorText || null,
+    };
+    session.turnCandidateErrors.push(entry);
+    if (session.turnCandidateErrors.length > 20) {
+      session.turnCandidateErrors.shift();
+    }
+    recordSessionLog(session, "warn", "Bridge ICE candidate error", {
+      ...entry,
     });
   };
 
@@ -886,14 +989,9 @@ async function buildAnswer(session) {
     return { answer: localAnswer, diagnostics };
   }
 
-  let result = await attemptAnswer(preferRelayTransport ? "relay" : "all");
-  if (preferRelayTransport && (result.diagnostics?.totalIceCandidates ?? 0) === 0) {
-    recordSessionLog(session, "warn", "Relay-only ICE gathering produced no candidates; retrying with all transports.", {
-      turnHost,
-    });
-    closeSessionResources(session);
-    session.capture = null;
-    result = await attemptAnswer("all");
+  const result = await attemptAnswer(preferRelayTransport ? "relay" : "all");
+  if (preferRelayTransport && (result.diagnostics?.candidateTypes?.relay ?? 0) === 0) {
+    throw new Error(buildRelayFailureMessage(session, result.diagnostics));
   }
 
   session.answer = result.answer;
@@ -944,6 +1042,7 @@ const server = http.createServer(async (req, res) => {
       sessions: sessions.size,
       turnConfigured: hasConfiguredTurnSecret,
       turnSecretSource,
+      turnServerUrl: buildTurnServerUrl(),
       warnings: turnWarnings,
     });
     return;
@@ -995,6 +1094,7 @@ const server = http.createServer(async (req, res) => {
       turn: {
         configured: hasConfiguredTurnSecret,
         secretSource: turnSecretSource,
+        url: buildTurnServerUrl(),
       },
     });
     return;

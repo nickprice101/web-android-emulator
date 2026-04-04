@@ -97,9 +97,13 @@ services:
       # Set TURN_BRIDGE_HOST to the TURN server's LAN/internal IP when the
       # bridge container cannot reach TURN_HOST directly (e.g. when coturn
       # listens on an internal IP and the router does not support hairpin NAT
-      # for the public DNS name).  The bridge will use this host for its own
-      # TURN allocation while browsers continue to use TURN_HOST.  Leave unset
-      # if the bridge can reach TURN_HOST without issue.
+      # for the public DNS name). With TURN-over-TLS, the bridge still needs
+      # to use TURN_HOST in the URL so the certificate matches; extra_hosts
+      # below maps that hostname to the internal IP inside this container.
+      # Leave TURN_BRIDGE_HOST unset if the bridge can reach TURN_HOST
+      # without issue.
+    extra_hosts:
+      - "turn.corsicanescape.com:192.168.1.152"
     expose:
       - "8090"
     healthcheck:

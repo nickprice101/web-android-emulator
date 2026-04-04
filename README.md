@@ -159,6 +159,20 @@ Only allow the ranges you actually use. A narrower Docker subnet such as `172.22
 
 The stack's `TURN_KEY` deployment secret must exactly match coturn's `static-auth-secret` value.
 
+If the WebRTC bridge needs to reach coturn on a LAN/internal IP to avoid hairpin NAT, do not switch the bridge itself to `turns:192.168.x.x`. TLS certificate validation still checks the TURN hostname. Keep `TURN_HOST=turn.yourdomain.com` in the ICE URL and instead map that hostname to the internal IP inside the bridge container, for example:
+
+```yaml
+services:
+  bridge-webrtc:
+    environment:
+      TURN_HOST: turn.yourdomain.com
+      TURN_BRIDGE_HOST: 192.168.1.152
+    extra_hosts:
+      - "turn.yourdomain.com:192.168.1.152"
+```
+
+That preserves SNI/certificate validation while routing the bridge's TCP connection to the LAN address.
+
 Router port forwarding is only one half of the path. If the Pi runs its own firewall (`ufw`, `iptables`, `nftables`, etc.), allow these inbound ports there too:
 
 * `443/tcp`

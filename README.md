@@ -144,6 +144,19 @@ simple-log
 no-cli
 ```
 
+If your emulator stack runs on a Docker bridge network and the WebRTC bridge falls back to host candidates like `172.22.x.x`, coturn may reject browser permissions to those peers with `403 Forbidden IP`. In that case, either:
+
+* fix relay allocation so the bridge returns relay candidates instead of private host candidates, or
+* explicitly allow the private subnet that contains the bridge peer in `turnserver.conf`, for example:
+
+```
+allowed-peer-ip=172.16.0.0-172.31.255.255
+allowed-peer-ip=192.168.0.0-192.168.255.255
+allowed-peer-ip=10.0.0.0-10.255.255.255
+```
+
+Only allow the ranges you actually use. A narrower Docker subnet such as `172.22.0.0-172.22.255.255` is safer than opening all RFC1918 space.
+
 The stack's `TURN_KEY` deployment secret must exactly match coturn's `static-auth-secret` value.
 
 Router port forwarding is only one half of the path. If the Pi runs its own firewall (`ufw`, `iptables`, `nftables`, etc.), allow these inbound ports there too:

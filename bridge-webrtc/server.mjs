@@ -306,6 +306,26 @@ function summarizeTurnFailure(session, diagnostics) {
     return `TURN client socket setup failed after DNS/TCP${turnScheme === "turns" ? "/TLS" : ""} preflight passed. This usually points to TURN auth mismatch or blocked relay connectivity on 49160-49200/tcp.`;
   }
 
+  if (
+    probe?.dns?.ok &&
+    probe?.tcp?.ok &&
+    (probe?.tls?.ok || probe?.tls?.skipped) &&
+    (candidateTypes.relay ?? 0) === 0 &&
+    (candidateTypes.privateHost ?? 0) > 0
+  ) {
+    return "TURN DNS/TCP/TLS preflight passed, but the bridge answer only exposed private Docker/LAN host candidates and no relay candidate. Browsers that fall back to TURN for those private peers commonly hit coturn 403 Forbidden IP unless that subnet is explicitly allowed.";
+  }
+
+  if (
+    probe?.dns?.ok &&
+    probe?.tcp?.ok &&
+    (probe?.tls?.ok || probe?.tls?.skipped) &&
+    (candidateTypes.relay ?? 0) === 0 &&
+    (candidateTypes.loopbackHost ?? 0) > 0
+  ) {
+    return "TURN DNS/TCP/TLS preflight passed, but the bridge answer still exposed loopback host candidates like 127.0.0.1 and no relay candidate. That SDP is not usable for a remote browser session.";
+  }
+
   if (probe?.dns?.ok && probe?.tcp?.ok && (probe?.tls?.ok || probe?.tls?.skipped) && (candidateTypes.relay ?? 0) === 0) {
     return "TURN DNS/TCP/TLS preflight passed, but no relay candidate was allocated. This usually points to TURN auth mismatch or blocked relay ports 49160-49200/tcp.";
   }
@@ -325,6 +345,14 @@ function summarizeCandidateTypes(candidateTypes) {
     `srflx=${candidateTypes.srflx ?? 0}`,
     `prflx=${candidateTypes.prflx ?? 0}`,
   ].join(", ");
+}
+
+function summarizeCandidateAddresses(candidateTypes) {
+  const addresses = Array.isArray(candidateTypes?.addresses) ? candidateTypes.addresses.filter(Boolean) : [];
+  if (addresses.length === 0) {
+    return "no candidate addresses";
+  }
+  return addresses.join(", ");
 }
 
 function parseCandidateDiagnostics(sdp) {
@@ -1235,6 +1263,20 @@ async function buildAnswer(session) {
     } else {
       throw new Error(relayFailureMessage);
     }
+  }
+
+  if (
+    preferRelayTransport &&
+    (result.diagnostics?.candidateTypes?.relay ?? 0) === 0 &&
+    (result.diagnostics?.candidateTypes?.publicHost ?? 0) === 0
+  ) {
+    session.turnFailureSummary = [
+      buildRelayFailureMessage(session, result.diagnostics),
+      `Bridge candidate addresses: ${summarizeCandidateAddresses(result.diagnostics?.candidateTypes)}.`,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    throw new Error(session.turnFailureSummary);
   }
 
   if ((result.diagnostics?.candidateTypes?.total ?? 0) === 0) {

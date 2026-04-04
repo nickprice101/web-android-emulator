@@ -94,24 +94,62 @@ function buildIceServers() {
     return [];
   }
 
+  return buildIceServersForUrls([buildTurnServerUrl()].filter(Boolean));
+}
+
+function formatTurnHostForUrl(host) {
+  if (!host) {
+    return host;
+  }
+  return net.isIP(host) === 6 ? `[${host}]` : host;
+}
+
+function buildTurnServerUrl(host = turnHost) {
+  if (!host) {
+    return null;
+  }
+  return `${turnScheme}:${formatTurnHostForUrl(host)}:${turnPort}?transport=${turnProtocol}`;
+}
+
+function buildIceServersForUrls(urls) {
+  if (!hasConfiguredTurnSecret || !Array.isArray(urls) || urls.length === 0) {
+    return [];
+  }
+
   const expiry = Math.floor(Date.now() / 1000) + turnTtl;
   const username = `${expiry}:${turnUsernameSuffix}`;
   const credential = createHmac("sha1", turnKey).update(username).digest("base64");
 
   return [
     {
-      urls: [`${turnScheme}:${turnHost}:${turnPort}?transport=${turnProtocol}`],
+      urls,
       username,
       credential,
     },
   ];
 }
 
-function buildTurnServerUrl() {
-  if (!turnHost) {
-    return null;
+function uniqueValues(values) {
+  return Array.from(new Set((values || []).filter(Boolean)));
+}
+
+async function resolveTurnServerUrls() {
+  const hostnameUrl = buildTurnServerUrl();
+  if (!hostnameUrl || !turnHost) {
+    return { hostnameUrl: null, resolvedUrls: [], resolvedAddresses: [] };
   }
-  return `${turnScheme}:${turnHost}:${turnPort}?transport=${turnProtocol}`;
+
+  try {
+    const records = await dns.lookup(turnHost, { all: true });
+    const resolvedAddresses = uniqueValues(records.map((record) => record.address));
+    return {
+      hostnameUrl,
+      resolvedAddresses,
+      resolvedUrls: resolvedAddresses.map((address) => buildTurnServerUrl(address)).filter(Boolean),
+    };
+  } catch {
+    return { hostnameUrl, resolvedUrls: [], resolvedAddresses: [] };
+  }
 }
 
 function buildTurnWarnings() {
@@ -295,7 +333,10 @@ function summarizeTurnFailure(session, diagnostics) {
   }
 
   if (recentErrors.some((entry) => /host lookup/i.test(entry.errorText || ""))) {
-    return `TURN client reported a DNS or host lookup error after preflight. Recent ICE errors: ${recentErrorText}.`;
+    if (session.turnUrlStrategy === "resolved-ip") {
+      return `TURN client still reported host lookup or socket setup errors even after retrying with DNS-resolved TURN IPs (${(session.turnResolution?.resolvedAddresses || []).join(", ")}). Recent ICE errors: ${recentErrorText}.`;
+    }
+    return `TURN client reported a DNS or host lookup error after preflight while using the TURN hostname. Recent ICE errors: ${recentErrorText}.`;
   }
 
   if (recentErrors.some((entry) => /tls|certificate|ssl/i.test(entry.errorText || ""))) {
@@ -353,6 +394,10 @@ function summarizeCandidateAddresses(candidateTypes) {
     return "no candidate addresses";
   }
   return addresses.join(", ");
+}
+
+function hasTurnHostLookupError(errors) {
+  return (errors || []).some((entry) => /host lookup/i.test(entry?.errorText || ""));
 }
 
 function parseCandidateDiagnostics(sdp) {
@@ -764,6 +809,8 @@ function sessionPayload(session) {
     relayFallbackUsed: Boolean(session.relayFallbackUsed),
     turnFailureSummary: session.turnFailureSummary || null,
     turnConnectivity: session.turnConnectivity,
+    turnResolution: session.turnResolution || null,
+    turnUrlStrategy: session.turnUrlStrategy || null,
     turnCandidateErrors: session.turnCandidateErrors.slice(-5),
     recentLogs: session.logs.slice(-10),
     eventStreamUrl: `/bridge/api/session/${session.id}/events`,
@@ -863,6 +910,8 @@ function createSession(offer) {
     localIceCandidates: [],
     turnCandidateErrors: [],
     turnConnectivity: null,
+    turnResolution: null,
+    turnUrlStrategy: null,
     answerAttempts: [],
     turnPolicy: null,
     relayFallbackUsed: false,
@@ -1308,7 +1357,10 @@ function translateInputPayload(session, payload) {
 }
 
 async function buildAnswer(session) {
-  async function attemptAnswer(iceTransportPolicy) {
+  const turnUrlOptions = await resolveTurnServerUrls();
+  session.turnResolution = turnUrlOptions;
+
+  async function attemptAnswer(iceTransportPolicy, options = {}) {
     const priorErrorCount = session.turnCandidateErrors.length;
     session.localIceCandidates = [];
     session.turnConnectivity = preferRelayTransport ? await probeTurnConnectivity() : null;
@@ -1316,8 +1368,18 @@ async function buildAnswer(session) {
       recordSessionLog(session, "info", "TURN connectivity preflight", session.turnConnectivity);
     }
 
+    const turnUrls = options.turnUrls || buildIceServers().flatMap((server) => server.urls || []);
+    const turnUrlStrategy = options.turnUrlStrategy || (turnUrls[0] === turnUrlOptions.hostnameUrl ? "hostname" : "resolved-ip");
+    session.turnUrlStrategy = turnUrlStrategy;
+    if (turnUrls.length > 0) {
+      recordSessionLog(session, "info", "Configuring bridge TURN URLs", {
+        turnUrlStrategy,
+        urls: turnUrls,
+      });
+    }
+
     const peer = new RTCPeerConnection({
-      iceServers: buildIceServers(),
+      iceServers: buildIceServersForUrls(turnUrls),
       iceTransportPolicy,
     });
 
@@ -1372,16 +1434,53 @@ async function buildAnswer(session) {
       answer: localAnswer,
       diagnostics,
       iceTransportPolicy,
+      turnUrls,
+      turnUrlStrategy,
       candidateErrors: session.turnCandidateErrors.slice(priorErrorCount),
     };
   }
 
-  let result = await attemptAnswer(preferRelayTransport ? "relay" : "all");
+  let result = await attemptAnswer(preferRelayTransport ? "relay" : "all", {
+    turnUrls: turnUrlOptions.hostnameUrl ? [turnUrlOptions.hostnameUrl] : [],
+    turnUrlStrategy: "hostname",
+  });
   session.answerAttempts.push({
     iceTransportPolicy: result.iceTransportPolicy,
+    turnUrlStrategy: result.turnUrlStrategy,
+    turnUrls: result.turnUrls || [],
     diagnostics: result.diagnostics || null,
     candidateErrors: result.candidateErrors || [],
   });
+
+  if (
+    preferRelayTransport &&
+    (result.diagnostics?.candidateTypes?.relay ?? 0) === 0 &&
+    hasTurnHostLookupError(result.candidateErrors) &&
+    (turnUrlOptions.resolvedUrls?.length ?? 0) > 0
+  ) {
+    recordSessionLog(
+      session,
+      "warn",
+      "Relay-only ICE gathering reported TURN host lookup errors; retrying with DNS-resolved TURN IP literals.",
+      {
+        hostnameUrl: turnUrlOptions.hostnameUrl,
+        resolvedAddresses: turnUrlOptions.resolvedAddresses,
+        resolvedUrls: turnUrlOptions.resolvedUrls,
+      }
+    );
+    closeSessionResources(session);
+    result = await attemptAnswer("relay", {
+      turnUrls: turnUrlOptions.resolvedUrls,
+      turnUrlStrategy: "resolved-ip",
+    });
+    session.answerAttempts.push({
+      iceTransportPolicy: result.iceTransportPolicy,
+      turnUrlStrategy: result.turnUrlStrategy,
+      turnUrls: result.turnUrls || [],
+      diagnostics: result.diagnostics || null,
+      candidateErrors: result.candidateErrors || [],
+    });
+  }
 
   if (preferRelayTransport && (result.diagnostics?.candidateTypes?.relay ?? 0) === 0) {
     const relayFailureMessage = buildRelayFailureMessage(session, result.diagnostics);

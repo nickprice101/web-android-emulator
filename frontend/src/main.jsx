@@ -5,6 +5,79 @@ import { Emulator } from "android-emulator-webrtc/emulator";
 const EMULATOR_ASPECT = 1080 / 1920;
 const RAW_FRAME_URL = "/api/frame";
 
+function formatClockTime(value) {
+  if (!value) {
+    return "n/a";
+  }
+  try {
+    return new Date(value).toLocaleTimeString();
+  } catch {
+    return String(value);
+  }
+}
+
+function buildVideoStatsSnapshot(video) {
+  if (!video) {
+    return null;
+  }
+
+  return {
+    readyState: video.readyState,
+    paused: video.paused,
+    ended: video.ended,
+    currentTime: Number(video.currentTime || 0).toFixed(2),
+    videoWidth: video.videoWidth || 0,
+    videoHeight: video.videoHeight || 0,
+    networkState: video.networkState,
+  };
+}
+
+function buildInboundVideoStats(reports) {
+  let inbound = null;
+  let track = null;
+  let transport = null;
+  let selectedPair = null;
+
+  reports.forEach((report) => {
+    if (report.type === "inbound-rtp" && report.kind === "video" && !report.isRemote) {
+      inbound = report;
+      return;
+    }
+    if (report.type === "track" && report.kind === "video") {
+      track = report;
+    }
+  });
+
+  if (inbound?.transportId) {
+    transport = reports.get(inbound.transportId) || null;
+    if (transport?.selectedCandidatePairId) {
+      selectedPair = reports.get(transport.selectedCandidatePairId) || null;
+    }
+  }
+
+  return {
+    packetsReceived: inbound?.packetsReceived ?? 0,
+    bytesReceived: inbound?.bytesReceived ?? 0,
+    framesDecoded: inbound?.framesDecoded ?? track?.framesDecoded ?? 0,
+    framesReceived: inbound?.framesReceived ?? track?.framesReceived ?? 0,
+    keyFramesDecoded: inbound?.keyFramesDecoded ?? 0,
+    firCount: inbound?.firCount ?? 0,
+    pliCount: inbound?.pliCount ?? 0,
+    nackCount: inbound?.nackCount ?? 0,
+    jitter: inbound?.jitter ?? null,
+    decoderImplementation: inbound?.decoderImplementation || null,
+    frameWidth: track?.frameWidth ?? inbound?.frameWidth ?? 0,
+    frameHeight: track?.frameHeight ?? inbound?.frameHeight ?? 0,
+    selectedCandidatePair: selectedPair
+      ? {
+          state: selectedPair.state || null,
+          currentRoundTripTime: selectedPair.currentRoundTripTime ?? null,
+          availableIncomingBitrate: selectedPair.availableIncomingBitrate ?? null,
+        }
+      : null,
+  };
+}
+
 async function parseJsonResponse(resp, label) {
   const text = await resp.text();
   let data;
@@ -50,6 +123,10 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
   const [sessionMessage, setSessionMessage] = useState("");
   const [logs, setLogs] = useState([]);
   const [hasVideo, setHasVideo] = useState(false);
+  const [runtimeEvents, setRuntimeEvents] = useState([]);
+  const [videoStats, setVideoStats] = useState(null);
+  const [receiverStats, setReceiverStats] = useState(null);
+  const [answerSdp, setAnswerSdp] = useState("");
 
   const sendSessionInput = useCallback(
     async (payload) => {
@@ -67,6 +144,15 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
     },
     []
   );
+
+  const appendRuntimeEvent = useCallback((message, details = null) => {
+    const entry = {
+      at: new Date().toISOString(),
+      message,
+      details,
+    };
+    setRuntimeEvents((previous) => [...previous, entry].slice(-10));
+  }, []);
 
   useEffect(() => {
     if (!inputRef) {
@@ -99,6 +185,10 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         setSessionMessage("Checking custom bridge health...");
         setHasVideo(false);
         setLogs([]);
+        setRuntimeEvents([]);
+        setVideoStats(null);
+        setReceiverStats(null);
+        setAnswerSdp("");
         onStateChange("connecting");
 
         const health = await parseJsonResponse(await fetch("/bridge/health"), "/bridge/health");
@@ -118,6 +208,9 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         const peer = new RTCPeerConnection(config.rtcConfiguration || {});
         peerRef.current = peer;
         peer.addTransceiver("video", { direction: "recvonly" });
+        appendRuntimeEvent("Created browser RTCPeerConnection", {
+          iceServers: (config.rtcConfiguration?.iceServers || []).length,
+        });
 
         peer.ontrack = (event) => {
           const stream = event.streams?.[0] || new MediaStream([event.track]);
@@ -126,6 +219,17 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
             videoRef.current.play().catch(() => {});
           }
           setHasVideo(true);
+          appendRuntimeEvent("Browser received remote video track", {
+            trackId: event.track?.id || null,
+            streams: (event.streams || []).map((streamEntry) => streamEntry.id),
+            muted: Boolean(event.track?.muted),
+            readyState: event.track?.readyState || "unknown",
+          });
+          if (event.track) {
+            event.track.onmute = () => appendRuntimeEvent("Remote video track muted", { trackId: event.track.id });
+            event.track.onunmute = () => appendRuntimeEvent("Remote video track unmuted", { trackId: event.track.id });
+            event.track.onended = () => appendRuntimeEvent("Remote video track ended", { trackId: event.track.id });
+          }
           setSessionMessage(
             event.streams?.length
               ? "Remote emulator video track attached."
@@ -135,10 +239,16 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
 
         peer.onconnectionstatechange = () => {
           setSessionState(peer.connectionState || "unknown");
+          appendRuntimeEvent("Peer connection state changed", { state: peer.connectionState || "unknown" });
         };
+        peer.oniceconnectionstatechange = () =>
+          appendRuntimeEvent("ICE connection state changed", { state: peer.iceConnectionState || "unknown" });
+        peer.onicegatheringstatechange = () =>
+          appendRuntimeEvent("ICE gathering state changed", { state: peer.iceGatheringState || "unknown" });
 
         const offer = await peer.createOffer();
         await peer.setLocalDescription(offer);
+        appendRuntimeEvent("Browser SDP offer created", { type: offer.type });
 
         const sessionResp = await fetch("/bridge/api/session", {
           method: "POST",
@@ -163,6 +273,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         setSessionInfo(session);
         setSessionState(session.state || "created");
         setSessionMessage(session.message || "Session created.");
+        setAnswerSdp(session.answer?.sdp || "");
         if (Array.isArray(session.recentLogs)) {
           setLogs(session.recentLogs.slice(-6));
         }
@@ -206,6 +317,12 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         }
 
         await peer.setRemoteDescription(session.answer);
+        appendRuntimeEvent("Bridge SDP answer applied in browser", {
+          type: session.answer.type,
+          hasVideoSection: Boolean(session.answerDiagnostics?.hasVideoSection),
+          sendCapableVideo: Boolean(session.answerDiagnostics?.hasSendonlyOrSendrecvVideo),
+          iceCandidates: session.answerDiagnostics?.totalIceCandidates ?? null,
+        });
         setSessionState(session.state || "answer-applied");
         onMessage(session.message || "Custom WebRTC signaling completed. Waiting for media.");
       } catch (error) {
@@ -238,7 +355,96 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         peerRef.current = null;
       }
     };
-  }, [active, onMessage, onStateChange]);
+  }, [active, appendRuntimeEvent, onMessage, onStateChange]);
+
+  useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
+
+    const video = videoRef.current;
+    if (!video) {
+      return undefined;
+    }
+
+    const handlers = {
+      loadedmetadata: () =>
+        appendRuntimeEvent("Video element loaded metadata", {
+          width: video.videoWidth || 0,
+          height: video.videoHeight || 0,
+        }),
+      playing: () => appendRuntimeEvent("Video element started playing"),
+      waiting: () => appendRuntimeEvent("Video element waiting for data"),
+      stalled: () => appendRuntimeEvent("Video element stalled"),
+      error: () =>
+        appendRuntimeEvent("Video element error", {
+          code: video.error?.code || null,
+          message: video.error?.message || null,
+        }),
+    };
+
+    Object.entries(handlers).forEach(([eventName, handler]) => video.addEventListener(eventName, handler));
+    return () => {
+      Object.entries(handlers).forEach(([eventName, handler]) => video.removeEventListener(eventName, handler));
+    };
+  }, [active, appendRuntimeEvent]);
+
+  useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    async function collectStats() {
+      const peer = peerRef.current;
+      if (!peer) {
+        return;
+      }
+
+      try {
+        const reports = await peer.getStats();
+        if (cancelled) {
+          return;
+        }
+        setReceiverStats(buildInboundVideoStats(reports));
+      } catch (error) {
+        if (!cancelled) {
+          appendRuntimeEvent("Failed to read RTCPeerConnection stats", { error: error.message });
+        }
+      }
+    }
+
+    const refreshVideo = () => setVideoStats(buildVideoStatsSnapshot(videoRef.current));
+
+    collectStats();
+    refreshVideo();
+    const statsId = setInterval(collectStats, 1500);
+    const videoId = setInterval(refreshVideo, 1000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(statsId);
+      clearInterval(videoId);
+    };
+  }, [active, appendRuntimeEvent]);
+
+  const answerSummary = useMemo(() => {
+    const diagnostics = sessionInfo?.answerDiagnostics;
+    const videoSection = diagnostics?.mediaSections?.find((section) => section.kind === "video");
+    if (!videoSection) {
+      return "Answer SDP not available yet.";
+    }
+    return [
+      `video=${videoSection.direction}`,
+      `mid=${videoSection.mid || "n/a"}`,
+      `candidates=${videoSection.iceCandidates}`,
+      `codecs=${videoSection.codecs.length}`,
+      videoSection.trackId ? `track=${videoSection.trackId}` : null,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+  }, [sessionInfo]);
 
   const handlePointerDown = useCallback((event) => {
     if (!active) {
@@ -416,6 +622,90 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
                 : ""}
             </div>
             {logs[logs.length - 1] && <div>{logs[logs.length - 1].message}</div>}
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          borderTop: "1px solid #202634",
+          background: "#0a0e15",
+          padding: "10px 12px 12px",
+          display: "grid",
+          gridTemplateColumns: "1.15fr 0.85fr",
+          gap: 12,
+          minHeight: 170,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 11, color: "#9db0cc", marginBottom: 6 }}>Live diagnostics</div>
+          <div style={{ fontSize: 11, lineHeight: 1.6, marginBottom: 8 }}>
+            <div>Answer: {answerSummary}</div>
+            <div>
+              RTP: packets {receiverStats?.packetsReceived ?? 0} | bytes {receiverStats?.bytesReceived ?? 0} | frames
+              decoded {receiverStats?.framesDecoded ?? 0}
+            </div>
+            <div>
+              Video: readyState {videoStats?.readyState ?? 0} | currentTime {videoStats?.currentTime ?? "0.00"} | size{" "}
+              {videoStats?.videoWidth ?? 0}x{videoStats?.videoHeight ?? 0}
+            </div>
+            <div>
+              Bridge: frames {sessionInfo?.media?.framesDelivered ?? 0} | first frame{" "}
+              {formatClockTime(sessionInfo?.media?.firstFrameAt)}
+            </div>
+          </div>
+          <div
+            style={{
+              maxHeight: 108,
+              overflow: "auto",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              fontSize: 10,
+              lineHeight: 1.45,
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+              padding: 8,
+              borderRadius: 10,
+              background: "#05070b",
+              border: "1px solid #202634",
+            }}
+          >
+            {answerSdp || "Answer SDP will appear here after session creation."}
+          </div>
+        </div>
+
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 11, color: "#9db0cc", marginBottom: 6 }}>Runtime events</div>
+          <div
+            style={{
+              maxHeight: 138,
+              overflow: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+              fontSize: 10,
+              lineHeight: 1.45,
+            }}
+          >
+            {runtimeEvents.length === 0 && (
+              <div style={{ color: "#7e8ba3" }}>Session events will appear here once the browser starts negotiating.</div>
+            )}
+            {runtimeEvents.map((entry) => (
+              <div
+                key={`${entry.at}:${entry.message}`}
+                style={{
+                  padding: 8,
+                  borderRadius: 10,
+                  background: "#05070b",
+                  border: "1px solid #202634",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                [{formatClockTime(entry.at)}] {entry.message}
+                {entry.details ? ` ${JSON.stringify(entry.details)}` : ""}
+              </div>
+            ))}
           </div>
         </div>
       </div>

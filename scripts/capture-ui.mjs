@@ -21,12 +21,24 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <rect x="16" y="78" width="500" height="48" rx="20" fill="#0B1018"/>
   <text x="34" y="108" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="14">Custom WebRTC bridge (low latency)</text>
   <text x="323" y="108" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="13">bridge: ready | session: connected</text>
-  <rect x="42" y="146" width="448" height="688" rx="26" fill="url(#screen)"/>
-  <rect x="42" y="766" width="250" height="54" rx="12" fill="#09111C" fill-opacity="0.82"/>
-  <text x="58" y="798" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">Peer connection established and video is flowing.</text>
-  <rect x="310" y="766" width="154" height="54" rx="12" fill="#09111C" fill-opacity="0.82"/>
-  <text x="326" y="790" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">frames: 184</text>
-  <text x="326" y="808" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">1080x1920</text>
+  <rect x="42" y="146" width="448" height="520" rx="26" fill="url(#screen)"/>
+  <rect x="42" y="598" width="250" height="54" rx="12" fill="#09111C" fill-opacity="0.82"/>
+  <text x="58" y="630" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">Peer connection established and video is flowing.</text>
+  <rect x="310" y="598" width="154" height="54" rx="12" fill="#09111C" fill-opacity="0.82"/>
+  <text x="326" y="622" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">frames: 184</text>
+  <text x="326" y="640" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">1080x1920</text>
+  <rect x="16" y="684" width="500" height="184" rx="20" fill="#0A0E15" stroke="#202634"/>
+  <text x="34" y="712" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">Live diagnostics</text>
+  <text x="34" y="736" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="11">Answer: video=sendonly | mid=0 | candidates=3 | codecs=2 | track=video-track-1</text>
+  <text x="34" y="756" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="11">RTP: packets 1462 | bytes 914211 | frames decoded 176</text>
+  <text x="34" y="776" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="11">Video: readyState 4 | currentTime 12.34 | size 1080x1920</text>
+  <text x="34" y="796" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="11">Bridge: frames 184 | first frame 19:36:11</text>
+  <rect x="32" y="810" width="258" height="42" rx="10" fill="#05070B" stroke="#202634"/>
+  <text x="42" y="828" fill="#A8B3C7" font-family="Consolas, monospace" font-size="9">v=0</text>
+  <text x="42" y="842" fill="#A8B3C7" font-family="Consolas, monospace" font-size="9">m=video 9 UDP/TLS/RTP/SAVPF 96 97</text>
+  <rect x="306" y="810" width="184" height="42" rx="10" fill="#05070B" stroke="#202634"/>
+  <text x="316" y="828" fill="#A8B3C7" font-family="Consolas, monospace" font-size="9">[19:36:11] ontrack</text>
+  <text x="316" y="842" fill="#A8B3C7" font-family="Consolas, monospace" font-size="9">[19:36:12] video playing</text>
   <rect x="538" y="78" width="886" height="790" rx="18" fill="#171A21"/>
   <rect x="560" y="102" width="842" height="86" rx="12" fill="#111823" stroke="#2B313D"/>
   <text x="578" y="126" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Package name</text>

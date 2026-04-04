@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
 
-if [ -n "${TURN_SECRET:-}" ]; then
-  : "${TURN_HOST:?TURN_HOST must be set when TURN_SECRET is configured}"
+TURN_SHARED_SECRET="${TURN_KEY:-${TURN_SECRET:-}}"
+
+if [ -n "${TURN_SHARED_SECRET:-}" ]; then
+  : "${TURN_HOST:?TURN_HOST must be set when TURN_KEY is configured}"
 
   TURN_PORT="${TURN_PORT:-443}"
   TURN_PROTOCOL="${TURN_PROTOCOL:-tcp}"
@@ -13,7 +15,7 @@ if [ -n "${TURN_SECRET:-}" ]; then
   now="$(date +%s)"
   expiry="$((now + TURN_TTL))"
   username="${expiry}:${TURN_USERNAME_SUFFIX}"
-  credential="$(printf '%s' "${username}" | openssl dgst -binary -sha1 -hmac "${TURN_SECRET}" | openssl base64 -A)"
+  credential="$(printf '%s' "${username}" | openssl dgst -binary -sha1 -hmac "${TURN_SHARED_SECRET}" | openssl base64 -A)"
 
   export TURN
   TURN="$(printf '{"iceServers":[{"urls":["%s:%s:%s?transport=%s"],"username":"%s","credential":"%s"}]}' \

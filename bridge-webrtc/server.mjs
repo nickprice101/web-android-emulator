@@ -16,7 +16,8 @@ const apkbridgeDeviceInfoPath = process.env.APKBRIDGE_DEVICE_INFO_PATH || "/devi
 const captureFps = Math.max(1, Number.parseInt(process.env.CAPTURE_FPS || "6", 10));
 const defaultScreenWidth = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_WIDTH || "1080", 10));
 const defaultScreenHeight = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_HEIGHT || "1920", 10));
-const turnSecret = process.env.TURN_SECRET || "";
+const turnKey = process.env.TURN_KEY || process.env.TURN_SECRET || "";
+const turnSecretSource = process.env.TURN_KEY ? "TURN_KEY" : process.env.TURN_SECRET ? "TURN_SECRET" : null;
 const turnHost = process.env.TURN_HOST || "";
 const turnPort = process.env.TURN_PORT || "443";
 const turnProtocol = process.env.TURN_PROTOCOL || "tcp";
@@ -26,7 +27,13 @@ const turnUsernameSuffix = process.env.TURN_USERNAME_SUFFIX || "emuuser";
 const answerTimeoutMs = Number.parseInt(process.env.WEBRTC_ANSWER_TIMEOUT_MS || "10000", 10);
 const sessionIdleTimeoutMs = Number.parseInt(process.env.WEBRTC_SESSION_IDLE_TIMEOUT_MS || "300000", 10);
 const sessionRetentionMs = Number.parseInt(process.env.WEBRTC_SESSION_RETENTION_MS || "30000", 10);
-const preferRelayTransport = Boolean(turnSecret && turnHost);
+const placeholderSecretPatterns = [/^PLACEHOLDER/i, /^REPLACE_ME/i, /^CHANGEME$/i];
+const hasConfiguredTurnSecret = Boolean(
+  turnKey &&
+    turnHost &&
+    !placeholderSecretPatterns.some((pattern) => pattern.test(turnKey.trim()))
+);
+const preferRelayTransport = hasConfiguredTurnSecret;
 
 const sessions = new Map();
 
@@ -78,13 +85,13 @@ function readBody(req) {
 }
 
 function buildIceServers() {
-  if (!turnSecret || !turnHost) {
+  if (!hasConfiguredTurnSecret) {
     return [];
   }
 
   const expiry = Math.floor(Date.now() / 1000) + turnTtl;
   const username = `${expiry}:${turnUsernameSuffix}`;
-  const credential = createHmac("sha1", turnSecret).update(username).digest("base64");
+  const credential = createHmac("sha1", turnKey).update(username).digest("base64");
 
   return [
     {
@@ -94,6 +101,28 @@ function buildIceServers() {
     },
   ];
 }
+
+function buildTurnWarnings() {
+  const warnings = [];
+
+  if (process.env.TURN_SECRET && !process.env.TURN_KEY) {
+    warnings.push("TURN_SECRET is deprecated here. Set TURN_KEY so the bridge and emulator use the documented secret name.");
+  }
+
+  if (!turnHost) {
+    warnings.push("TURN_HOST is not configured, so relay ICE cannot be used.");
+  }
+
+  if (!turnKey) {
+    warnings.push("TURN_KEY is not configured, so the bridge will not mint TURN credentials.");
+  } else if (placeholderSecretPatterns.some((pattern) => pattern.test(turnKey.trim()))) {
+    warnings.push("TURN_KEY still looks like a placeholder value, so TURN credentials are disabled.");
+  }
+
+  return warnings;
+}
+
+const turnWarnings = buildTurnWarnings();
 
 function toServiceUrl(path) {
   return new URL(path, apkbridgeBaseUrl).toString();
@@ -199,7 +228,7 @@ function parseSdpDiagnostics(sdp) {
 
   for (const line of lines) {
     if (line.startsWith("m=")) {
-      const [, kind = "unknown", port = "0", protocol = "", ...formats] = line.slice(2).split(/\s+/);
+      const [kind = "unknown", port = "0", protocol = "", ...formats] = line.slice(2).split(/\s+/);
       current = {
         kind,
         port: Number.parseInt(port, 10) || 0,
@@ -454,6 +483,16 @@ function attachPeerObservers(session) {
   if (!peer) {
     return;
   }
+
+  peer.onicecandidateerror = (event) => {
+    recordSessionLog(session, "warn", "Bridge ICE candidate error", {
+      address: event.address || null,
+      port: event.port || null,
+      url: event.url || null,
+      errorCode: event.errorCode || null,
+      errorText: event.errorText || null,
+    });
+  };
 
   peer.onicegatheringstatechange = () => {
     session.iceGatheringState = peer.iceGatheringState || "unknown";
@@ -791,54 +830,74 @@ function translateInputPayload(session, payload) {
 }
 
 async function buildAnswer(session) {
-  const peer = new RTCPeerConnection({
-    iceServers: buildIceServers(),
-    iceTransportPolicy: preferRelayTransport ? "relay" : "all",
-  });
+  async function attemptAnswer(iceTransportPolicy) {
+    const peer = new RTCPeerConnection({
+      iceServers: buildIceServers(),
+      iceTransportPolicy,
+    });
 
-  session.peer = peer;
-  attachPeerObservers(session);
+    session.peer = peer;
+    attachPeerObservers(session);
 
-  setSessionState(
-    session,
-    "applying-offer",
-    "Applying the browser SDP offer on the bridge peer connection.",
-    { log: true }
-  );
+    setSessionState(
+      session,
+      "applying-offer",
+      "Applying the browser SDP offer on the bridge peer connection.",
+      { log: true }
+    );
 
-  await peer.setRemoteDescription(new RTCSessionDescription(session.offer));
+    await peer.setRemoteDescription(new RTCSessionDescription(session.offer));
 
-  setSessionState(
-    session,
-    "starting-media",
-    captureMode === "stub"
-      ? "Bridge is in stub mode, so media attachment is skipped."
-      : "Starting the emulator capture pipeline and attaching a video track.",
-    { log: true }
-  );
+    setSessionState(
+      session,
+      "starting-media",
+      captureMode === "stub"
+        ? "Bridge is in stub mode, so media attachment is skipped."
+        : "Starting the emulator capture pipeline and attaching a video track.",
+      { log: true }
+    );
 
-  await attachVideoSource(session, peer);
+    await attachVideoSource(session, peer);
 
-  setSessionState(session, "creating-answer", "Creating the SDP answer for the browser peer.", { log: true });
-  const answer = await peer.createAnswer();
-  await peer.setLocalDescription(answer);
+    setSessionState(session, "creating-answer", "Creating the SDP answer for the browser peer.", { log: true });
+    const answer = await peer.createAnswer();
+    await peer.setLocalDescription(answer);
 
-  setSessionState(
-    session,
-    "gathering-ice",
-    "Collecting ICE candidates before returning the non-trickle SDP answer.",
-    { log: true }
-  );
-  await waitForIceGatheringComplete(peer);
+    setSessionState(
+      session,
+      "gathering-ice",
+      `Collecting ICE candidates before returning the non-trickle SDP answer (${iceTransportPolicy}).`,
+      { log: true }
+    );
+    await waitForIceGatheringComplete(peer);
 
-  session.answer = {
-    type: peer.localDescription?.type || answer.type,
-    sdp: peer.localDescription?.sdp || answer.sdp,
-  };
-  session.answerDiagnostics = parseSdpDiagnostics(session.answer.sdp);
-  if (session.answerDiagnostics) {
-    recordSessionLog(session, "info", "Created SDP answer diagnostics", session.answerDiagnostics);
+    const localAnswer = {
+      type: peer.localDescription?.type || answer.type,
+      sdp: peer.localDescription?.sdp || answer.sdp,
+    };
+    const diagnostics = parseSdpDiagnostics(localAnswer.sdp);
+    if (diagnostics) {
+      recordSessionLog(session, "info", "Created SDP answer diagnostics", {
+        iceTransportPolicy,
+        ...diagnostics,
+      });
+    }
+
+    return { answer: localAnswer, diagnostics };
   }
+
+  let result = await attemptAnswer(preferRelayTransport ? "relay" : "all");
+  if (preferRelayTransport && (result.diagnostics?.totalIceCandidates ?? 0) === 0) {
+    recordSessionLog(session, "warn", "Relay-only ICE gathering produced no candidates; retrying with all transports.", {
+      turnHost,
+    });
+    closeSessionResources(session);
+    session.capture = null;
+    result = await attemptAnswer("all");
+  }
+
+  session.answer = result.answer;
+  session.answerDiagnostics = result.diagnostics;
 
   setSessionState(
     session,
@@ -883,7 +942,9 @@ const server = http.createServer(async (req, res) => {
       captureMode,
       captureFps,
       sessions: sessions.size,
-      turnConfigured: Boolean(turnSecret && turnHost),
+      turnConfigured: hasConfiguredTurnSecret,
+      turnSecretSource,
+      warnings: turnWarnings,
     });
     return;
   }
@@ -928,7 +989,13 @@ const server = http.createServer(async (req, res) => {
         captureMode === "stub"
           ? "Media capture is disabled in stub mode."
           : "Video is captured from the emulator through apkbridge screencaps and piped into WebRTC.",
+        ...turnWarnings,
       ],
+      warnings: turnWarnings,
+      turn: {
+        configured: hasConfiguredTurnSecret,
+        secretSource: turnSecretSource,
+      },
     });
     return;
   }

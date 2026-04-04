@@ -1100,7 +1100,7 @@ function App() {
     const failureMessage = [
       "Custom WebRTC failed because the bridge answer only exposed private or loopback ICE candidates",
       shownAddresses ? `(${shownAddresses})` : "",
-      "and no relay candidate, so the browser had no reachable media path. Check TURN reachability and that deployed TURN credentials are not placeholders.",
+      "and no relay candidate, so the browser had no reachable media path. If coturn logs show 403 Forbidden IP for a 172.16-31.x, 192.168.x, or 10.x peer, allow that private bridge subnet on the TURN server or fix relay allocation so those host candidates are never used.",
     ]
       .filter(Boolean)
       .join(" ");

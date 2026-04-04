@@ -10,17 +10,17 @@
   <rect x="474" y="14" width="110" height="30" rx="8" fill="#252D3B"/>
   <rect x="594" y="14" width="160" height="30" rx="8" fill="#252D3B"/>
   <rect x="764" y="14" width="180" height="30" rx="8" fill="#6B4F1D"/>
-  <text x="836" y="34" text-anchor="middle" fill="#F3D9A4" font-family="Segoe UI, Arial, sans-serif" font-size="13">PNG Fallback</text>
+  <text x="836" y="34" text-anchor="middle" fill="#F3D9A4" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC Error</text>
   <rect x="16" y="78" width="500" height="790" rx="20" fill="#05070B" stroke="#202634"/>
   <rect x="16" y="78" width="500" height="48" rx="20" fill="#0B1018"/>
-  <text x="34" y="108" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="14">PNG bridge fallback</text>
-  <text x="323" y="108" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="13">bridge: ready | fallback: automatic</text>
+  <text x="34" y="108" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="14">Custom WebRTC error state</text>
+  <text x="323" y="108" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="13">bridge: ready | mode: webrtc | fallback: disabled</text>
   <rect x="42" y="146" width="448" height="520" rx="26" fill="url(#screen)"/>
   <rect x="42" y="598" width="250" height="54" rx="12" fill="#09111C" fill-opacity="0.82"/>
-  <text x="58" y="630" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC failed, but the emulator stays visible via PNG.</text>
+  <text x="58" y="630" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC failed and the UI keeps the error visible for TURN diagnostics.</text>
   <rect x="310" y="598" width="154" height="54" rx="12" fill="#09111C" fill-opacity="0.82"/>
-  <text x="326" y="622" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">fallback: active</text>
-  <text x="326" y="640" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">1080x1920</text>
+  <text x="326" y="622" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">reason: host-only ICE</text>
+  <text x="326" y="640" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">display: error banner</text>
   <rect x="538" y="78" width="886" height="790" rx="18" fill="#171A21"/>
   <rect x="560" y="102" width="842" height="86" rx="12" fill="#111823" stroke="#2B313D"/>
   <text x="578" y="126" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Package name</text>
@@ -35,13 +35,13 @@
   <text x="1008" y="266" fill="#3FB950" font-family="Segoe UI, Arial, sans-serif" font-size="28">ready</text>
   <rect x="560" y="318" width="842" height="104" rx="12" fill="#111823" stroke="#2B313D"/>
   <text x="578" y="344" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Last message</text>
-  <text x="578" y="370" fill="#D7DFED" font-family="Consolas, monospace" font-size="13">Custom WebRTC could not establish media because the bridge answer only</text>
-  <text x="578" y="390" fill="#D7DFED" font-family="Consolas, monospace" font-size="13">exposed private or loopback ICE candidates. Switched to PNG mode.</text>
+  <text x="578" y="370" fill="#D7DFED" font-family="Consolas, monospace" font-size="13">TURN relay gathering failed for turns:turn.corsicanescape.com:443?transport=tcp.</text>
+  <text x="578" y="390" fill="#D7DFED" font-family="Consolas, monospace" font-size="13">DNS/TCP/TLS preflight passed, but no relay candidate was allocated.</text>
   <rect x="560" y="440" width="842" height="158" rx="12" fill="#111823" stroke="#2B313D"/>
   <text x="578" y="466" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Display diagnostics</text>
   <text x="578" y="494" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">Raw ADB frame endpoint: /api/frame</text>
   <text x="578" y="520" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Emulator screen: 1080x1920</text>
-  <text x="578" y="544" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC frame: failed fast after host-only ICE answer.</text>
+  <text x="578" y="544" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC frame: TURN preflight succeeded, relay allocation still failed.</text>
   <text x="578" y="568" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Tip: check TURN reachability and make sure TURN credentials are real deployment values.</text>
   <rect x="1220" y="472" width="146" height="102" rx="10" fill="url(#screen)" stroke="#2B313D"/>
   <text x="1228" y="590" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="11">Raw screencap preview</text>
@@ -50,10 +50,10 @@
   <text x="578" y="668" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Browser offer: type=offer | candidates=4</text>
   <text x="578" y="688" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Bridge answer: video=sendonly | mid=0 | candidates=3 | codecs=11 | track=6ecbb6d6...</text>
   <text x="578" y="708" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Browser RTP: packets 0 | bytes 0 | frames decoded 0</text>
-  <text x="578" y="728" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Bridge states: session failed | ice closed | gathering complete</text>
+  <text x="578" y="728" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Bridge states: session failed | ice closed | gathering complete | dns ok | tcp ok | tls ok</text>
   <rect x="578" y="742" width="396" height="68" rx="10" fill="#0F1218" stroke="#2B313D"/>
   <text x="594" y="764" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">[09:26:09] Bridge SDP answer applied in browser {"sendCapableVideo":true}</text>
-  <text x="594" y="784" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">[09:26:30] WebRTC fallback triggered {"mode":"png","reason":"host-only ICE"}</text>
+  <text x="594" y="784" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">[09:26:30] TURN connectivity preflight {"dns":"ok","tcp":"ok","tls":"ok"}</text>
   <rect x="988" y="742" width="396" height="68" rx="10" fill="#0F1218" stroke="#2B313D"/>
   <text x="1004" y="764" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">v=0</text>
   <text x="1004" y="784" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">m=video 50446 UDP/TLS/RTP/SAVPF 96 97 98 99 100 ...</text>

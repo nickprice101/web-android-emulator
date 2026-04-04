@@ -1481,6 +1481,28 @@ function App() {
                   {webrtcDiagnostics?.sessionInfo?.iceConnectionState || "new"} | gathering{" "}
                   {webrtcDiagnostics?.sessionInfo?.iceGatheringState || "new"}
                 </div>
+                <div>
+                  TURN preflight: dns{" "}
+                  {webrtcDiagnostics?.sessionInfo?.turnConnectivity?.dns
+                    ? webrtcDiagnostics.sessionInfo.turnConnectivity.dns.ok
+                      ? "ok"
+                      : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.dns.message})`
+                    : "pending"}{" "}
+                  | tcp{" "}
+                  {webrtcDiagnostics?.sessionInfo?.turnConnectivity?.tcp
+                    ? webrtcDiagnostics.sessionInfo.turnConnectivity.tcp.ok
+                      ? "ok"
+                      : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.tcp.message})`
+                    : "pending"}{" "}
+                  | tls{" "}
+                  {webrtcDiagnostics?.sessionInfo?.turnConnectivity?.tls
+                    ? webrtcDiagnostics.sessionInfo.turnConnectivity.tls.skipped
+                      ? "skipped"
+                      : webrtcDiagnostics.sessionInfo.turnConnectivity.tls.ok
+                        ? "ok"
+                        : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.tls.message})`
+                    : "pending"}
+                </div>
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

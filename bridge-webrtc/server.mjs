@@ -4,7 +4,7 @@ import http from "node:http";
 import { URL } from "node:url";
 import wrtc from "@roamhq/wrtc";
 
-const { RTCPeerConnection, RTCSessionDescription, nonstandard = {} } = wrtc;
+const { RTCPeerConnection, RTCSessionDescription, MediaStream, nonstandard = {} } = wrtc;
 const { RTCVideoSource } = nonstandard;
 
 const port = Number.parseInt(process.env.PORT || "8090", 10);
@@ -616,7 +616,13 @@ async function attachVideoSource(session, peer) {
 
   const capture = new EmulatorVideoCapture(session);
   const track = await capture.start();
-  peer.addTrack(track);
+  const stream = new MediaStream();
+  stream.addTrack(track);
+  peer.addTrack(track, stream);
+  recordSessionLog(session, "info", "Attached emulator video track to peer connection", {
+    streamId: stream.id,
+    trackId: track.id,
+  });
   session.capture = capture;
 }
 

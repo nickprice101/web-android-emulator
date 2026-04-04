@@ -1520,6 +1520,12 @@ function App() {
                   {webrtcDiagnostics?.sessionInfo?.relayFallbackUsed ? "yes" : "no"}
                 </div>
                 <div>
+                  Bridge TURN URL strategy: {webrtcDiagnostics?.sessionInfo?.turnUrlStrategy || "n/a"}
+                  {webrtcDiagnostics?.sessionInfo?.turnResolution?.resolvedAddresses?.length
+                    ? ` | resolved IPs ${webrtcDiagnostics.sessionInfo.turnResolution.resolvedAddresses.join(", ")}`
+                    : ""}
+                </div>
+                <div>
                   Bridge candidates:{" "}
                   {formatCandidateTypeSummary(webrtcDiagnostics?.sessionInfo?.answerDiagnostics?.candidateTypes)}
                 </div>

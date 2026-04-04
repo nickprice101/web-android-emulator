@@ -27,18 +27,6 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <rect x="310" y="598" width="154" height="54" rx="12" fill="#09111C" fill-opacity="0.82"/>
   <text x="326" y="622" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">frames: 184</text>
   <text x="326" y="640" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">1080x1920</text>
-  <rect x="16" y="684" width="500" height="184" rx="20" fill="#0A0E15" stroke="#202634"/>
-  <text x="34" y="712" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">Live diagnostics</text>
-  <text x="34" y="736" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="11">Answer: video=sendonly | mid=0 | candidates=3 | codecs=2 | track=video-track-1</text>
-  <text x="34" y="756" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="11">RTP: packets 1462 | bytes 914211 | frames decoded 176</text>
-  <text x="34" y="776" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="11">Video: readyState 4 | currentTime 12.34 | size 1080x1920</text>
-  <text x="34" y="796" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="11">Bridge: frames 184 | first frame 19:36:11</text>
-  <rect x="32" y="810" width="258" height="42" rx="10" fill="#05070B" stroke="#202634"/>
-  <text x="42" y="828" fill="#A8B3C7" font-family="Consolas, monospace" font-size="9">v=0</text>
-  <text x="42" y="842" fill="#A8B3C7" font-family="Consolas, monospace" font-size="9">m=video 9 UDP/TLS/RTP/SAVPF 96 97</text>
-  <rect x="306" y="810" width="184" height="42" rx="10" fill="#05070B" stroke="#202634"/>
-  <text x="316" y="828" fill="#A8B3C7" font-family="Consolas, monospace" font-size="9">[19:36:11] ontrack</text>
-  <text x="316" y="842" fill="#A8B3C7" font-family="Consolas, monospace" font-size="9">[19:36:12] video playing</text>
   <rect x="538" y="78" width="886" height="790" rx="18" fill="#171A21"/>
   <rect x="560" y="102" width="842" height="86" rx="12" fill="#111823" stroke="#2B313D"/>
   <text x="578" y="126" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Package name</text>
@@ -63,11 +51,17 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <rect x="1220" y="472" width="146" height="102" rx="10" fill="url(#screen)" stroke="#2B313D"/>
   <text x="1228" y="590" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="11">Raw screencap preview</text>
   <rect x="560" y="616" width="842" height="212" rx="12" fill="#111823" stroke="#2B313D"/>
-  <text x="578" y="642" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Android system logs (live, last 100)</text>
-  <rect x="578" y="664" width="806" height="116" rx="10" fill="#0F1218" stroke="#2B313D"/>
-  <text x="596" y="696" fill="#D7DFED" font-family="Consolas, monospace" font-size="14">04-03 19:36:10.401 I ActivityTaskManager: START u0 {act=android.intent.action.MAIN ...}</text>
-  <text x="596" y="722" fill="#D7DFED" font-family="Consolas, monospace" font-size="14">04-03 19:36:11.218 I chromium: [INFO:webrtc] connected via custom bridge</text>
-  <text x="596" y="748" fill="#D7DFED" font-family="Consolas, monospace" font-size="14">04-03 19:36:12.007 I InputDispatcher: Delivering pointer event to foreground app</text>
+  <text x="578" y="642" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Custom WebRTC diagnostics</text>
+  <text x="578" y="668" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Browser offer: type=offer | candidates=4</text>
+  <text x="578" y="688" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Bridge answer: video=sendonly | mid=0 | candidates=3 | codecs=2 | track=video-track-1</text>
+  <text x="578" y="708" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Browser RTP: packets 1462 | bytes 914211 | frames decoded 176</text>
+  <text x="578" y="728" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Bridge states: session connected | ice connected | gathering complete</text>
+  <rect x="578" y="742" width="396" height="68" rx="10" fill="#0F1218" stroke="#2B313D"/>
+  <text x="594" y="764" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">[19:36:09] Browser SDP offer created {"type":"offer","iceCandidates":4}</text>
+  <text x="594" y="784" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">[19:36:11] Browser received remote video track {"muted":false}</text>
+  <rect x="988" y="742" width="396" height="68" rx="10" fill="#0F1218" stroke="#2B313D"/>
+  <text x="1004" y="764" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">v=0</text>
+  <text x="1004" y="784" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">m=video 9 UDP/TLS/RTP/SAVPF 96 97</text>
   <defs>
     <linearGradient id="screen" x1="42" y1="146" x2="490" y2="834" gradientUnits="userSpaceOnUse">
       <stop stop-color="#2B3951"/>

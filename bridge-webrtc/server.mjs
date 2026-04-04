@@ -705,11 +705,30 @@ async function attachVideoSource(session, peer) {
   const track = await capture.start();
   const stream = new MediaStream();
   stream.addTrack(track);
-  peer.addTrack(track, stream);
-  recordSessionLog(session, "info", "Attached emulator video track to peer connection", {
-    streamId: stream.id,
-    trackId: track.id,
-  });
+
+  const transceiver = peer
+    .getTransceivers()
+    .find((entry) => entry.receiver?.track?.kind === "video" || entry.sender?.track?.kind === "video");
+
+  if (transceiver?.sender) {
+    await transceiver.sender.replaceTrack(track);
+    if (transceiver.direction !== "sendrecv") {
+      transceiver.direction = "sendonly";
+    }
+    recordSessionLog(session, "info", "Attached emulator video track to offered video transceiver", {
+      streamId: stream.id,
+      trackId: track.id,
+      direction: transceiver.direction,
+      mid: transceiver.mid || null,
+    });
+  } else {
+    peer.addTrack(track, stream);
+    recordSessionLog(session, "warn", "No offered video transceiver was available; attached track using addTrack fallback", {
+      streamId: stream.id,
+      trackId: track.id,
+    });
+  }
+
   session.capture = capture;
 }
 

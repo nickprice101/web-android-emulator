@@ -23,6 +23,7 @@ const turnKey = process.env.TURN_KEY || process.env.TURN_SECRET || "";
 const turnSecretSource = process.env.TURN_KEY ? "TURN_KEY" : process.env.TURN_SECRET ? "TURN_SECRET" : null;
 const turnHost = process.env.TURN_HOST || "";
 const turnBridgeHost = process.env.TURN_BRIDGE_HOST?.trim() || "";
+const turnBridgeHostIsIp = Boolean(turnBridgeHost && net.isIP(turnBridgeHost));
 const turnPort = process.env.TURN_PORT || "443";
 const turnProtocol = process.env.TURN_PROTOCOL || "tcp";
 const turnScheme = process.env.TURN_SCHEME || "turns";
@@ -136,7 +137,10 @@ function uniqueValues(values) {
 
 async function resolveTurnServerUrls() {
   const hostnameUrl = buildTurnServerUrl();
-  const bridgeUrl = turnBridgeHost && turnBridgeHost !== turnHost ? buildTurnServerUrl(turnBridgeHost) : null;
+  const bridgeUrl =
+    turnBridgeHost && turnBridgeHost !== turnHost && !(turnScheme === "turns" && turnBridgeHostIsIp)
+      ? buildTurnServerUrl(turnBridgeHost)
+      : null;
   if (!hostnameUrl || !turnHost) {
     return { hostnameUrl: null, bridgeUrl, resolvedUrls: [], resolvedAddresses: [] };
   }
@@ -173,9 +177,15 @@ function buildTurnWarnings() {
   }
 
   if (turnBridgeHost && turnBridgeHost !== turnHost) {
-    warnings.push(
-      `TURN_BRIDGE_HOST is set to '${turnBridgeHost}'. The bridge will use this host to reach the TURN server internally (e.g. to bypass hairpin NAT). Browsers still use TURN_HOST '${turnHost}'.`
-    );
+    if (turnScheme === "turns" && turnBridgeHostIsIp) {
+      warnings.push(
+        `TURN_BRIDGE_HOST is set to the IP '${turnBridgeHost}', but TURN_SCHEME is 'turns'. TLS certificates validate TURN_HOST '${turnHost}', not a raw IP, so the bridge will keep using the hostname. Map that hostname to the LAN IP inside Docker if you need to bypass hairpin NAT.`
+      );
+    } else {
+      warnings.push(
+        `TURN_BRIDGE_HOST is set to '${turnBridgeHost}'. The bridge will use this host to reach the TURN server internally (e.g. to bypass hairpin NAT). Browsers still use TURN_HOST '${turnHost}'.`
+      );
+    }
   }
 
   return warnings;
@@ -1712,7 +1722,10 @@ const server = http.createServer(async (req, res) => {
         secretSource: turnSecretSource,
         url: buildTurnServerUrl(),
         bridgeHost: turnBridgeHost && turnBridgeHost !== turnHost ? turnBridgeHost : null,
-        bridgeUrl: turnBridgeHost && turnBridgeHost !== turnHost ? buildTurnServerUrl(turnBridgeHost) : null,
+        bridgeUrl:
+          turnBridgeHost && turnBridgeHost !== turnHost && !(turnScheme === "turns" && turnBridgeHostIsIp)
+            ? buildTurnServerUrl(turnBridgeHost)
+            : null,
       },
     });
     return;

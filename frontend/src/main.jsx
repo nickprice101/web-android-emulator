@@ -86,6 +86,134 @@ function countSdpIceCandidates(sdp) {
   return matches ? matches.length : 0;
 }
 
+function isLoopbackAddress(address) {
+  return address === "::1" || address === "localhost" || /^127\./.test(address);
+}
+
+function isPrivateAddress(address) {
+  if (!address) {
+    return false;
+  }
+  if (isLoopbackAddress(address)) {
+    return true;
+  }
+  if (/^10\./.test(address) || /^192\.168\./.test(address) || /^169\.254\./.test(address)) {
+    return true;
+  }
+  const match172 = address.match(/^172\.(\d{1,3})\./);
+  if (match172) {
+    const octet = Number(match172[1]);
+    if (octet >= 16 && octet <= 31) {
+      return true;
+    }
+  }
+  return /^(fc|fd|fe80)/i.test(address);
+}
+
+function parseSdpCandidateDiagnostics(sdp) {
+  const summary = {
+    total: 0,
+    relay: 0,
+    srflx: 0,
+    host: 0,
+    publicHost: 0,
+    privateHost: 0,
+    loopbackHost: 0,
+    addresses: [],
+  };
+
+  if (!sdp) {
+    return summary;
+  }
+
+  const lines = String(sdp)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("a=candidate:"));
+
+  for (const line of lines) {
+    const parts = line.slice("a=candidate:".length).split(/\s+/);
+    const address = parts[4] || "";
+    const typeIndex = parts.indexOf("typ");
+    const candidateType = typeIndex >= 0 ? parts[typeIndex + 1] : "";
+
+    summary.total += 1;
+    if (address && !summary.addresses.includes(address)) {
+      summary.addresses.push(address);
+    }
+
+    if (candidateType === "relay") {
+      summary.relay += 1;
+      continue;
+    }
+    if (candidateType === "srflx") {
+      summary.srflx += 1;
+      continue;
+    }
+    if (candidateType === "host") {
+      summary.host += 1;
+      if (isLoopbackAddress(address)) {
+        summary.loopbackHost += 1;
+      } else if (isPrivateAddress(address)) {
+        summary.privateHost += 1;
+      } else {
+        summary.publicHost += 1;
+      }
+    }
+  }
+
+  return summary;
+}
+
+function parseSdpVideoSection(sdp) {
+  if (!sdp) {
+    return null;
+  }
+
+  const lines = String(sdp)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  let current = null;
+  for (const line of lines) {
+    if (line.startsWith("m=")) {
+      const [, kind = "unknown"] = line.slice(2).split(/\s+/);
+      current =
+        kind === "video"
+          ? { kind, direction: "sendrecv", mid: null, trackId: null, codecs: [], candidates: 0 }
+          : null;
+      continue;
+    }
+
+    if (!current) {
+      continue;
+    }
+    if (line.startsWith("a=sendrecv") || line.startsWith("a=sendonly") || line.startsWith("a=recvonly") || line.startsWith("a=inactive")) {
+      current.direction = line.slice(2);
+      continue;
+    }
+    if (line.startsWith("a=mid:")) {
+      current.mid = line.slice("a=mid:".length);
+      continue;
+    }
+    if (line.startsWith("a=msid:")) {
+      const [, trackId = ""] = line.slice("a=msid:".length).split(/\s+/, 2);
+      current.trackId = trackId || null;
+      continue;
+    }
+    if (line.startsWith("a=rtpmap:")) {
+      current.codecs.push(line.slice("a=rtpmap:".length));
+      continue;
+    }
+    if (line.startsWith("a=candidate:")) {
+      current.candidates += 1;
+    }
+  }
+
+  return current;
+}
+
 function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
   if (!peer) {
     return Promise.reject(new Error("RTCPeerConnection is not available"));
@@ -487,20 +615,20 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
 
   const answerSummary = useMemo(() => {
     const diagnostics = sessionInfo?.answerDiagnostics;
-    const videoSection = diagnostics?.mediaSections?.find((section) => section.kind === "video");
+    const videoSection = diagnostics?.mediaSections?.find((section) => section.kind === "video") || parseSdpVideoSection(answerSdp);
     if (!videoSection) {
       return "Answer SDP not available yet.";
     }
     return [
       `video=${videoSection.direction}`,
       `mid=${videoSection.mid || "n/a"}`,
-      `candidates=${videoSection.iceCandidates}`,
+      `candidates=${videoSection.iceCandidates ?? videoSection.candidates ?? 0}`,
       `codecs=${videoSection.codecs.length}`,
       videoSection.trackId ? `track=${videoSection.trackId}` : null,
     ]
       .filter(Boolean)
       .join(" | ");
-  }, [sessionInfo]);
+  }, [answerSdp, sessionInfo]);
 
   useEffect(() => {
     if (!onDiagnosticsChange) {
@@ -751,6 +879,7 @@ function App() {
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [framePreviewTick, setFramePreviewTick] = useState(0);
   const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
+  const webrtcFallbackRef = useRef(false);
 
   const handleWebrtcMessage = useCallback((nextMessage) => {
     setMessage(nextMessage);
@@ -893,6 +1022,52 @@ function App() {
     }, 2000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (streamMode === "webrtc") {
+      webrtcFallbackRef.current = false;
+    }
+  }, [streamMode]);
+
+  useEffect(() => {
+    if (streamMode !== "webrtc" || webrtcFallbackRef.current) {
+      return;
+    }
+
+    const answerSdp = webrtcDiagnostics?.answerSdp || "";
+    const candidateDiagnostics = parseSdpCandidateDiagnostics(answerSdp);
+    const packetsReceived = webrtcDiagnostics?.receiverStats?.packetsReceived ?? 0;
+    const sessionState = webrtcDiagnostics?.sessionInfo?.state || "";
+    const peerState = webrtcDiagnostics?.sessionInfo?.peerConnectionState || "";
+    const iceState = webrtcDiagnostics?.sessionInfo?.iceConnectionState || "";
+    const failedStates = ["failed", "disconnected", "closed", "expired", "media-failed"];
+    const transportFailed =
+      failedStates.includes(sessionState) || failedStates.includes(peerState) || failedStates.includes(iceState);
+    const hostOnlyFailure =
+      candidateDiagnostics.total > 0 &&
+      candidateDiagnostics.relay === 0 &&
+      candidateDiagnostics.publicHost === 0 &&
+      packetsReceived === 0 &&
+      transportFailed;
+
+    if (!hostOnlyFailure) {
+      return;
+    }
+
+    webrtcFallbackRef.current = true;
+    const shownAddresses = candidateDiagnostics.addresses.slice(0, 3).join(", ");
+    const fallbackMessage = [
+      "Custom WebRTC could not establish media because the bridge answer only exposed private or loopback ICE candidates",
+      shownAddresses ? `(${shownAddresses})` : "",
+      "and no relay candidate. Switched to PNG mode. Check TURN reachability and that TURN credentials are not placeholders.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    setWebrtcNotice(fallbackMessage);
+    setMessage(fallbackMessage);
+    setStreamMode("png");
+  }, [streamMode, webrtcDiagnostics]);
 
   const stateColor = (state) =>
     state === "connected" || state === "ready"

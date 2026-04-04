@@ -165,12 +165,6 @@ function parseSdpCandidateDiagnostics(sdp) {
   return summary;
 }
 
-function hasRemoteVideoTrack(runtimeEvents) {
-  return Array.isArray(runtimeEvents)
-    ? runtimeEvents.some((entry) => entry?.message === "Browser received remote video track")
-    : false;
-}
-
 function parseSdpVideoSection(sdp) {
   if (!sdp) {
     return null;
@@ -885,7 +879,7 @@ function App() {
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [framePreviewTick, setFramePreviewTick] = useState(0);
   const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
-  const webrtcFallbackRef = useRef(false);
+  const webrtcFailureRef = useRef(false);
 
   const handleWebrtcMessage = useCallback((nextMessage) => {
     setMessage(nextMessage);
@@ -1031,12 +1025,12 @@ function App() {
 
   useEffect(() => {
     if (streamMode === "webrtc") {
-      webrtcFallbackRef.current = false;
+      webrtcFailureRef.current = false;
     }
   }, [streamMode]);
 
   useEffect(() => {
-    if (streamMode !== "webrtc" || webrtcFallbackRef.current) {
+    if (streamMode !== "webrtc" || webrtcFailureRef.current) {
       return;
     }
 
@@ -1049,7 +1043,6 @@ function App() {
     const peerState = webrtcDiagnostics?.sessionInfo?.peerConnectionState || "";
     const iceState = webrtcDiagnostics?.sessionInfo?.iceConnectionState || "";
     const browserVideoReadyState = Number(webrtcDiagnostics?.videoStats?.readyState ?? 0);
-    const remoteTrackSeen = hasRemoteVideoTrack(webrtcDiagnostics?.runtimeEvents);
     const hardFailedStates = ["failed", "closed", "expired", "media-failed"];
     const transportFailed =
       hardFailedStates.includes(sessionState) ||
@@ -1063,26 +1056,25 @@ function App() {
       framesReceived === 0 &&
       framesDecoded === 0 &&
       browserVideoReadyState < HTMLMediaElement.HAVE_CURRENT_DATA &&
-      !remoteTrackSeen &&
       transportFailed;
 
     if (!hostOnlyFailure) {
       return;
     }
 
-    webrtcFallbackRef.current = true;
+    webrtcFailureRef.current = true;
     const shownAddresses = candidateDiagnostics.addresses.slice(0, 3).join(", ");
-    const fallbackMessage = [
-      "Custom WebRTC could not establish media because the bridge answer only exposed private or loopback ICE candidates",
+    const failureMessage = [
+      "Custom WebRTC failed because the bridge answer only exposed private or loopback ICE candidates",
       shownAddresses ? `(${shownAddresses})` : "",
-      "and no relay candidate. Switched to PNG mode. Check TURN reachability and that TURN credentials are not placeholders.",
+      "and no relay candidate, so the browser had no reachable media path. Check TURN reachability and that deployed TURN credentials are not placeholders.",
     ]
       .filter(Boolean)
       .join(" ");
 
-    setWebrtcNotice(fallbackMessage);
-    setMessage(fallbackMessage);
-    setStreamMode("png");
+    setWebrtcNotice(failureMessage);
+    setMessage(failureMessage);
+    setEmuState("error");
   }, [streamMode, webrtcDiagnostics]);
 
   const stateColor = (state) =>

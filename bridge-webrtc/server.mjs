@@ -31,6 +31,7 @@ const answerTimeoutMs = Number.parseInt(process.env.WEBRTC_ANSWER_TIMEOUT_MS || 
 const sessionIdleTimeoutMs = Number.parseInt(process.env.WEBRTC_SESSION_IDLE_TIMEOUT_MS || "300000", 10);
 const sessionRetentionMs = Number.parseInt(process.env.WEBRTC_SESSION_RETENTION_MS || "30000", 10);
 const turnProbeTimeoutMs = Math.max(1000, Number.parseInt(process.env.TURN_PROBE_TIMEOUT_MS || "4000", 10));
+const allowRelayFallback = process.env.WEBRTC_ALLOW_RELAY_FALLBACK !== "false";
 const placeholderSecretPatterns = [/^PLACEHOLDER/i, /^REPLACE_ME/i, /^CHANGEME$/i];
 const hasConfiguredTurnSecret = Boolean(
   turnKey &&
@@ -310,6 +311,20 @@ function summarizeTurnFailure(session, diagnostics) {
   }
 
   return recentErrorText ? `Recent ICE errors: ${recentErrorText}.` : null;
+}
+
+function summarizeCandidateTypes(candidateTypes) {
+  if (!candidateTypes) {
+    return "no candidate diagnostics";
+  }
+
+  return [
+    `total=${candidateTypes.total ?? 0}`,
+    `relay=${candidateTypes.relay ?? 0}`,
+    `host=${candidateTypes.host ?? 0}`,
+    `srflx=${candidateTypes.srflx ?? 0}`,
+    `prflx=${candidateTypes.prflx ?? 0}`,
+  ].join(", ");
 }
 
 function parseCandidateDiagnostics(sdp) {
@@ -594,6 +609,10 @@ function sessionPayload(session) {
       trackAttached: session.media.trackAttached,
     },
     answerDiagnostics: session.answerDiagnostics || null,
+    answerAttempts: session.answerAttempts || [],
+    turnPolicy: session.turnPolicy || null,
+    relayFallbackUsed: Boolean(session.relayFallbackUsed),
+    turnFailureSummary: session.turnFailureSummary || null,
     turnConnectivity: session.turnConnectivity,
     turnCandidateErrors: session.turnCandidateErrors.slice(-5),
     recentLogs: session.logs.slice(-10),
@@ -693,6 +712,10 @@ function createSession(offer) {
     cleanupTimer: null,
     turnCandidateErrors: [],
     turnConnectivity: null,
+    answerAttempts: [],
+    turnPolicy: null,
+    relayFallbackUsed: false,
+    turnFailureSummary: null,
   };
   sessions.set(id, session);
   scheduleSessionExpiry(session);
@@ -1114,6 +1137,7 @@ function translateInputPayload(session, payload) {
 
 async function buildAnswer(session) {
   async function attemptAnswer(iceTransportPolicy) {
+    const priorErrorCount = session.turnCandidateErrors.length;
     session.turnConnectivity = preferRelayTransport ? await probeTurnConnectivity() : null;
     if (session.turnConnectivity) {
       recordSessionLog(session, "info", "TURN connectivity preflight", session.turnConnectivity);
@@ -1171,23 +1195,71 @@ async function buildAnswer(session) {
       });
     }
 
-    return { answer: localAnswer, diagnostics };
+    return {
+      answer: localAnswer,
+      diagnostics,
+      iceTransportPolicy,
+      candidateErrors: session.turnCandidateErrors.slice(priorErrorCount),
+    };
   }
 
-  const result = await attemptAnswer(preferRelayTransport ? "relay" : "all");
+  let result = await attemptAnswer(preferRelayTransport ? "relay" : "all");
+  session.answerAttempts.push({
+    iceTransportPolicy: result.iceTransportPolicy,
+    diagnostics: result.diagnostics || null,
+    candidateErrors: result.candidateErrors || [],
+  });
+
   if (preferRelayTransport && (result.diagnostics?.candidateTypes?.relay ?? 0) === 0) {
-    throw new Error(buildRelayFailureMessage(session, result.diagnostics));
+    const relayFailureMessage = buildRelayFailureMessage(session, result.diagnostics);
+    session.turnFailureSummary = relayFailureMessage;
+
+    if (allowRelayFallback) {
+      session.relayFallbackUsed = true;
+      session.turnPolicy = {
+        requested: "relay",
+        applied: "all",
+        fallbackReason: relayFailureMessage,
+      };
+      recordSessionLog(session, "warn", "Relay-only ICE gathering produced no relay candidates; retrying with all candidates enabled.", {
+        relayCandidateSummary: summarizeCandidateTypes(result.diagnostics?.candidateTypes),
+        candidateErrors: result.candidateErrors || [],
+      });
+      closeSessionResources(session);
+      result = await attemptAnswer("all");
+      session.answerAttempts.push({
+        iceTransportPolicy: result.iceTransportPolicy,
+        diagnostics: result.diagnostics || null,
+        candidateErrors: result.candidateErrors || [],
+      });
+    } else {
+      throw new Error(relayFailureMessage);
+    }
+  }
+
+  if ((result.diagnostics?.candidateTypes?.total ?? 0) === 0) {
+    session.turnFailureSummary = buildRelayFailureMessage(session, result.diagnostics);
+    throw new Error(session.turnFailureSummary);
   }
 
   session.answer = result.answer;
   session.answerDiagnostics = result.diagnostics;
+  if (!session.turnPolicy) {
+    session.turnPolicy = {
+      requested: result.iceTransportPolicy,
+      applied: result.iceTransportPolicy,
+      fallbackReason: null,
+    };
+  }
 
   setSessionState(
     session,
     captureMode === "stub" ? "answered-no-media" : "answered",
     captureMode === "stub"
       ? "SDP answer created successfully, but media is disabled because the bridge is in stub mode."
-      : "SDP answer created successfully. Waiting for the browser peer to connect.",
+      : session.relayFallbackUsed
+        ? "SDP answer created after retrying ICE gathering with all candidates enabled. Waiting for the browser peer to connect."
+        : "SDP answer created successfully. Waiting for the browser peer to connect.",
     { log: true }
   );
 

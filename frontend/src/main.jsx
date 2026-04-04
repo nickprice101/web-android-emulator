@@ -214,6 +214,20 @@ function parseSdpVideoSection(sdp) {
   return current;
 }
 
+function formatCandidateTypeSummary(candidateTypes) {
+  if (!candidateTypes) {
+    return "n/a";
+  }
+
+  return [
+    `total ${candidateTypes.total ?? 0}`,
+    `relay ${candidateTypes.relay ?? 0}`,
+    `host ${candidateTypes.host ?? 0}`,
+    `srflx ${candidateTypes.srflx ?? 0}`,
+    `prflx ${candidateTypes.prflx ?? 0}`,
+  ].join(" | ");
+}
+
 function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
   if (!peer) {
     return Promise.reject(new Error("RTCPeerConnection is not available"));
@@ -629,6 +643,21 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
       .filter(Boolean)
       .join(" | ");
   }, [answerSdp, sessionInfo]);
+
+  const answerAttemptSummary = useMemo(() => {
+    const attempts = Array.isArray(sessionInfo?.answerAttempts) ? sessionInfo.answerAttempts : [];
+    if (attempts.length === 0) {
+      return "No bridge ICE attempts recorded yet.";
+    }
+
+    return attempts
+      .map((attempt, index) => {
+        const candidateSummary = formatCandidateTypeSummary(attempt?.diagnostics?.candidateTypes);
+        const errorCount = Array.isArray(attempt?.candidateErrors) ? attempt.candidateErrors.length : 0;
+        return `attempt ${index + 1}: ${attempt?.iceTransportPolicy || "unknown"} | ${candidateSummary} | errors ${errorCount}`;
+      })
+      .join("\n");
+  }, [sessionInfo]);
 
   useEffect(() => {
     if (!onDiagnosticsChange) {
@@ -1482,6 +1511,18 @@ function App() {
                   {webrtcDiagnostics?.sessionInfo?.iceGatheringState || "new"}
                 </div>
                 <div>
+                  Bridge TURN policy: requested {webrtcDiagnostics?.sessionInfo?.turnPolicy?.requested || "n/a"} | applied{" "}
+                  {webrtcDiagnostics?.sessionInfo?.turnPolicy?.applied || "n/a"} | fallback{" "}
+                  {webrtcDiagnostics?.sessionInfo?.relayFallbackUsed ? "yes" : "no"}
+                </div>
+                <div>
+                  Bridge candidates:{" "}
+                  {formatCandidateTypeSummary(webrtcDiagnostics?.sessionInfo?.answerDiagnostics?.candidateTypes)}
+                </div>
+                <div>
+                  Bridge attempts: {Array.isArray(webrtcDiagnostics?.sessionInfo?.answerAttempts) ? webrtcDiagnostics.sessionInfo.answerAttempts.length : 0}
+                </div>
+                <div>
                   TURN preflight: dns{" "}
                   {webrtcDiagnostics?.sessionInfo?.turnConnectivity?.dns
                     ? webrtcDiagnostics.sessionInfo.turnConnectivity.dns.ok
@@ -1502,6 +1543,9 @@ function App() {
                         ? "ok"
                         : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.tls.message})`
                     : "pending"}
+                </div>
+                <div>
+                  TURN failure summary: {webrtcDiagnostics?.sessionInfo?.turnFailureSummary || "none"}
                 </div>
               </div>
 
@@ -1547,6 +1591,26 @@ function App() {
                   <textarea
                     readOnly
                     value={webrtcDiagnostics?.answerSdp || "Answer SDP will appear here after session creation."}
+                    style={{
+                      width: "100%",
+                      minHeight: 180,
+                      resize: "vertical",
+                      fontSize: 10,
+                      lineHeight: 1.45,
+                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                      padding: 8,
+                      borderRadius: 10,
+                      color: "#d7dfed",
+                      background: "#0f1218",
+                      border: "1px solid #2b313d",
+                    }}
+                  />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, color: "#9db0cc", marginBottom: 6 }}>Bridge ICE attempts</div>
+                  <textarea
+                    readOnly
+                    value={answerAttemptSummary}
                     style={{
                       width: "100%",
                       minHeight: 180,

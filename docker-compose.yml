@@ -93,6 +93,13 @@ services:
       TURN_KEY: "PLACEHOLDER_TURN_KEY"
       TURN_TTL: "86400"
       TURN_USERNAME_SUFFIX: "emuuser"
+      # TURN_BRIDGE_HOST: "192.168.1.152"
+      # Set TURN_BRIDGE_HOST to the TURN server's LAN/internal IP when the
+      # bridge container cannot reach TURN_HOST directly (e.g. when coturn
+      # listens on an internal IP and the router does not support hairpin NAT
+      # for the public DNS name).  The bridge will use this host for its own
+      # TURN allocation while browsers continue to use TURN_HOST.  Leave unset
+      # if the bridge can reach TURN_HOST without issue.
     expose:
       - "8090"
     healthcheck:

@@ -22,6 +22,7 @@ const defaultScreenHeight = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFA
 const turnKey = process.env.TURN_KEY || process.env.TURN_SECRET || "";
 const turnSecretSource = process.env.TURN_KEY ? "TURN_KEY" : process.env.TURN_SECRET ? "TURN_SECRET" : null;
 const turnHost = process.env.TURN_HOST || "";
+const turnBridgeHost = process.env.TURN_BRIDGE_HOST?.trim() || "";
 const turnPort = process.env.TURN_PORT || "443";
 const turnProtocol = process.env.TURN_PROTOCOL || "tcp";
 const turnScheme = process.env.TURN_SCHEME || "turns";
@@ -135,8 +136,9 @@ function uniqueValues(values) {
 
 async function resolveTurnServerUrls() {
   const hostnameUrl = buildTurnServerUrl();
+  const bridgeUrl = turnBridgeHost && turnBridgeHost !== turnHost ? buildTurnServerUrl(turnBridgeHost) : null;
   if (!hostnameUrl || !turnHost) {
-    return { hostnameUrl: null, resolvedUrls: [], resolvedAddresses: [] };
+    return { hostnameUrl: null, bridgeUrl, resolvedUrls: [], resolvedAddresses: [] };
   }
 
   try {
@@ -144,11 +146,12 @@ async function resolveTurnServerUrls() {
     const resolvedAddresses = uniqueValues(records.map((record) => record.address));
     return {
       hostnameUrl,
+      bridgeUrl,
       resolvedAddresses,
       resolvedUrls: resolvedAddresses.map((address) => buildTurnServerUrl(address)).filter(Boolean),
     };
   } catch {
-    return { hostnameUrl, resolvedUrls: [], resolvedAddresses: [] };
+    return { hostnameUrl, bridgeUrl, resolvedUrls: [], resolvedAddresses: [] };
   }
 }
 
@@ -167,6 +170,12 @@ function buildTurnWarnings() {
     warnings.push("TURN_KEY is not configured, so the bridge will not mint TURN credentials.");
   } else if (placeholderSecretPatterns.some((pattern) => pattern.test(turnKey.trim()))) {
     warnings.push("TURN_KEY still looks like a placeholder value, so TURN credentials are disabled.");
+  }
+
+  if (turnBridgeHost && turnBridgeHost !== turnHost) {
+    warnings.push(
+      `TURN_BRIDGE_HOST is set to '${turnBridgeHost}'. The bridge will use this host to reach the TURN server internally (e.g. to bypass hairpin NAT). Browsers still use TURN_HOST '${turnHost}'.`
+    );
   }
 
   return warnings;
@@ -299,16 +308,38 @@ async function probeTurnConnectivity() {
     return null;
   }
 
+  const effectiveHost = turnBridgeHost || turnHost;
   const dnsResult = await probeTurnDns();
   const tcpResult = dnsResult.ok ? await probeTurnTcp() : null;
   const tlsResult = dnsResult.ok && tcpResult?.ok ? await probeTurnTls() : null;
 
+  let bridgeProbe = null;
+  if (turnBridgeHost && turnBridgeHost !== turnHost) {
+    const bridgeTcpResult = await connectTcp(turnBridgeHost, Number.parseInt(turnPort, 10) || 443).then(
+      (r) => r,
+      (e) => ({ ok: false, ...probeErrorDetails(e) })
+    );
+    const bridgeTlsResult =
+      turnScheme === "turns" && bridgeTcpResult?.ok
+        ? await handshakeTls(turnBridgeHost, Number.parseInt(turnPort, 10) || 443).then(
+            (r) => r,
+            (e) => ({ ok: false, ...probeErrorDetails(e) })
+          )
+        : null;
+    bridgeProbe = {
+      host: turnBridgeHost,
+      tcp: bridgeTcpResult,
+      tls: bridgeTlsResult,
+    };
+  }
+
   return {
     at: nowIso(),
-    serverUrl: buildTurnServerUrl(),
+    serverUrl: buildTurnServerUrl(effectiveHost),
     dns: dnsResult,
     tcp: tcpResult,
     tls: tlsResult,
+    bridgeHostProbe: bridgeProbe,
   };
 }
 
@@ -319,6 +350,14 @@ function summarizeTurnFailure(session, diagnostics) {
   const recentErrorText = recentErrors
     .map((entry) => entry.errorText || entry.url || `ICE error ${entry.errorCode || "unknown"}`)
     .join(" | ");
+
+  if (probe?.bridgeHostProbe && !probe.bridgeHostProbe.tcp?.ok) {
+    return `TURN_BRIDGE_HOST '${turnBridgeHost}' TCP connect on port ${turnPort} failed: ${probe.bridgeHostProbe.tcp?.message || "unknown error"}. The bridge cannot reach the TURN server at this internal address.`;
+  }
+
+  if (probe?.bridgeHostProbe && probe.bridgeHostProbe.tls && !probe.bridgeHostProbe.tls?.ok) {
+    return `TURN_BRIDGE_HOST '${turnBridgeHost}' TLS handshake on port ${turnPort} failed: ${probe.bridgeHostProbe.tls?.message || "unknown error"}.`;
+  }
 
   if (probe?.dns && !probe.dns.ok) {
     return `DNS lookup failed for ${turnHost}: ${probe.dns.message}.`;
@@ -1441,8 +1480,12 @@ async function buildAnswer(session) {
   }
 
   let result = await attemptAnswer(preferRelayTransport ? "relay" : "all", {
-    turnUrls: turnUrlOptions.hostnameUrl ? [turnUrlOptions.hostnameUrl] : [],
-    turnUrlStrategy: "hostname",
+    turnUrls: turnUrlOptions.bridgeUrl
+      ? [turnUrlOptions.bridgeUrl]
+      : turnUrlOptions.hostnameUrl
+        ? [turnUrlOptions.hostnameUrl]
+        : [],
+    turnUrlStrategy: turnUrlOptions.bridgeUrl ? "bridge-host" : "hostname",
   });
   session.answerAttempts.push({
     iceTransportPolicy: result.iceTransportPolicy,
@@ -1451,6 +1494,36 @@ async function buildAnswer(session) {
     diagnostics: result.diagnostics || null,
     candidateErrors: result.candidateErrors || [],
   });
+
+  if (
+    preferRelayTransport &&
+    (result.diagnostics?.candidateTypes?.relay ?? 0) === 0 &&
+    result.turnUrlStrategy === "bridge-host" &&
+    turnUrlOptions.hostnameUrl
+  ) {
+    recordSessionLog(
+      session,
+      "warn",
+      "Relay-only ICE gathering via TURN_BRIDGE_HOST produced no relay candidates; retrying with the public TURN_HOST hostname.",
+      {
+        bridgeUrl: turnUrlOptions.bridgeUrl,
+        hostnameUrl: turnUrlOptions.hostnameUrl,
+        candidateErrors: result.candidateErrors || [],
+      }
+    );
+    closeSessionResources(session);
+    result = await attemptAnswer("relay", {
+      turnUrls: [turnUrlOptions.hostnameUrl],
+      turnUrlStrategy: "hostname",
+    });
+    session.answerAttempts.push({
+      iceTransportPolicy: result.iceTransportPolicy,
+      turnUrlStrategy: result.turnUrlStrategy,
+      turnUrls: result.turnUrls || [],
+      diagnostics: result.diagnostics || null,
+      candidateErrors: result.candidateErrors || [],
+    });
+  }
 
   if (
     preferRelayTransport &&
@@ -1638,6 +1711,8 @@ const server = http.createServer(async (req, res) => {
         configured: hasConfiguredTurnSecret,
         secretSource: turnSecretSource,
         url: buildTurnServerUrl(),
+        bridgeHost: turnBridgeHost && turnBridgeHost !== turnHost ? turnBridgeHost : null,
+        bridgeUrl: turnBridgeHost && turnBridgeHost !== turnHost ? buildTurnServerUrl(turnBridgeHost) : null,
       },
     });
     return;

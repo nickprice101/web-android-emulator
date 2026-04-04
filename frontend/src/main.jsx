@@ -1524,7 +1524,21 @@ function App() {
                   {webrtcDiagnostics?.sessionInfo?.turnResolution?.resolvedAddresses?.length
                     ? ` | resolved IPs ${webrtcDiagnostics.sessionInfo.turnResolution.resolvedAddresses.join(", ")}`
                     : ""}
+                  {webrtcDiagnostics?.sessionInfo?.turnResolution?.bridgeUrl
+                    ? ` | bridge URL ${webrtcDiagnostics.sessionInfo.turnResolution.bridgeUrl}`
+                    : ""}
                 </div>
+                {webrtcDiagnostics?.sessionInfo?.turnConnectivity?.bridgeHostProbe && (
+                  <div>
+                    TURN bridge-host preflight ({webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.host}): tcp{" "}
+                    {webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tcp?.ok
+                      ? "ok"
+                      : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tcp?.message || "unknown"})`}
+                    {webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls
+                      ? ` | tls ${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls.ok ? "ok" : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls.message || "unknown"})`}`
+                      : ""}
+                  </div>
+                )}
                 <div>
                   Bridge candidates:{" "}
                   {formatCandidateTypeSummary(webrtcDiagnostics?.sessionInfo?.answerDiagnostics?.candidateTypes)}

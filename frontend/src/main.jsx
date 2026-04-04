@@ -165,6 +165,12 @@ function parseSdpCandidateDiagnostics(sdp) {
   return summary;
 }
 
+function hasRemoteVideoTrack(runtimeEvents) {
+  return Array.isArray(runtimeEvents)
+    ? runtimeEvents.some((entry) => entry?.message === "Browser received remote video track")
+    : false;
+}
+
 function parseSdpVideoSection(sdp) {
   if (!sdp) {
     return null;
@@ -1037,17 +1043,27 @@ function App() {
     const answerSdp = webrtcDiagnostics?.answerSdp || "";
     const candidateDiagnostics = parseSdpCandidateDiagnostics(answerSdp);
     const packetsReceived = webrtcDiagnostics?.receiverStats?.packetsReceived ?? 0;
+    const framesReceived = webrtcDiagnostics?.receiverStats?.framesReceived ?? 0;
+    const framesDecoded = webrtcDiagnostics?.receiverStats?.framesDecoded ?? 0;
     const sessionState = webrtcDiagnostics?.sessionInfo?.state || "";
     const peerState = webrtcDiagnostics?.sessionInfo?.peerConnectionState || "";
     const iceState = webrtcDiagnostics?.sessionInfo?.iceConnectionState || "";
-    const failedStates = ["failed", "disconnected", "closed", "expired", "media-failed"];
+    const browserVideoReadyState = Number(webrtcDiagnostics?.videoStats?.readyState ?? 0);
+    const remoteTrackSeen = hasRemoteVideoTrack(webrtcDiagnostics?.runtimeEvents);
+    const hardFailedStates = ["failed", "closed", "expired", "media-failed"];
     const transportFailed =
-      failedStates.includes(sessionState) || failedStates.includes(peerState) || failedStates.includes(iceState);
+      hardFailedStates.includes(sessionState) ||
+      hardFailedStates.includes(peerState) ||
+      hardFailedStates.includes(iceState);
     const hostOnlyFailure =
       candidateDiagnostics.total > 0 &&
       candidateDiagnostics.relay === 0 &&
       candidateDiagnostics.publicHost === 0 &&
       packetsReceived === 0 &&
+      framesReceived === 0 &&
+      framesDecoded === 0 &&
+      browserVideoReadyState < HTMLMediaElement.HAVE_CURRENT_DATA &&
+      !remoteTrackSeen &&
       transportFailed;
 
     if (!hostOnlyFailure) {

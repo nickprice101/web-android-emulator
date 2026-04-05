@@ -1377,12 +1377,11 @@ class EmulatorVideoCapture {
       "-max_delay",
       "0",
       ...(this.mode === "adb-screenrecord"
-        ? ["-probesize", "32", "-analyzeduration", "0", "-f", "h264"]
+        ? ["-probesize", "128", "-analyzeduration", "0", "-f", "h264", "-r", String(captureFps)]
         : ["-f", "image2pipe", "-codec:v", "png"]),
       "-i",
       "pipe:0",
       "-an",
-      ...(this.mode === "adb-screenrecord" ? ["-vf", `fps=${captureFps}`] : []),
       "-pix_fmt",
       "yuv420p",
       "-f",
@@ -1580,6 +1579,11 @@ class EmulatorVideoCapture {
           return;
         }
         recordSessionLog(this.session, "warn", "Screenrecord stream ended; reconnecting");
+        // Discard any partial raw-video frame that was accumulating for the
+        // previous segment.  Each new screenrecord segment restarts the H.264
+        // bitstream from scratch (new SPS/PPS + IDR), so the old buffer bytes
+        // do not belong to the new segment's first frame.
+        this.rawBuffer = Buffer.alloc(0);
       } catch (error) {
         if (!this.running || error.name === "AbortError") {
           return;

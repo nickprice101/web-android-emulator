@@ -19,14 +19,21 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <text x="836" y="34" text-anchor="middle" fill="#F3D9A4" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC Error</text>
   <rect x="16" y="78" width="500" height="790" rx="20" fill="#05070B" stroke="#202634"/>
   <rect x="16" y="78" width="500" height="48" rx="20" fill="#0B1018"/>
-  <text x="34" y="108" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="14">Custom WebRTC error state</text>
-  <text x="323" y="108" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="13">bridge: ready | mode: webrtc | fallback: disabled</text>
+  <text x="34" y="108" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="14">Custom WebRTC bridge (low latency)</text>
+  <text x="248" y="108" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="13">bridge: ready | session: connected | capture: screen captures</text>
   <rect x="42" y="146" width="448" height="520" rx="26" fill="url(#screen)"/>
-  <rect x="42" y="598" width="250" height="54" rx="12" fill="#09111C" fill-opacity="0.82"/>
-  <text x="58" y="630" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC failed and the UI keeps the error visible for TURN diagnostics.</text>
-  <rect x="310" y="598" width="154" height="54" rx="12" fill="#09111C" fill-opacity="0.82"/>
-  <text x="326" y="622" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">reason: host-only ICE</text>
-  <text x="326" y="640" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">display: error banner</text>
+  <rect x="42" y="566" width="228" height="86" rx="12" fill="#09111C" fill-opacity="0.82"/>
+  <text x="58" y="590" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Peer connected, but the bridge</text>
+  <text x="58" y="608" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">switched away from screen streaming.</text>
+  <text x="58" y="626" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">Capture: requested streaming -&gt;</text>
+  <text x="58" y="644" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">active screen captures.</text>
+  <rect x="284" y="566" width="180" height="118" rx="12" fill="#09111C" fill-opacity="0.82"/>
+  <text x="300" y="590" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">capture: screen captures</text>
+  <text x="300" y="610" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">requested streaming -&gt;</text>
+  <text x="300" y="628" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">active screen captures</text>
+  <text x="300" y="648" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">reason: Screen streaming</text>
+  <text x="300" y="666" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">never produced a first frame</text>
+  <text x="300" y="684" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">backend: apkbridge /frame</text>
   <rect x="538" y="78" width="886" height="790" rx="18" fill="#171A21"/>
   <rect x="560" y="102" width="842" height="86" rx="12" fill="#111823" stroke="#2B313D"/>
   <text x="578" y="126" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Package name</text>
@@ -47,16 +54,16 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <text x="578" y="466" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Display diagnostics</text>
   <text x="578" y="494" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">Raw ADB frame endpoint: /api/frame</text>
   <text x="578" y="520" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Emulator screen: 1080x1920</text>
-  <text x="578" y="544" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC frame: TURN preflight succeeded, relay allocation still failed.</text>
-  <text x="578" y="568" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Tip: check TURN reachability and make sure TURN credentials are real deployment values.</text>
+  <text x="578" y="544" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC frame: requested streaming -&gt; active screen captures | Screen streaming never produced a first frame.</text>
+  <text x="578" y="568" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Tip: when this happens, inspect the new overlay and bridge session logs before blaming TURN.</text>
   <rect x="1220" y="472" width="146" height="102" rx="10" fill="url(#screen)" stroke="#2B313D"/>
   <text x="1228" y="590" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="11">Raw screencap preview</text>
   <rect x="560" y="616" width="842" height="212" rx="12" fill="#111823" stroke="#2B313D"/>
   <text x="578" y="642" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Custom WebRTC diagnostics</text>
   <text x="578" y="668" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Browser offer: type=offer | candidates=4</text>
   <text x="578" y="688" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Bridge answer: video=sendonly | mid=0 | candidates=3 | codecs=11 | track=6ecbb6d6...</text>
-  <text x="578" y="708" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Browser RTP: packets 0 | bytes 0 | frames decoded 0</text>
-  <text x="578" y="728" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Bridge states: session failed | ice closed | gathering complete | dns ok | tcp ok | tls ok</text>
+  <text x="578" y="708" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Browser RTP: packets 281 | bytes 1450192 | frames decoded 54</text>
+  <text x="578" y="728" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Capture backend: requested streaming | active screen captures | fallback yes</text>
   <rect x="578" y="742" width="396" height="68" rx="10" fill="#0F1218" stroke="#2B313D"/>
   <text x="594" y="764" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">[09:26:09] Bridge SDP answer applied in browser {"sendCapableVideo":true}</text>
   <text x="594" y="784" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">[09:26:30] TURN connectivity preflight {"dns":"ok","tcp":"ok","tls":"ok"}</text>

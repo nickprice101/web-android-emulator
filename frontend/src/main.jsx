@@ -344,6 +344,87 @@ function formatAnswerAttemptSummary(attempts) {
     .join("\n");
 }
 
+function describeCaptureMode(mode) {
+  if (mode === "adb-screenrecord") {
+    return "streaming";
+  }
+  if (mode === "adb-screencap") {
+    return "screen captures";
+  }
+  if (mode === "stub") {
+    return "disabled";
+  }
+  return mode || "unknown";
+}
+
+function describeCaptureBackend(mode) {
+  if (mode === "adb-screenrecord") {
+    return "apkbridge /screenrecord";
+  }
+  if (mode === "adb-screencap") {
+    return "apkbridge /frame";
+  }
+  if (mode === "stub") {
+    return "stub mode";
+  }
+  return mode || "unknown";
+}
+
+function describeCaptureReason(reason, activeMode) {
+  if (reason === "initial-start") {
+    return activeMode === "adb-screenrecord"
+      ? "The bridge is using the low-latency screenrecord stream."
+      : "The bridge started directly in screen-capture polling mode.";
+  }
+  if (reason === "screenrecord-retry") {
+    return "The bridge is retrying the screen streaming path.";
+  }
+  if (reason === "screenrecord-restored") {
+    return "Screen streaming delivered a frame again, so the bridge switched back to streaming.";
+  }
+  if (reason === "screenrecord-first-frame-timeout") {
+    return "Screen streaming never produced a first frame, so the bridge fell back to screen captures.";
+  }
+  if (!reason) {
+    return "";
+  }
+  return reason.replace(/-/g, " ");
+}
+
+function buildCaptureOverlay(sessionInfo, logs, receiverStats) {
+  const requestedMode = sessionInfo?.media?.requestedSource || sessionInfo?.mode || null;
+  const activeMode = sessionInfo?.media?.source || requestedMode || null;
+  const usingFallback = Boolean(sessionInfo?.media?.usingFallback);
+  const activeReason = sessionInfo?.media?.fallbackReason || sessionInfo?.media?.activeReason || null;
+  const latestLog = (Array.isArray(logs) ? [...logs].reverse() : []).find((entry) =>
+    ["Capture fallback activated", "Capture pipeline started", "Connected to apkbridge screenrecord stream"].includes(
+      entry?.message
+    )
+  );
+  const fpsValue =
+    receiverStats?.framesPerSecond != null && Number.isFinite(receiverStats.framesPerSecond)
+      ? Math.round(receiverStats.framesPerSecond)
+      : null;
+
+  return {
+    requestedLabel: describeCaptureMode(requestedMode),
+    activeLabel: describeCaptureMode(activeMode),
+    backendLabel: describeCaptureBackend(activeMode),
+    usingFallback,
+    statusLine:
+      requestedMode && activeMode && requestedMode !== activeMode
+        ? `requested ${describeCaptureMode(requestedMode)} -> active ${describeCaptureMode(activeMode)}`
+        : `${describeCaptureMode(activeMode)} active`,
+    reasonLine:
+      describeCaptureReason(activeReason, activeMode) ||
+      latestLog?.message ||
+      (activeMode === "adb-screenrecord"
+        ? "The bridge is trying to keep the streaming path active."
+        : "The bridge is polling still frames from the emulator."),
+    fpsLine: fpsValue == null ? null : `${fpsValue} fps in browser`,
+  };
+}
+
 function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
   if (!peer) {
     return Promise.reject(new Error("RTCPeerConnection is not available"));
@@ -770,6 +851,10 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
     return formatAnswerAttemptSummary(sessionInfo?.answerAttempts);
   }, [sessionInfo]);
 
+  const captureOverlay = useMemo(() => {
+    return buildCaptureOverlay(sessionInfo, logs, receiverStats);
+  }, [logs, receiverStats, sessionInfo]);
+
   useEffect(() => {
     if (!onDiagnosticsChange) {
       return;
@@ -936,7 +1021,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
       >
         <span>Custom WebRTC bridge (low latency)</span>
         <span>
-          bridge: {bridgeState} | session: {sessionState}
+          bridge: {bridgeState} | session: {sessionState} | capture: {captureOverlay.activeLabel}
         </span>
       </div>
 
@@ -993,6 +1078,9 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
             >
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Preparing low-latency stream</div>
               <div>{sessionMessage || "Waiting for custom bridge media..."}</div>
+              <div style={{ marginTop: 8, color: "#9db0cc" }}>
+                Capture: {captureOverlay.statusLine}. {captureOverlay.reasonLine}
+              </div>
               {notes.length > 0 && (
                 <div style={{ marginTop: 10 }}>
                   {notes.map((note) => (
@@ -1036,7 +1124,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         >
           <div
             style={{
-              maxWidth: "55%",
+              maxWidth: "60%",
               padding: "8px 10px",
               background: "rgba(6, 8, 12, 0.78)",
               borderRadius: 10,
@@ -1048,7 +1136,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
           </div>
           <div
             style={{
-              minWidth: 180,
+              minWidth: 260,
               padding: "8px 10px",
               background: "rgba(6, 8, 12, 0.78)",
               borderRadius: 10,
@@ -1056,16 +1144,17 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
               color: "#d7dfed",
             }}
           >
+            <div>capture: {captureOverlay.activeLabel}{captureOverlay.usingFallback ? " (fallback)" : ""}</div>
+            <div>{captureOverlay.statusLine}</div>
+            <div>{captureOverlay.reasonLine}</div>
             <div>
               frames: {sessionInfo?.media?.framesDelivered ?? 0}
               {sessionInfo?.media?.width && sessionInfo?.media?.height
                 ? ` | ${sessionInfo.media.width}x${sessionInfo.media.height}`
                 : ""}
-              {receiverStats?.framesPerSecond != null
-                ? ` | ${Math.round(receiverStats.framesPerSecond)} fps`
-                : ""}
+              {captureOverlay.fpsLine ? ` | ${captureOverlay.fpsLine}` : ""}
             </div>
-            {logs[logs.length - 1] && <div>{logs[logs.length - 1].message}</div>}
+            <div>backend: {captureOverlay.backendLabel}</div>
           </div>
         </div>
       </div>
@@ -1656,7 +1745,7 @@ function App() {
                   <div>
                     WebRTC frame:{" "}
                     {streamMode === "webrtc"
-                      ? webrtcNotice || "waiting for session status"
+                      ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}`
                       : "switch to Custom WebRTC to compare"}
                   </div>
                   <div>
@@ -1702,6 +1791,10 @@ function App() {
                 <div>
                   Bridge media: frames {webrtcDiagnostics?.sessionInfo?.media?.framesDelivered ?? 0} | first frame{" "}
                   {formatClockTime(webrtcDiagnostics?.sessionInfo?.media?.firstFrameAt)}
+                </div>
+                <div>
+                  Capture backend: requested {captureOverlay.requestedLabel} | active {captureOverlay.activeLabel}
+                  {captureOverlay.usingFallback ? " | fallback yes" : " | fallback no"}
                 </div>
                 <div>
                   Bridge states: session {webrtcDiagnostics?.sessionInfo?.peerConnectionState || "new"} | ice{" "}

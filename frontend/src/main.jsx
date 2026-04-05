@@ -866,6 +866,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
       sessionMessage,
       sessionInfo,
       logs,
+      captureOverlay,
       runtimeEvents,
       videoStats,
       receiverStats,
@@ -877,6 +878,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
     answerSdp,
     answerSummary,
     bridgeState,
+    captureOverlay,
     logs,
     offerSummary,
     onDiagnosticsChange,
@@ -1196,6 +1198,9 @@ function App() {
   const [framePreviewTick, setFramePreviewTick] = useState(0);
   const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
   const webrtcFailureRef = useRef(false);
+  const captureOverlay =
+    webrtcDiagnostics?.captureOverlay ||
+    buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
 
   const handleWebrtcMessage = useCallback((nextMessage) => {
     setMessage(nextMessage);

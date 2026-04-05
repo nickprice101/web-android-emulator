@@ -153,6 +153,7 @@ function buildInboundVideoStats(reports) {
     bytesReceived: inbound?.bytesReceived ?? 0,
     framesDecoded: inbound?.framesDecoded ?? track?.framesDecoded ?? 0,
     framesReceived: inbound?.framesReceived ?? track?.framesReceived ?? 0,
+    framesPerSecond: inbound?.framesPerSecond ?? null,
     keyFramesDecoded: inbound?.keyFramesDecoded ?? 0,
     firCount: inbound?.firCount ?? 0,
     pliCount: inbound?.pliCount ?? 0,
@@ -352,10 +353,14 @@ function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
     return Promise.resolve();
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const timeout = window.setTimeout(() => {
+      // Proceed with whatever candidates have been gathered so far rather than
+      // aborting the session.  Host candidates are collected almost instantly;
+      // if STUN/TURN gathering is slow the offer will still work with the
+      // candidates that are already in peer.localDescription.
       cleanup();
-      reject(new Error(`Timed out waiting for browser ICE gathering after ${timeoutMs}ms.`));
+      resolve();
     }, timeoutMs);
 
     function cleanup() {
@@ -1055,6 +1060,9 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
               frames: {sessionInfo?.media?.framesDelivered ?? 0}
               {sessionInfo?.media?.width && sessionInfo?.media?.height
                 ? ` | ${sessionInfo.media.width}x${sessionInfo.media.height}`
+                : ""}
+              {receiverStats?.framesPerSecond != null
+                ? ` | ${Math.round(receiverStats.framesPerSecond)} fps`
                 : ""}
             </div>
             {logs[logs.length - 1] && <div>{logs[logs.length - 1].message}</div>}

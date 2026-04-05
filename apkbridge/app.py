@@ -137,7 +137,7 @@ def execute_input_event(payload):
         text = str(payload.get("text", ""))
         if not text:
             raise ValueError("Input text event requires non-empty text")
-        adb("shell", "sh", "-lc", f"input text {shell_quote_text(text)}")
+        adb("shell", f"input text {shell_quote_text(text)}")
         return {"message": "Sent text input", "adb": ["shell", "input", "text", text]}
 
     if event_type in {"tap", "swipe"}:

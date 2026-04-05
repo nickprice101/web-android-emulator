@@ -228,6 +228,13 @@ function formatCandidateTypeSummary(candidateTypes) {
   ].join(" | ");
 }
 
+function formatBridgeTlsStatus(tls) {
+  if (tls.skipped) {
+    return "skipped";
+  }
+  return tls.ok ? "ok" : `failed (${tls.message || "unknown"})`;
+}
+
 function formatAnswerAttemptSummary(attempts) {
   const normalizedAttempts = Array.isArray(attempts) ? attempts : [];
   if (normalizedAttempts.length === 0) {
@@ -1535,7 +1542,7 @@ function App() {
                       ? "ok"
                       : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tcp?.message || "unknown"})`}
                     {webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls
-                      ? ` | tls ${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls.ok ? "ok" : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls.message || "unknown"})`}`
+                      ? ` | tls ${formatBridgeTlsStatus(webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls)}`
                       : ""}
                   </div>
                 )}

@@ -159,7 +159,7 @@ Only allow the ranges you actually use. A narrower Docker subnet such as `172.22
 
 The stack's `TURN_KEY` deployment secret must exactly match coturn's `static-auth-secret` value.
 
-If the WebRTC bridge needs to reach coturn on a LAN/internal IP to avoid hairpin NAT, do not switch the bridge itself to `turns:192.168.x.x`. TLS certificate validation still checks the TURN hostname. Keep `TURN_HOST=turn.yourdomain.com` in the ICE URL and instead map that hostname to the internal IP inside the bridge container, for example:
+If the WebRTC bridge needs to reach coturn on a LAN/internal IP to avoid hairpin NAT, set `TURN_BRIDGE_HOST` to the coturn LAN IP and add `TURN_BRIDGE_SCHEME=turn` with `TURN_BRIDGE_PORT=3478`. This routes the bridge's own TURN connection to the LAN IP on coturn's plain-TURN port, bypassing both libwebrtc's DNS resolver (which does not consult `/etc/hosts`) and TLS certificate hostname mismatches that arise when connecting via an IP literal with the `turns:` scheme. Browsers still use `TURN_HOST` with `TURN_SCHEME` (e.g. `turns:/443`):
 
 ```yaml
 services:
@@ -167,11 +167,15 @@ services:
     environment:
       TURN_HOST: turn.yourdomain.com
       TURN_BRIDGE_HOST: 192.168.1.152
+      TURN_BRIDGE_SCHEME: turn
+      TURN_BRIDGE_PORT: 3478
     extra_hosts:
       - "turn.yourdomain.com:192.168.1.152"
 ```
 
-That preserves SNI/certificate validation while routing the bridge's TCP connection to the LAN address.
+`TURN_BRIDGE_SCHEME` and `TURN_BRIDGE_PORT` default to `TURN_SCHEME` and `TURN_PORT` when not set. Only override them when you need the bridge to use a different scheme or port than the browser-facing TURN URL (the most common case is plain `turn:` on port 3478 to avoid TLS certificate issues on the LAN path).
+
+`extra_hosts` is still useful so that Node.js itself (preflight probes and direct HTTP requests) can resolve the TURN hostname to the LAN IP, even if libwebrtc's C++ resolver does not use `/etc/hosts`.
 
 Router port forwarding is only one half of the path. If the Pi runs its own firewall (`ufw`, `iptables`, `nftables`, etc.), allow these inbound ports there too:
 

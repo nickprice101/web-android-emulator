@@ -1251,8 +1251,19 @@ class EmulatorVideoCapture {
       const info = await fetchServiceJson(apkbridgeDeviceInfoPath);
       dimensions = info.screen || null;
     } else {
-      firstPng = await fetchFramePng();
-      dimensions = parsePngDimensions(firstPng);
+      // Try the lightweight device-info endpoint (runs `adb shell wm size`) before
+      // falling back to a full PNG screencap.  This avoids the cost of a full
+      // screencap (~500 ms–2 s) when all we need are the screen dimensions.
+      try {
+        const info = await fetchServiceJson(apkbridgeDeviceInfoPath);
+        dimensions = info.screen || null;
+      } catch {
+        // Ignored — fall through to PNG-based dimension detection below.
+      }
+      if (!dimensions) {
+        firstPng = await fetchFramePng();
+        dimensions = parsePngDimensions(firstPng);
+      }
     }
 
     this.mode = mode;
@@ -1656,16 +1667,17 @@ async function buildAnswer(session) {
 
     await peer.setRemoteDescription(new RTCSessionDescription(session.offer));
 
-    setSessionState(
-      session,
-      "starting-media",
-      captureMode === "stub"
-        ? "Bridge is in stub mode, so media attachment is skipped."
-        : "Starting the emulator capture pipeline and attaching a video track.",
-      { log: true }
-    );
-
-    await attachVideoSource(session, peer);
+    // Pre-set the video transceiver direction to sendonly so the answer SDP
+    // correctly reflects that the bridge will send video, even though the
+    // capture track is attached in parallel below.
+    if (captureMode !== "stub") {
+      const videoTransceiver = peer
+        .getTransceivers()
+        .find((t) => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video");
+      if (videoTransceiver && videoTransceiver.direction !== "sendrecv") {
+        videoTransceiver.direction = "sendonly";
+      }
+    }
 
     setSessionState(session, "creating-answer", "Creating the SDP answer for the browser peer.", { log: true });
     const answer = await peer.createAnswer();
@@ -1674,10 +1686,16 @@ async function buildAnswer(session) {
     setSessionState(
       session,
       "gathering-ice",
-      `Collecting ICE candidates before returning the non-trickle SDP answer (${iceTransportPolicy}).`,
+      `Collecting ICE candidates and starting the capture pipeline concurrently (${iceTransportPolicy}).`,
       { log: true }
     );
-    await waitForIceGatheringComplete(peer);
+
+    // Run ICE gathering and media pipeline setup in parallel.  Previously the
+    // pipeline was started before createAnswer(), which prevented ICE gathering
+    // from beginning until the (potentially slow) screencap or screenrecord
+    // initialisation finished.  Running them concurrently cuts time-to-first-
+    // frame by up to ~2 s in the typical case.
+    await Promise.all([waitForIceGatheringComplete(peer), attachVideoSource(session, peer)]);
 
     const localAnswer = {
       type: peer.localDescription?.type || answer.type,

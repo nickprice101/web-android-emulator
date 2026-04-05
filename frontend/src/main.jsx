@@ -352,10 +352,14 @@ function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
     return Promise.resolve();
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const timeout = window.setTimeout(() => {
+      // Proceed with whatever candidates have been gathered so far rather than
+      // aborting the session.  Host candidates are collected almost instantly;
+      // if STUN/TURN gathering is slow the offer will still work with the
+      // candidates that are already in peer.localDescription.
       cleanup();
-      reject(new Error(`Timed out waiting for browser ICE gathering after ${timeoutMs}ms.`));
+      resolve();
     }, timeoutMs);
 
     function cleanup() {

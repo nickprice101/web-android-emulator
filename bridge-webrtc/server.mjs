@@ -563,7 +563,7 @@ function buildAnswerSdpWithGatheredCandidates(sdp, gatheredCandidates) {
     return sdp;
   }
 
-  const lines = String(sdp).replace(/\r\n/g, "\n").split("\n");
+  const lines = String(sdp).replace(/\r\n/g, "\n").split("\n").filter(Boolean);
   const mediaSections = [];
   let current = null;
 

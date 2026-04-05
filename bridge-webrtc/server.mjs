@@ -21,6 +21,10 @@ const captureFps = Math.max(1, Number.parseInt(process.env.CAPTURE_FPS || "30", 
 const captureBitrate = Math.max(1_000_000, Number.parseInt(process.env.CAPTURE_BIT_RATE || "12000000", 10));
 const defaultScreenWidth = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_WIDTH || "1080", 10));
 const defaultScreenHeight = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_HEIGHT || "1920", 10));
+const screenrecordFirstFrameTimeoutMs = Math.max(
+  1000,
+  Number.parseInt(process.env.CAPTURE_SCREENRECORD_FIRST_FRAME_TIMEOUT_MS || "5000", 10)
+);
 const turnKey = process.env.TURN_KEY || process.env.TURN_SECRET || "";
 const turnSecretSource = process.env.TURN_KEY ? "TURN_KEY" : process.env.TURN_SECRET ? "TURN_SECRET" : null;
 const turnHost = process.env.TURN_HOST || "";
@@ -773,6 +777,16 @@ function captureSourceDescription() {
   return "adb-screencap -> ffmpeg -> RTCVideoSource";
 }
 
+function captureSourceDescriptionForMode(mode) {
+  if (mode === "adb-screenrecord") {
+    return "adb screenrecord -> ffmpeg -> RTCVideoSource";
+  }
+  if (mode === "stub") {
+    return "none";
+  }
+  return "adb-screencap -> ffmpeg -> RTCVideoSource";
+}
+
 function parseSdpDiagnostics(sdp) {
   if (!sdp) {
     return null;
@@ -1198,6 +1212,7 @@ class EmulatorVideoCapture {
   constructor(session) {
     this.session = session;
     this.frameIntervalMs = Math.max(50, Math.round(1000 / captureFps));
+    this.mode = captureMode;
     this.rawBuffer = Buffer.alloc(0);
     this.consecutiveFailures = 0;
     this.running = false;
@@ -1209,6 +1224,9 @@ class EmulatorVideoCapture {
     this.frameSize = Math.floor((this.width * this.height * 3) / 2);
     this.ffmpegClosedUnexpectedly = false;
     this.streamAbortController = null;
+    this.firstFrameTimer = null;
+    this.pipelineRestartInProgress = false;
+    this.fallbackActivated = false;
   }
 
   async start() {
@@ -1216,9 +1234,20 @@ class EmulatorVideoCapture {
       throw new Error("This wrtc build does not expose RTCVideoSource");
     }
 
+    this.videoSource = new RTCVideoSource();
+    this.track = this.videoSource.createTrack();
+    this.running = true;
+    await this.startPipeline({ mode: this.mode, reason: "initial-start" });
+    if (this.mode === "adb-screenrecord") {
+      this.armFirstFrameWatchdog();
+    }
+    return this.track;
+  }
+
+  async prepareMode(mode) {
     let firstPng = null;
     let dimensions = null;
-    if (captureMode === "adb-screenrecord") {
+    if (mode === "adb-screenrecord") {
       const info = await fetchServiceJson(apkbridgeDeviceInfoPath);
       dimensions = info.screen || null;
     } else {
@@ -1226,35 +1255,44 @@ class EmulatorVideoCapture {
       dimensions = parsePngDimensions(firstPng);
     }
 
+    this.mode = mode;
     this.width = dimensions.width || defaultScreenWidth;
     this.height = dimensions.height || defaultScreenHeight;
     this.frameSize = Math.floor((this.width * this.height * 3) / 2);
-    this.videoSource = new RTCVideoSource();
-    this.track = this.videoSource.createTrack();
-
+    this.session.media.source = mode;
     this.session.media.width = this.width;
     this.session.media.height = this.height;
     this.session.media.trackAttached = true;
+
     recordSessionLog(this.session, "info", "Emulator capture initialized", {
       width: this.width,
       height: this.height,
       fps: captureFps,
       bitrate: captureBitrate,
-      mode: captureMode,
+      mode,
+      source: captureSourceDescriptionForMode(mode),
     });
 
+    return { firstPng };
+  }
+
+  async startPipeline({ mode, reason }) {
+    const { firstPng } = await this.prepareMode(mode);
     await this.startFfmpeg();
-    this.running = true;
     if (firstPng) {
       await writeToStream(this.ffmpeg.stdin, firstPng);
     }
-    this.loopPromise = (captureMode === "adb-screenrecord" ? this.captureStreamLoop() : this.captureLoop()).catch((error) => {
+
+    this.loopPromise = (mode === "adb-screenrecord" ? this.captureStreamLoop() : this.captureLoop()).catch((error) => {
       if (!this.running) {
         return;
       }
       closeSession(this.session, "media-failed", error.message);
     });
-    return this.track;
+    recordSessionLog(this.session, "info", "Capture pipeline started", {
+      mode,
+      reason,
+    });
   }
 
   async startFfmpeg() {
@@ -1266,13 +1304,13 @@ class EmulatorVideoCapture {
       "nobuffer",
       "-flags",
       "low_delay",
-      ...(captureMode === "adb-screenrecord"
+      ...(this.mode === "adb-screenrecord"
         ? ["-probesize", "32", "-analyzeduration", "0", "-f", "h264"]
         : ["-f", "image2pipe", "-codec:v", "png"]),
       "-i",
       "pipe:0",
       "-an",
-      ...(captureMode === "adb-screenrecord" ? ["-vf", `fps=${captureFps}`] : []),
+      ...(this.mode === "adb-screenrecord" ? ["-vf", `fps=${captureFps}`] : []),
       "-pix_fmt",
       "yuv420p",
       "-f",
@@ -1295,12 +1333,60 @@ class EmulatorVideoCapture {
       recordSessionLog(this.session, "error", "ffmpeg process error", { error: error.message });
     });
     this.ffmpeg.on("close", (code, signal) => {
-      if (!this.running) {
+      if (!this.running || this.pipelineRestartInProgress) {
         return;
       }
       this.ffmpegClosedUnexpectedly = true;
       closeSession(this.session, "media-failed", `Capture pipeline exited unexpectedly (code=${code}, signal=${signal}).`);
     });
+  }
+
+  armFirstFrameWatchdog() {
+    clearTimeout(this.firstFrameTimer);
+    this.firstFrameTimer = setTimeout(() => {
+      if (!this.running || this.session.media.firstFrameAt || this.mode !== "adb-screenrecord" || this.fallbackActivated) {
+        return;
+      }
+
+      recordSessionLog(this.session, "warn", "Screenrecord capture did not deliver a first frame in time; falling back to screencap polling", {
+        timeoutMs: screenrecordFirstFrameTimeoutMs,
+      });
+      this.fallbackActivated = true;
+      this.fallbackToScreencap().catch((error) => {
+        if (!this.running) {
+          return;
+        }
+        closeSession(this.session, "media-failed", `Failed to fall back to screencap capture: ${error.message}`);
+      });
+    }, screenrecordFirstFrameTimeoutMs);
+  }
+
+  async fallbackToScreencap() {
+    this.pipelineRestartInProgress = true;
+    try {
+      clearTimeout(this.firstFrameTimer);
+      this.firstFrameTimer = null;
+      this.streamAbortController?.abort();
+      this.streamAbortController = null;
+
+      if (this.ffmpeg?.stdin && !this.ffmpeg.stdin.destroyed) {
+        this.ffmpeg.stdin.end();
+      }
+      if (this.ffmpeg) {
+        this.ffmpeg.kill("SIGTERM");
+      }
+      this.ffmpeg = null;
+      this.rawBuffer = Buffer.alloc(0);
+      this.consecutiveFailures = 0;
+
+      await this.startPipeline({ mode: "adb-screencap", reason: "screenrecord-first-frame-timeout" });
+      recordSessionLog(this.session, "warn", "Capture fallback activated", {
+        activeMode: this.mode,
+      });
+      broadcastSessionStatus(this.session);
+    } finally {
+      this.pipelineRestartInProgress = false;
+    }
   }
 
   handleStdout(chunk) {
@@ -1318,6 +1404,8 @@ class EmulatorVideoCapture {
       this.session.media.framesDelivered += 1;
       this.session.media.lastFrameAt = nowIso();
       if (!this.session.media.firstFrameAt) {
+        clearTimeout(this.firstFrameTimer);
+        this.firstFrameTimer = null;
         this.session.media.firstFrameAt = this.session.media.lastFrameAt;
         setSessionState(this.session, "media-ready", "First emulator frame captured and attached to the WebRTC track.", {
           log: true,
@@ -1415,6 +1503,8 @@ class EmulatorVideoCapture {
 
   stop() {
     this.running = false;
+    clearTimeout(this.firstFrameTimer);
+    this.firstFrameTimer = null;
     this.streamAbortController?.abort();
     this.streamAbortController = null;
     if (this.track) {
@@ -1848,7 +1938,7 @@ const server = http.createServer(async (req, res) => {
         captureMode === "stub"
           ? "Media capture is disabled in stub mode."
           : captureMode === "adb-screenrecord"
-            ? "Video is captured from the emulator through an apkbridge-backed adb screenrecord H.264 stream and piped into WebRTC."
+            ? `Video is captured from the emulator through an apkbridge-backed adb screenrecord H.264 stream and piped into WebRTC. If screenrecord stalls before the first frame, the bridge automatically falls back to adb screencap polling after ${screenrecordFirstFrameTimeoutMs}ms.`
             : "Video is captured from the emulator through apkbridge screencaps and piped into WebRTC.",
         ...turnWarnings,
       ],

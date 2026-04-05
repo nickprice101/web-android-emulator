@@ -21,6 +21,10 @@ const captureFps = Math.max(1, Number.parseInt(process.env.CAPTURE_FPS || "30", 
 const captureBitrate = Math.max(1_000_000, Number.parseInt(process.env.CAPTURE_BIT_RATE || "12000000", 10));
 const defaultScreenWidth = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_WIDTH || "1080", 10));
 const defaultScreenHeight = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_HEIGHT || "1920", 10));
+const screenrecordRetryIntervalMs = Math.max(
+  1000,
+  Number.parseInt(process.env.CAPTURE_SCREENRECORD_RETRY_INTERVAL_MS || "5000", 10)
+);
 const screenrecordFirstFrameTimeoutMs = Math.max(
   1000,
   Number.parseInt(process.env.CAPTURE_SCREENRECORD_FIRST_FRAME_TIMEOUT_MS || "15000", 10)
@@ -903,6 +907,7 @@ function sessionPayload(session) {
     iceConnectionState: session.iceConnectionState || "new",
     iceGatheringState: session.iceGatheringState || "new",
     media: {
+      requestedSource: session.media.requestedSource,
       source: session.media.source,
       width: session.media.width,
       height: session.media.height,
@@ -911,6 +916,9 @@ function sessionPayload(session) {
       framesDelivered: session.media.framesDelivered,
       framesPerSecond: session.media.framesPerSecond,
       trackAttached: session.media.trackAttached,
+      activeReason: session.media.activeReason || null,
+      fallbackReason: session.media.fallbackReason || null,
+      usingFallback: Boolean(session.media.usingFallback),
     },
     answerDiagnostics: session.answerDiagnostics || null,
     answerAttempts: session.answerAttempts || [],
@@ -1004,6 +1012,7 @@ function createSession(offer) {
     iceConnectionState: "new",
     iceGatheringState: "new",
     media: {
+      requestedSource: captureMode,
       source: captureMode,
       width: null,
       height: null,
@@ -1012,6 +1021,9 @@ function createSession(offer) {
       framesDelivered: 0,
       framesPerSecond: captureFps,
       trackAttached: false,
+      activeReason: "initial-start",
+      fallbackReason: null,
+      usingFallback: false,
     },
     logs: [],
     listeners: new Set(),
@@ -1229,8 +1241,10 @@ class EmulatorVideoCapture {
     this.ffmpegClosedUnexpectedly = false;
     this.streamAbortController = null;
     this.firstFrameTimer = null;
+    this.screenrecordRetryTimer = null;
     this.pipelineRestartInProgress = false;
     this.fallbackActivated = false;
+    this.pipelineFirstFrameDelivered = false;
   }
 
   async start() {
@@ -1242,13 +1256,10 @@ class EmulatorVideoCapture {
     this.track = this.videoSource.createTrack();
     this.running = true;
     await this.startPipeline({ mode: this.mode, reason: "initial-start" });
-    if (this.mode === "adb-screenrecord") {
-      this.armFirstFrameWatchdog();
-    }
     return this.track;
   }
 
-  async prepareMode(mode) {
+  async prepareMode(mode, reason) {
     let firstPng = null;
     let dimensions = null;
     if (mode === "adb-screenrecord") {
@@ -1274,17 +1285,24 @@ class EmulatorVideoCapture {
     this.width = dimensions.width || defaultScreenWidth;
     this.height = dimensions.height || defaultScreenHeight;
     this.frameSize = Math.floor((this.width * this.height * 3) / 2);
+    this.session.media.requestedSource = this.session.mode;
     this.session.media.source = mode;
     this.session.media.width = this.width;
     this.session.media.height = this.height;
     this.session.media.trackAttached = true;
+    this.session.media.activeReason = reason || null;
+    this.session.media.usingFallback = mode !== this.session.mode;
+    this.session.media.fallbackReason = this.session.media.usingFallback ? reason || null : null;
 
     recordSessionLog(this.session, "info", "Emulator capture initialized", {
       width: this.width,
       height: this.height,
       fps: captureFps,
       bitrate: captureBitrate,
+      requestedMode: this.session.mode,
       mode,
+      reason: reason || null,
+      usingFallback: this.session.media.usingFallback,
       source: captureSourceDescriptionForMode(mode),
     });
 
@@ -1292,7 +1310,8 @@ class EmulatorVideoCapture {
   }
 
   async startPipeline({ mode, reason }) {
-    const { firstPng } = await this.prepareMode(mode);
+    const { firstPng } = await this.prepareMode(mode, reason);
+    this.pipelineFirstFrameDelivered = false;
     await this.startFfmpeg();
     if (firstPng) {
       await writeToStream(this.ffmpeg.stdin, firstPng);
@@ -1307,7 +1326,43 @@ class EmulatorVideoCapture {
     recordSessionLog(this.session, "info", "Capture pipeline started", {
       mode,
       reason,
+      requestedMode: this.session.mode,
+      usingFallback: mode !== this.session.mode,
     });
+    if (mode === "adb-screenrecord") {
+      this.armFirstFrameWatchdog();
+    } else {
+      this.armScreenrecordRetry();
+    }
+  }
+
+  stopCurrentPipeline() {
+    clearTimeout(this.firstFrameTimer);
+    this.firstFrameTimer = null;
+    this.streamAbortController?.abort();
+    this.streamAbortController = null;
+
+    if (this.ffmpeg?.stdin && !this.ffmpeg.stdin.destroyed) {
+      this.ffmpeg.stdin.end();
+    }
+    if (this.ffmpeg) {
+      this.ffmpeg.kill("SIGTERM");
+    }
+    this.ffmpeg = null;
+    this.rawBuffer = Buffer.alloc(0);
+    this.consecutiveFailures = 0;
+    this.pipelineFirstFrameDelivered = false;
+  }
+
+  async switchPipeline(mode, reason) {
+    this.pipelineRestartInProgress = true;
+    try {
+      this.stopCurrentPipeline();
+      await this.startPipeline({ mode, reason });
+      broadcastSessionStatus(this.session);
+    } finally {
+      this.pipelineRestartInProgress = false;
+    }
   }
 
   async startFfmpeg() {
@@ -1361,7 +1416,7 @@ class EmulatorVideoCapture {
   armFirstFrameWatchdog() {
     clearTimeout(this.firstFrameTimer);
     this.firstFrameTimer = setTimeout(() => {
-      if (!this.running || this.session.media.firstFrameAt || this.mode !== "adb-screenrecord" || this.fallbackActivated) {
+      if (!this.running || this.pipelineFirstFrameDelivered || this.mode !== "adb-screenrecord" || this.fallbackActivated) {
         return;
       }
 
@@ -1378,32 +1433,44 @@ class EmulatorVideoCapture {
     }, screenrecordFirstFrameTimeoutMs);
   }
 
-  async fallbackToScreencap() {
-    this.pipelineRestartInProgress = true;
-    try {
-      clearTimeout(this.firstFrameTimer);
-      this.firstFrameTimer = null;
-      this.streamAbortController?.abort();
-      this.streamAbortController = null;
+  armScreenrecordRetry() {
+    clearTimeout(this.screenrecordRetryTimer);
+    this.screenrecordRetryTimer = null;
 
-      if (this.ffmpeg?.stdin && !this.ffmpeg.stdin.destroyed) {
-        this.ffmpeg.stdin.end();
-      }
-      if (this.ffmpeg) {
-        this.ffmpeg.kill("SIGTERM");
-      }
-      this.ffmpeg = null;
-      this.rawBuffer = Buffer.alloc(0);
-      this.consecutiveFailures = 0;
-
-      await this.startPipeline({ mode: "adb-screencap", reason: "screenrecord-first-frame-timeout" });
-      recordSessionLog(this.session, "warn", "Capture fallback activated", {
-        activeMode: this.mode,
-      });
-      broadcastSessionStatus(this.session);
-    } finally {
-      this.pipelineRestartInProgress = false;
+    if (!this.running || this.session.mode !== "adb-screenrecord" || this.mode !== "adb-screencap") {
+      return;
     }
+
+    this.screenrecordRetryTimer = setTimeout(() => {
+      this.screenrecordRetryTimer = null;
+      if (!this.running || this.pipelineRestartInProgress || this.mode !== "adb-screencap") {
+        return;
+      }
+
+      recordSessionLog(this.session, "info", "Retrying screenrecord capture so the bridge can return to the streaming path", {
+        retryIntervalMs: screenrecordRetryIntervalMs,
+      });
+      this.restoreScreenrecord().catch((error) => {
+        if (!this.running) {
+          return;
+        }
+        recordSessionLog(this.session, "warn", "Failed to restore screenrecord capture", {
+          error: error.message,
+        });
+        this.armScreenrecordRetry();
+      });
+    }, screenrecordRetryIntervalMs);
+  }
+
+  async fallbackToScreencap() {
+    await this.switchPipeline("adb-screencap", "screenrecord-first-frame-timeout");
+    recordSessionLog(this.session, "warn", "Capture fallback activated", {
+      activeMode: this.mode,
+    });
+  }
+
+  async restoreScreenrecord() {
+    await this.switchPipeline("adb-screenrecord", "screenrecord-retry");
   }
 
   handleStdout(chunk) {
@@ -1420,10 +1487,24 @@ class EmulatorVideoCapture {
 
       this.session.media.framesDelivered += 1;
       this.session.media.lastFrameAt = nowIso();
-      if (!this.session.media.firstFrameAt) {
+      if (!this.pipelineFirstFrameDelivered) {
+        this.pipelineFirstFrameDelivered = true;
         clearTimeout(this.firstFrameTimer);
         this.firstFrameTimer = null;
-        this.session.media.firstFrameAt = this.session.media.lastFrameAt;
+        clearTimeout(this.screenrecordRetryTimer);
+        this.screenrecordRetryTimer = null;
+        if (this.mode === "adb-screenrecord" && this.fallbackActivated) {
+          this.fallbackActivated = false;
+          this.session.media.activeReason = "screenrecord-restored";
+          this.session.media.fallbackReason = null;
+          this.session.media.usingFallback = false;
+          recordSessionLog(this.session, "info", "Screenrecord capture restored; switched back to the streaming path", {
+            activeMode: this.mode,
+          });
+        }
+        if (!this.session.media.firstFrameAt) {
+          this.session.media.firstFrameAt = this.session.media.lastFrameAt;
+        }
         setSessionState(this.session, "media-ready", "First emulator frame captured and attached to the WebRTC track.", {
           log: true,
         });
@@ -1522,6 +1603,8 @@ class EmulatorVideoCapture {
     this.running = false;
     clearTimeout(this.firstFrameTimer);
     this.firstFrameTimer = null;
+    clearTimeout(this.screenrecordRetryTimer);
+    this.screenrecordRetryTimer = null;
     this.streamAbortController?.abort();
     this.streamAbortController = null;
     if (this.track) {

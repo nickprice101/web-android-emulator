@@ -24,6 +24,8 @@ const turnSecretSource = process.env.TURN_KEY ? "TURN_KEY" : process.env.TURN_SE
 const turnHost = process.env.TURN_HOST || "";
 const turnBridgeHost = process.env.TURN_BRIDGE_HOST?.trim() || "";
 const turnBridgeHostIsIp = Boolean(turnBridgeHost && net.isIP(turnBridgeHost));
+const turnBridgePort = process.env.TURN_BRIDGE_PORT?.trim() || "";
+const turnBridgeScheme = process.env.TURN_BRIDGE_SCHEME?.trim() || "";
 const turnPort = process.env.TURN_PORT || "443";
 const turnProtocol = process.env.TURN_PROTOCOL || "tcp";
 const turnScheme = process.env.TURN_SCHEME || "turns";
@@ -113,6 +115,15 @@ function buildTurnServerUrl(host = turnHost) {
   return `${turnScheme}:${formatTurnHostForUrl(host)}:${turnPort}?transport=${turnProtocol}`;
 }
 
+function buildBridgeTurnServerUrl(host = turnBridgeHost) {
+  if (!host) {
+    return null;
+  }
+  const scheme = turnBridgeScheme || turnScheme;
+  const port = turnBridgePort || turnPort;
+  return `${scheme}:${formatTurnHostForUrl(host)}:${port}?transport=${turnProtocol}`;
+}
+
 function buildIceServersForUrls(urls) {
   if (!hasConfiguredTurnSecret || !Array.isArray(urls) || urls.length === 0) {
     return [];
@@ -137,14 +148,16 @@ function uniqueValues(values) {
 
 async function resolveTurnServerUrls() {
   const hostnameUrl = buildTurnServerUrl();
-  // When TURN_BRIDGE_HOST is a raw IP and TURN_SCHEME is "turns", use the IP
-  // literal directly in the bridge URL. The native WebRTC TURN client (libwebrtc)
-  // uses TLS for channel encryption but does not validate the server certificate
-  // against the URL hostname, so connecting via the IP bypasses the DNS lookup
-  // that the C++ resolver (which does not read /etc/hosts) would otherwise fail.
+  // When TURN_BRIDGE_HOST is set, build a bridge-specific URL using
+  // TURN_BRIDGE_SCHEME and TURN_BRIDGE_PORT (if provided). This lets the bridge
+  // use plain TURN (turn: scheme) on the TURN server's standard listening port
+  // (typically 3478) for its own relay gathering, bypassing both the DNS lookup
+  // that libwebrtc's C++ resolver cannot satisfy from /etc/hosts, and any TLS
+  // certificate hostname mismatch that would occur when connecting via the LAN IP
+  // with the turns: scheme. Browsers still receive the public TURN_HOST URL.
   const bridgeUrl =
     turnBridgeHost && turnBridgeHost !== turnHost
-      ? buildTurnServerUrl(turnBridgeHost)
+      ? buildBridgeTurnServerUrl(turnBridgeHost)
       : null;
   if (!hostnameUrl || !turnHost) {
     return { hostnameUrl: null, bridgeUrl, resolvedUrls: [], resolvedAddresses: [] };
@@ -182,9 +195,15 @@ function buildTurnWarnings() {
   }
 
   if (turnBridgeHost && turnBridgeHost !== turnHost) {
-    if (turnScheme === "turns" && turnBridgeHostIsIp) {
+    const effectiveBridgeScheme = turnBridgeScheme || turnScheme;
+    const effectiveBridgePort = turnBridgePort || turnPort;
+    if (effectiveBridgeScheme === "turn" && turnBridgeHostIsIp) {
       warnings.push(
-        `TURN_BRIDGE_HOST is set to the IP '${turnBridgeHost}' with TURN_SCHEME 'turns'. The bridge will connect to this IP directly for relay gathering, bypassing the DNS lookup that can fail for the native TURN client inside the container. TLS certificate chain and expiry are still validated; only hostname matching against the IP literal is skipped by the TURN client (the cert CN/SAN is '${turnHost}'). Browsers still use TURN_HOST '${turnHost}'.`
+        `TURN_BRIDGE_HOST is set to '${turnBridgeHost}' with TURN_BRIDGE_SCHEME 'turn'. The bridge will connect to this IP on port ${effectiveBridgePort} using plain (unencrypted) TURN for relay gathering, bypassing both the DNS lookup that can fail for libwebrtc's C++ resolver and any TLS certificate mismatch when connecting via an IP literal. Browsers still use TURN_HOST '${turnHost}' with ${turnScheme.toUpperCase()}.`
+      );
+    } else if (effectiveBridgeScheme === "turns" && turnBridgeHostIsIp) {
+      warnings.push(
+        `TURN_BRIDGE_HOST is set to the IP '${turnBridgeHost}' with scheme 'turns'. TLS certificate validation applies; the server certificate must be valid for '${turnHost}'. Consider setting TURN_BRIDGE_SCHEME=turn and TURN_BRIDGE_PORT=3478 to use plain TURN and avoid TLS certificate issues when connecting via an IP literal. Browsers still use TURN_HOST '${turnHost}'.`
       );
     } else {
       warnings.push(
@@ -330,21 +349,25 @@ async function probeTurnConnectivity() {
 
   let bridgeProbe = null;
   if (turnBridgeHost && turnBridgeHost !== turnHost) {
-    const bridgeTcpResult = await connectTcp(turnBridgeHost, Number.parseInt(turnPort, 10) || 443).then(
+    const effectiveBridgeScheme = turnBridgeScheme || turnScheme;
+    const effectiveBridgePort = Number.parseInt(turnBridgePort || turnPort, 10) || 443;
+    const bridgeTcpResult = await connectTcp(turnBridgeHost, effectiveBridgePort).then(
       (r) => r,
       (e) => ({ ok: false, ...probeErrorDetails(e) })
     );
     const bridgeTlsResult =
-      turnScheme === "turns" && bridgeTcpResult?.ok
+      effectiveBridgeScheme === "turns" && bridgeTcpResult?.ok
         ? await handshakeTls(
             turnBridgeHost,
-            Number.parseInt(turnPort, 10) || 443,
+            effectiveBridgePort,
             turnBridgeHostIsIp ? turnHost : undefined
           ).then(
             (r) => r,
             (e) => ({ ok: false, ...probeErrorDetails(e) })
           )
-        : null;
+        : effectiveBridgeScheme === "turn"
+          ? { ok: true, skipped: true, reason: "TURN_BRIDGE_SCHEME is 'turn', so TLS is not used for the bridge-to-TURN-server connection." }
+          : null;
     bridgeProbe = {
       host: turnBridgeHost,
       tcp: bridgeTcpResult,
@@ -354,7 +377,7 @@ async function probeTurnConnectivity() {
 
   return {
     at: nowIso(),
-    serverUrl: buildTurnServerUrl(effectiveHost),
+    serverUrl: turnBridgeHost && turnBridgeHost !== turnHost ? buildBridgeTurnServerUrl(turnBridgeHost) : buildTurnServerUrl(effectiveHost),
     dns: dnsResult,
     tcp: tcpResult,
     tls: tlsResult,
@@ -371,11 +394,13 @@ function summarizeTurnFailure(session, diagnostics) {
     .join(" | ");
 
   if (probe?.bridgeHostProbe && !probe.bridgeHostProbe.tcp?.ok) {
-    return `TURN_BRIDGE_HOST '${turnBridgeHost}' TCP connect on port ${turnPort} failed: ${probe.bridgeHostProbe.tcp?.message || "unknown error"}. The bridge cannot reach the TURN server at this internal address.`;
+    const bridgePortDisplay = turnBridgePort || turnPort;
+    return `TURN_BRIDGE_HOST '${turnBridgeHost}' TCP connect on port ${bridgePortDisplay} failed: ${probe.bridgeHostProbe.tcp?.message || "unknown error"}. The bridge cannot reach the TURN server at this internal address.`;
   }
 
   if (probe?.bridgeHostProbe && probe.bridgeHostProbe.tls && !probe.bridgeHostProbe.tls?.ok) {
-    return `TURN_BRIDGE_HOST '${turnBridgeHost}' TLS handshake on port ${turnPort} failed: ${probe.bridgeHostProbe.tls?.message || "unknown error"}.`;
+    const bridgePortDisplay = turnBridgePort || turnPort;
+    return `TURN_BRIDGE_HOST '${turnBridgeHost}' TLS handshake on port ${bridgePortDisplay} failed: ${probe.bridgeHostProbe.tls?.message || "unknown error"}.`;
   }
 
   if (probe?.dns && !probe.dns.ok) {
@@ -1590,7 +1615,19 @@ async function buildAnswer(session) {
         candidateErrors: result.candidateErrors || [],
       });
       closeSessionResources(session);
-      result = await attemptAnswer("all");
+      const fallbackTurnUrls = turnUrlOptions.bridgeUrl
+        ? [turnUrlOptions.bridgeUrl]
+        : (turnUrlOptions.resolvedUrls?.length ?? 0) > 0
+          ? turnUrlOptions.resolvedUrls
+          : null;
+      const fallbackTurnUrlStrategy = turnUrlOptions.bridgeUrl
+        ? "bridge-host"
+        : (turnUrlOptions.resolvedUrls?.length ?? 0) > 0
+          ? "resolved-ip"
+          : null;
+      result = await attemptAnswer("all", {
+        ...(fallbackTurnUrls ? { turnUrls: fallbackTurnUrls, turnUrlStrategy: fallbackTurnUrlStrategy } : {}),
+      });
       session.answerAttempts.push({
         iceTransportPolicy: result.iceTransportPolicy,
         diagnostics: result.diagnostics || null,
@@ -1733,7 +1770,7 @@ const server = http.createServer(async (req, res) => {
         bridgeHost: turnBridgeHost && turnBridgeHost !== turnHost ? turnBridgeHost : null,
         bridgeUrl:
           turnBridgeHost && turnBridgeHost !== turnHost
-            ? buildTurnServerUrl(turnBridgeHost)
+            ? buildBridgeTurnServerUrl(turnBridgeHost)
             : null,
       },
     });

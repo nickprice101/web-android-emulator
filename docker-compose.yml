@@ -94,13 +94,20 @@ services:
       TURN_TTL: "86400"
       TURN_USERNAME_SUFFIX: "emuuser"
       TURN_BRIDGE_HOST: "192.168.1.152"
-      # Set TURN_BRIDGE_HOST to the TURN server's LAN/internal IP when the
-      # bridge container cannot reach TURN_HOST directly (e.g. when coturn
-      # listens on an internal IP and the router does not support hairpin NAT
-      # for the public DNS name). With TURN-over-TLS, the bridge still needs
-      # to use TURN_HOST in the URL so the certificate matches; extra_hosts
-      # below maps that hostname to the internal IP inside this container.
-      # Leave TURN_BRIDGE_HOST unset if the bridge can reach TURN_HOST
+      TURN_BRIDGE_SCHEME: "turn"
+      TURN_BRIDGE_PORT: "3478"
+      # TURN_BRIDGE_HOST: Set to the TURN server's LAN/internal IP when the
+      # bridge container cannot reach TURN_HOST directly (e.g. coturn listens
+      # on a LAN IP and the router does not support hairpin NAT for the public
+      # DNS name).
+      # TURN_BRIDGE_SCHEME / TURN_BRIDGE_PORT: Override the scheme and port
+      # used for the bridge's own TURN connection. Set TURN_BRIDGE_SCHEME=turn
+      # and TURN_BRIDGE_PORT=3478 to use plain (unencrypted) TURN on coturn's
+      # standard listening port, which avoids both libwebrtc's DNS lookup
+      # failure for /etc/hosts entries and TLS certificate hostname mismatches
+      # that occur when connecting to a TURN server via its LAN IP with turns:.
+      # Browsers still use TURN_HOST with TURN_SCHEME (turns:/443).
+      # Leave all TURN_BRIDGE_* vars unset if the bridge can reach TURN_HOST
       # without issue.
     extra_hosts:
       - "turn.corsicanescape.com:192.168.1.152"

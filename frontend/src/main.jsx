@@ -1535,7 +1535,7 @@ function App() {
                       ? "ok"
                       : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tcp?.message || "unknown"})`}
                     {webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls
-                      ? ` | tls ${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls.ok ? "ok" : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls.message || "unknown"})`}`
+                      ? ` | tls ${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls.skipped ? "skipped" : webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls.ok ? "ok" : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls.message || "unknown"})`}`
                       : ""}
                   </div>
                 )}

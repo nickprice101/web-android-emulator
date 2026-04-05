@@ -1615,18 +1615,18 @@ async function buildAnswer(session) {
         candidateErrors: result.candidateErrors || [],
       });
       closeSessionResources(session);
-      const fallbackTurnUrls = turnUrlOptions.bridgeUrl
+      const allPolicyTurnUrls = turnUrlOptions.bridgeUrl
         ? [turnUrlOptions.bridgeUrl]
         : (turnUrlOptions.resolvedUrls?.length ?? 0) > 0
           ? turnUrlOptions.resolvedUrls
           : null;
-      const fallbackTurnUrlStrategy = turnUrlOptions.bridgeUrl
+      const allPolicyTurnUrlStrategy = turnUrlOptions.bridgeUrl
         ? "bridge-host"
         : (turnUrlOptions.resolvedUrls?.length ?? 0) > 0
           ? "resolved-ip"
           : null;
       result = await attemptAnswer("all", {
-        ...(fallbackTurnUrls ? { turnUrls: fallbackTurnUrls, turnUrlStrategy: fallbackTurnUrlStrategy } : {}),
+        ...(allPolicyTurnUrls ? { turnUrls: allPolicyTurnUrls, turnUrlStrategy: allPolicyTurnUrlStrategy } : {}),
       });
       session.answerAttempts.push({
         iceTransportPolicy: result.iceTransportPolicy,

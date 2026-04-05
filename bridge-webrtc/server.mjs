@@ -23,7 +23,7 @@ const defaultScreenWidth = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAU
 const defaultScreenHeight = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_HEIGHT || "1920", 10));
 const screenrecordFirstFrameTimeoutMs = Math.max(
   1000,
-  Number.parseInt(process.env.CAPTURE_SCREENRECORD_FIRST_FRAME_TIMEOUT_MS || "5000", 10)
+  Number.parseInt(process.env.CAPTURE_SCREENRECORD_FIRST_FRAME_TIMEOUT_MS || "15000", 10)
 );
 const turnKey = process.env.TURN_KEY || process.env.TURN_SECRET || "";
 const turnSecretSource = process.env.TURN_KEY ? "TURN_KEY" : process.env.TURN_SECRET ? "TURN_SECRET" : null;
@@ -40,7 +40,7 @@ const turnUsernameSuffix = process.env.TURN_USERNAME_SUFFIX || "emuuser";
 const answerTimeoutMs = Number.parseInt(process.env.WEBRTC_ANSWER_TIMEOUT_MS || "10000", 10);
 const sessionIdleTimeoutMs = Number.parseInt(process.env.WEBRTC_SESSION_IDLE_TIMEOUT_MS || "300000", 10);
 const sessionRetentionMs = Number.parseInt(process.env.WEBRTC_SESSION_RETENTION_MS || "30000", 10);
-const turnProbeTimeoutMs = Math.max(1000, Number.parseInt(process.env.TURN_PROBE_TIMEOUT_MS || "4000", 10));
+const turnProbeTimeoutMs = Math.max(1000, Number.parseInt(process.env.TURN_PROBE_TIMEOUT_MS || "2000", 10));
 const allowRelayFallback = process.env.WEBRTC_ALLOW_RELAY_FALLBACK !== "false";
 const placeholderSecretPatterns = [/^PLACEHOLDER/i, /^REPLACE_ME/i, /^CHANGEME$/i];
 const hasConfiguredTurnSecret = Boolean(
@@ -1183,13 +1183,17 @@ function attachPeerObservers(session) {
 
 function waitForIceGatheringComplete(peer, timeoutMs = answerTimeoutMs) {
   if (peer.iceGatheringState === "complete") {
-    return Promise.resolve();
+    return Promise.resolve({ timedOut: false });
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const timeout = setTimeout(() => {
+      // Proceed with whatever candidates have been gathered so far rather than
+      // aborting the session.  This mirrors the browser-side behaviour and allows
+      // the answer to be built from partial candidates when the TURN server is
+      // slow or unreachable instead of failing the entire session.
       cleanup();
-      reject(new Error(`Timed out waiting for ICE gathering after ${timeoutMs}ms.`));
+      resolve({ timedOut: true });
     }, timeoutMs);
 
     function cleanup() {
@@ -1200,7 +1204,7 @@ function waitForIceGatheringComplete(peer, timeoutMs = answerTimeoutMs) {
     function onChange() {
       if (peer.iceGatheringState === "complete") {
         cleanup();
-        resolve();
+        resolve({ timedOut: false });
       }
     }
 
@@ -1315,6 +1319,8 @@ class EmulatorVideoCapture {
       "nobuffer",
       "-flags",
       "low_delay",
+      "-max_delay",
+      "0",
       ...(this.mode === "adb-screenrecord"
         ? ["-probesize", "32", "-analyzeduration", "0", "-f", "h264"]
         : ["-f", "image2pipe", "-codec:v", "png"]),
@@ -1695,7 +1701,15 @@ async function buildAnswer(session) {
     // from beginning until the (potentially slow) screencap or screenrecord
     // initialisation finished.  Running them concurrently cuts time-to-first-
     // frame by up to ~2 s in the typical case.
-    await Promise.all([waitForIceGatheringComplete(peer), attachVideoSource(session, peer)]);
+    const [gatherResult] = await Promise.all([waitForIceGatheringComplete(peer), attachVideoSource(session, peer)]);
+    if (gatherResult?.timedOut) {
+      recordSessionLog(session, "warn", "ICE gathering timed out; proceeding with partial candidates", {
+        iceTransportPolicy,
+        iceGatheringState: peer.iceGatheringState,
+        candidatesGathered: session.localIceCandidates.length,
+        timeoutMs: answerTimeoutMs,
+      });
+    }
 
     const localAnswer = {
       type: peer.localDescription?.type || answer.type,

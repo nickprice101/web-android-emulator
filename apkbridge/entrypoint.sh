@@ -34,5 +34,12 @@ adb -s "$ADB_TARGET" shell svc wifi disable || true
 adb -s "$ADB_TARGET" shell svc data disable || true
 
 echo "Ready. Starting server..."
-# Start Flask app via gunicorn, binding to all interfaces on port 5000
-exec gunicorn -b 0.0.0.0:5000 app:app
+# Start Flask app via gunicorn, binding to all interfaces on port 5000.
+# Use 4 sync workers so that long-lived /screenrecord streaming requests do not
+# block concurrent /input-event, /frame, or /device-info calls.  The timeout is
+# set to 300 s (well above the 180 s screenrecord time-limit) to prevent gunicorn
+# from killing workers that are actively streaming a response.
+# Gunicorn sync workers are separate forked processes with independent memory
+# spaces, so there is no shared mutable state between them; all per-request state
+# (ADB subprocesses, file handles) is created locally within each worker process.
+exec gunicorn -b 0.0.0.0:5000 --workers 4 --timeout 300 app:app

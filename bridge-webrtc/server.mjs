@@ -179,7 +179,7 @@ function buildTurnWarnings() {
   if (turnBridgeHost && turnBridgeHost !== turnHost) {
     if (turnScheme === "turns" && turnBridgeHostIsIp) {
       warnings.push(
-        `TURN_BRIDGE_HOST is set to the IP '${turnBridgeHost}', but TURN_SCHEME is 'turns'. TLS certificates validate TURN_HOST '${turnHost}', not a raw IP, so the bridge will keep using the hostname. Map that hostname to the LAN IP inside Docker if you need to bypass hairpin NAT.`
+        `TURN_BRIDGE_HOST is set to the IP '${turnBridgeHost}', but TURN_SCHEME is 'turns'. TLS certificates validate TURN_HOST '${turnHost}', not a raw IP, so the bridge will keep using the hostname. Add an extra_hosts entry mapping '${turnHost}' to '${turnBridgeHost}' inside the container so the hostname resolves to the LAN IP.`
       );
     } else {
       warnings.push(
@@ -257,12 +257,12 @@ async function probeTurnTcp() {
   }
 }
 
-function handshakeTls(host, portNumber) {
+function handshakeTls(host, portNumber, servername) {
   return new Promise((resolve, reject) => {
     const socket = tls.connect({
       host,
       port: portNumber,
-      servername: host,
+      servername: servername !== undefined ? servername : host,
       timeout: turnProbeTimeoutMs,
     });
 
@@ -331,7 +331,11 @@ async function probeTurnConnectivity() {
     );
     const bridgeTlsResult =
       turnScheme === "turns" && bridgeTcpResult?.ok
-        ? await handshakeTls(turnBridgeHost, Number.parseInt(turnPort, 10) || 443).then(
+        ? await handshakeTls(
+            turnBridgeHost,
+            Number.parseInt(turnPort, 10) || 443,
+            turnBridgeHostIsIp ? turnHost : undefined
+          ).then(
             (r) => r,
             (e) => ({ ok: false, ...probeErrorDetails(e) })
           )

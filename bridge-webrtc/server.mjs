@@ -14,9 +14,11 @@ const port = Number.parseInt(process.env.PORT || "8090", 10);
 const captureMode = process.env.CAPTURE_MODE || "adb-screencap";
 const apkbridgeBaseUrl = process.env.APKBRIDGE_BASE_URL || "http://apkbridge:5000";
 const apkbridgeFramePath = process.env.APKBRIDGE_FRAME_PATH || "/frame";
+const apkbridgeScreenrecordPath = process.env.APKBRIDGE_SCREENRECORD_PATH || "/screenrecord";
 const apkbridgeInputPath = process.env.APKBRIDGE_INPUT_PATH || "/input-event";
 const apkbridgeDeviceInfoPath = process.env.APKBRIDGE_DEVICE_INFO_PATH || "/device-info";
-const captureFps = Math.max(1, Number.parseInt(process.env.CAPTURE_FPS || "6", 10));
+const captureFps = Math.max(1, Number.parseInt(process.env.CAPTURE_FPS || "30", 10));
+const captureBitrate = Math.max(1_000_000, Number.parseInt(process.env.CAPTURE_BIT_RATE || "12000000", 10));
 const defaultScreenWidth = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_WIDTH || "1080", 10));
 const defaultScreenHeight = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_HEIGHT || "1920", 10));
 const turnKey = process.env.TURN_KEY || process.env.TURN_SECRET || "";
@@ -761,6 +763,16 @@ function writeToStream(stream, chunk) {
   });
 }
 
+function captureSourceDescription() {
+  if (captureMode === "adb-screenrecord") {
+    return "adb screenrecord -> ffmpeg -> RTCVideoSource";
+  }
+  if (captureMode === "stub") {
+    return "none";
+  }
+  return "adb-screencap -> ffmpeg -> RTCVideoSource";
+}
+
 function parseSdpDiagnostics(sdp) {
   if (!sdp) {
     return null;
@@ -1196,6 +1208,7 @@ class EmulatorVideoCapture {
     this.height = defaultScreenHeight;
     this.frameSize = Math.floor((this.width * this.height * 3) / 2);
     this.ffmpegClosedUnexpectedly = false;
+    this.streamAbortController = null;
   }
 
   async start() {
@@ -1203,8 +1216,15 @@ class EmulatorVideoCapture {
       throw new Error("This wrtc build does not expose RTCVideoSource");
     }
 
-    const firstPng = await fetchFramePng();
-    const dimensions = parsePngDimensions(firstPng);
+    let firstPng = null;
+    let dimensions = null;
+    if (captureMode === "adb-screenrecord") {
+      const info = await fetchServiceJson(apkbridgeDeviceInfoPath);
+      dimensions = info.screen || null;
+    } else {
+      firstPng = await fetchFramePng();
+      dimensions = parsePngDimensions(firstPng);
+    }
 
     this.width = dimensions.width || defaultScreenWidth;
     this.height = dimensions.height || defaultScreenHeight;
@@ -1219,12 +1239,16 @@ class EmulatorVideoCapture {
       width: this.width,
       height: this.height,
       fps: captureFps,
+      bitrate: captureBitrate,
+      mode: captureMode,
     });
 
     await this.startFfmpeg();
     this.running = true;
-    await writeToStream(this.ffmpeg.stdin, firstPng);
-    this.loopPromise = this.captureLoop().catch((error) => {
+    if (firstPng) {
+      await writeToStream(this.ffmpeg.stdin, firstPng);
+    }
+    this.loopPromise = (captureMode === "adb-screenrecord" ? this.captureStreamLoop() : this.captureLoop()).catch((error) => {
       if (!this.running) {
         return;
       }
@@ -1240,13 +1264,15 @@ class EmulatorVideoCapture {
       "error",
       "-fflags",
       "nobuffer",
-      "-f",
-      "image2pipe",
-      "-codec:v",
-      "png",
+      "-flags",
+      "low_delay",
+      ...(captureMode === "adb-screenrecord"
+        ? ["-probesize", "32", "-analyzeduration", "0", "-f", "h264"]
+        : ["-f", "image2pipe", "-codec:v", "png"]),
       "-i",
       "pipe:0",
       "-an",
+      ...(captureMode === "adb-screenrecord" ? ["-vf", `fps=${captureFps}`] : []),
       "-pix_fmt",
       "yuv420p",
       "-f",
@@ -1327,8 +1353,70 @@ class EmulatorVideoCapture {
     }
   }
 
+  async captureStreamLoop() {
+    while (this.running) {
+      try {
+        this.streamAbortController = new AbortController();
+        const response = await fetch(
+          `${toServiceUrl(apkbridgeScreenrecordPath)}?bit_rate=${encodeURIComponent(String(captureBitrate))}`,
+          {
+            headers: { Accept: "video/h264" },
+            signal: this.streamAbortController.signal,
+          }
+        );
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`Screenrecord stream failed (${response.status}): ${text.slice(0, 200)}`);
+        }
+        if (!response.body) {
+          throw new Error("Screenrecord stream returned no body");
+        }
+
+        const reader = response.body.getReader();
+        this.consecutiveFailures = 0;
+        recordSessionLog(this.session, "info", "Connected to apkbridge screenrecord stream", {
+          bitrate: captureBitrate,
+          fps: captureFps,
+        });
+
+        while (this.running) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          if (value?.length) {
+            await writeToStream(this.ffmpeg.stdin, Buffer.from(value));
+          }
+        }
+
+        reader.releaseLock();
+        if (!this.running) {
+          return;
+        }
+        recordSessionLog(this.session, "warn", "Screenrecord stream ended; reconnecting");
+      } catch (error) {
+        if (!this.running || error.name === "AbortError") {
+          return;
+        }
+        this.consecutiveFailures += 1;
+        recordSessionLog(this.session, "warn", "Screenrecord stream failed", {
+          attempt: this.consecutiveFailures,
+          error: error.message,
+        });
+        if (this.consecutiveFailures >= 3) {
+          throw new Error(`Screenrecord stream failed repeatedly: ${error.message}`);
+        }
+        await sleep(500);
+      } finally {
+        this.streamAbortController = null;
+      }
+    }
+  }
+
   stop() {
     this.running = false;
+    this.streamAbortController?.abort();
+    this.streamAbortController = null;
     if (this.track) {
       this.track.stop();
       this.track = null;
@@ -1739,7 +1827,7 @@ const server = http.createServer(async (req, res) => {
       media: {
         captureMode,
         status: captureMode === "stub" ? "pending" : "configured",
-        source: captureMode === "stub" ? "none" : "adb-screencap -> ffmpeg -> RTCVideoSource",
+        source: captureSourceDescription(),
         targetFps: captureFps,
         screen: upstreamScreen,
       },
@@ -1759,7 +1847,9 @@ const server = http.createServer(async (req, res) => {
           : "TURN is not configured, so the bridge can only advertise local host candidates.",
         captureMode === "stub"
           ? "Media capture is disabled in stub mode."
-          : "Video is captured from the emulator through apkbridge screencaps and piped into WebRTC.",
+          : captureMode === "adb-screenrecord"
+            ? "Video is captured from the emulator through an apkbridge-backed adb screenrecord H.264 stream and piped into WebRTC."
+            : "Video is captured from the emulator through apkbridge screencaps and piped into WebRTC.",
         ...turnWarnings,
       ],
       warnings: turnWarnings,

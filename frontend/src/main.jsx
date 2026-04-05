@@ -4,6 +4,99 @@ import { Emulator } from "android-emulator-webrtc/emulator";
 
 const EMULATOR_ASPECT = 1080 / 1920;
 const RAW_FRAME_URL = "/api/frame";
+function clampRatio(value) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
+function resolveVideoViewport(container, video) {
+  if (!container) {
+    return null;
+  }
+
+  const rect = container.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    return null;
+  }
+
+  const intrinsicWidth = video?.videoWidth || 0;
+  const intrinsicHeight = video?.videoHeight || 0;
+  const mediaAspect =
+    intrinsicWidth > 0 && intrinsicHeight > 0 ? intrinsicWidth / intrinsicHeight : EMULATOR_ASPECT;
+  const containerAspect = rect.width / rect.height;
+
+  let renderWidth = rect.width;
+  let renderHeight = rect.height;
+  if (containerAspect > mediaAspect) {
+    renderHeight = rect.height;
+    renderWidth = renderHeight * mediaAspect;
+  } else {
+    renderWidth = rect.width;
+    renderHeight = renderWidth / mediaAspect;
+  }
+
+  const offsetX = (rect.width - renderWidth) / 2;
+  const offsetY = (rect.height - renderHeight) / 2;
+  return {
+    rect,
+    offsetX,
+    offsetY,
+    renderWidth,
+    renderHeight,
+  };
+}
+
+function resolvePointerRatios(event, container, video) {
+  const viewport = resolveVideoViewport(container, video);
+  if (!viewport) {
+    return null;
+  }
+
+  const x = event.clientX - viewport.rect.left - viewport.offsetX;
+  const y = event.clientY - viewport.rect.top - viewport.offsetY;
+  if (x < 0 || y < 0 || x > viewport.renderWidth || y > viewport.renderHeight) {
+    return null;
+  }
+
+  return {
+    xRatio: clampRatio(x / Math.max(1, viewport.renderWidth)),
+    yRatio: clampRatio(y / Math.max(1, viewport.renderHeight)),
+  };
+}
+
+function mapKeyboardEventToPayload(event) {
+  if (event.altKey || event.metaKey || event.ctrlKey) {
+    return null;
+  }
+
+  const keyMap = {
+    Home: { type: "key", key: "GoHome" },
+    Escape: { type: "key", key: "GoBack" },
+    Backspace: { type: "key", key: "Backspace" },
+    Delete: { type: "key", key: "Delete" },
+    Enter: { type: "key", key: "Enter" },
+    Tab: { type: "key", key: "Tab" },
+    ArrowUp: { type: "key", key: "ArrowUp" },
+    ArrowDown: { type: "key", key: "ArrowDown" },
+    ArrowLeft: { type: "key", key: "ArrowLeft" },
+    ArrowRight: { type: "key", key: "ArrowRight" },
+  };
+  if (keyMap[event.key]) {
+    return keyMap[event.key];
+  }
+
+  if (event.key === " " || event.code === "Space") {
+    return { type: "key", key: "Space" };
+  }
+
+  if (event.key.length === 1) {
+    return { type: "text", text: event.key };
+  }
+
+  return null;
+}
 
 function formatClockTime(value) {
   if (!value) {
@@ -314,6 +407,7 @@ function mapBridgeSessionState(sessionState, hasVideo) {
 }
 
 function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inputRef, onDiagnosticsChange }) {
+  const containerRef = useRef(null);
   const videoRef = useRef(null);
   const peerRef = useRef(null);
   const sessionRef = useRef(null);
@@ -331,6 +425,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
   const [receiverStats, setReceiverStats] = useState(null);
   const [answerSdp, setAnswerSdp] = useState("");
   const [offerSummary, setOfferSummary] = useState("Offer not created yet.");
+  const [focusActive, setFocusActive] = useState(false);
 
   const sendSessionInput = useCallback(
     async (payload) => {
@@ -708,15 +803,45 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
       return;
     }
 
-    const rect = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.focus?.();
+    const ratios = resolvePointerRatios(event, containerRef.current, videoRef.current);
+    if (!ratios) {
+      gestureRef.current = null;
+      return;
+    }
+
     gestureRef.current = {
-      startXRatio: (event.clientX - rect.left) / Math.max(1, rect.width),
-      startYRatio: (event.clientY - rect.top) / Math.max(1, rect.height),
+      startXRatio: ratios.xRatio,
+      startYRatio: ratios.yRatio,
       pointerId: event.pointerId,
       startedAt: Date.now(),
+      moved: false,
     };
     event.currentTarget.setPointerCapture?.(event.pointerId);
   }, [active]);
+
+  const handlePointerMove = useCallback((event) => {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const ratios = resolvePointerRatios(event, containerRef.current, videoRef.current);
+    if (!ratios) {
+      return;
+    }
+
+    if (Math.abs(ratios.xRatio - gesture.startXRatio) >= 0.015 || Math.abs(ratios.yRatio - gesture.startYRatio) >= 0.015) {
+      gesture.moved = true;
+    }
+  }, []);
+
+  const clearGesture = useCallback((event) => {
+    if (gestureRef.current?.pointerId === event.pointerId) {
+      gestureRef.current = null;
+    }
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }, []);
 
   const handlePointerUp = useCallback(async (event) => {
     const gesture = gestureRef.current;
@@ -725,20 +850,26 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
       return;
     }
 
-    const rect = event.currentTarget.getBoundingClientRect();
-    const endXRatio = (event.clientX - rect.left) / Math.max(1, rect.width);
-    const endYRatio = (event.clientY - rect.top) / Math.max(1, rect.height);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    const end = resolvePointerRatios(event, containerRef.current, videoRef.current);
+    if (!end) {
+      return;
+    }
+
+    const endXRatio = end.xRatio;
+    const endYRatio = end.yRatio;
     const deltaX = endXRatio - gesture.startXRatio;
     const deltaY = endYRatio - gesture.startYRatio;
     const durationMs = Date.now() - gesture.startedAt;
 
     try {
-      if (Math.abs(deltaX) < 0.015 && Math.abs(deltaY) < 0.015) {
+      if (!gesture.moved && Math.abs(deltaX) < 0.015 && Math.abs(deltaY) < 0.015) {
         await sendSessionInput({
           type: "tap",
           xRatio: gesture.startXRatio,
           yRatio: gesture.startYRatio,
         });
+        onMessage("Tap delivered through custom WebRTC bridge");
       } else {
         await sendSessionInput({
           type: "swipe",
@@ -748,6 +879,26 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
           endYRatio,
           durationMs: Math.max(120, durationMs),
         });
+        onMessage("Swipe delivered through custom WebRTC bridge");
+      }
+    } catch (error) {
+      onMessage(`Custom WebRTC input failed: ${error.message}`);
+    }
+  }, [onMessage, sendSessionInput]);
+
+  const handleKeyDown = useCallback(async (event) => {
+    const payload = mapKeyboardEventToPayload(event);
+    if (!payload) {
+      return;
+    }
+
+    event.preventDefault();
+    try {
+      await sendSessionInput(payload);
+      if (payload.type === "key") {
+        onMessage(`Sent ${payload.key} through custom WebRTC bridge`);
+      } else if (payload.type === "text") {
+        onMessage(`Typed "${payload.text}" through custom WebRTC bridge`);
       }
     } catch (error) {
       onMessage(`Custom WebRTC input failed: ${error.message}`);
@@ -785,9 +936,19 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
       </div>
 
       <div
+        ref={containerRef}
         style={{ flex: 1, position: "relative", background: "#000" }}
+        tabIndex={0}
+        role="application"
+        aria-label="Android emulator screen"
         onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerCancel={clearGesture}
+        onLostPointerCapture={clearGesture}
+        onKeyDown={handleKeyDown}
+        onFocus={() => setFocusActive(true)}
+        onBlur={() => setFocusActive(false)}
       >
         <video
           ref={videoRef}
@@ -837,7 +998,25 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
             </div>
           </div>
         )}
-
+        {hasVideo && !focusActive && (
+          <div
+            style={{
+              position: "absolute",
+              left: 12,
+              right: 12,
+              bottom: 12,
+              padding: "8px 10px",
+              borderRadius: 10,
+              background: "rgba(9, 17, 28, 0.82)",
+              border: "1px solid rgba(59, 70, 91, 0.9)",
+              color: "#d7dfed",
+              fontSize: 12,
+              pointerEvents: "none",
+            }}
+          >
+            Click the stream to control it. Drag to swipe, type to send text, and use arrow keys, Enter, Backspace, or Esc.
+          </div>
+        )}
         <div
           style={{
             position: "absolute",

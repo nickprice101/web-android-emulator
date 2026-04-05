@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 import shlex
+import time
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -12,6 +13,8 @@ ADB_TARGET = os.environ.get("ADB_TARGET", "emulator:5555")
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace")).resolve()
 SCREENRECORD_BIT_RATE = max(1_000_000, int(os.environ.get("SCREENRECORD_BIT_RATE", "12000000")))
 SCREENRECORD_TIME_LIMIT = max(10, min(180, int(os.environ.get("SCREENRECORD_TIME_LIMIT", "180"))))
+SCREENRECORD_MAX_CONSECUTIVE_FAILURES = 3
+SCREENRECORD_RETRY_DELAY_SECONDS = 0.5
 KEY_MAP = {"HOME": "3", "BACK": "4", "RECENTS": "187", "POWER": "26", "MENU": "82"}
 KEY_NAME_MAP = {
     "GoHome": KEY_MAP["HOME"],
@@ -408,35 +411,52 @@ def screenrecord():
     except ValueError:
         return jsonify({"ok": False, "error": "bit_rate and time_limit must be integers"}), 400
 
-    proc = adb_popen(
-        "exec-out",
-        "screenrecord",
-        "--output-format=h264",
-        "--bit-rate",
-        str(bit_rate_value),
-        "--time-limit",
-        str(time_limit_value),
-        "-",
-    )
-
     def generate():
-        try:
-            while True:
-                chunk = proc.stdout.read(64 * 1024)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-            if proc.stdout:
-                proc.stdout.close()
-            if proc.stderr:
-                proc.stderr.close()
+        # Loop screenrecord segments so the HTTP response stays open indefinitely.
+        # Each segment runs for up to time_limit_value seconds (max 180 s, the
+        # Android hard limit).  When one segment ends we immediately start the next
+        # one, keeping the byte stream continuous from the bridge's perspective.
+        # The brief pause (~3-7 s for MediaCodec re-init) during the restart
+        # appears as a momentary video freeze rather than a session reconnection.
+        consecutive_failures = 0
+        while consecutive_failures < SCREENRECORD_MAX_CONSECUTIVE_FAILURES:
+            proc = adb_popen(
+                "exec-out",
+                "screenrecord",
+                "--output-format=h264",
+                "--bit-rate",
+                str(bit_rate_value),
+                "--time-limit",
+                str(time_limit_value),
+                "-",
+            )
+            delivered = False
+            try:
+                while True:
+                    chunk = proc.stdout.read(64 * 1024)
+                    if not chunk:
+                        break
+                    delivered = True
+                    consecutive_failures = 0
+                    yield chunk
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                if proc.stdout:
+                    proc.stdout.close()
+                if proc.stderr:
+                    proc.stderr.close()
+
+            if not delivered:
+                # screenrecord exited immediately without producing any data;
+                # treat as a transient error and back off briefly before retrying.
+                consecutive_failures += 1
+                time.sleep(SCREENRECORD_RETRY_DELAY_SECONDS)
+            # Normal exit (time limit reached): loop immediately.
 
     return Response(
         stream_with_context(generate()),

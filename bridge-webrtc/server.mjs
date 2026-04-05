@@ -137,8 +137,13 @@ function uniqueValues(values) {
 
 async function resolveTurnServerUrls() {
   const hostnameUrl = buildTurnServerUrl();
+  // When TURN_BRIDGE_HOST is a raw IP and TURN_SCHEME is "turns", use the IP
+  // literal directly in the bridge URL. The native WebRTC TURN client (libwebrtc)
+  // uses TLS for channel encryption but does not validate the server certificate
+  // against the URL hostname, so connecting via the IP bypasses the DNS lookup
+  // that the C++ resolver (which does not read /etc/hosts) would otherwise fail.
   const bridgeUrl =
-    turnBridgeHost && turnBridgeHost !== turnHost && !(turnScheme === "turns" && turnBridgeHostIsIp)
+    turnBridgeHost && turnBridgeHost !== turnHost
       ? buildTurnServerUrl(turnBridgeHost)
       : null;
   if (!hostnameUrl || !turnHost) {
@@ -179,7 +184,7 @@ function buildTurnWarnings() {
   if (turnBridgeHost && turnBridgeHost !== turnHost) {
     if (turnScheme === "turns" && turnBridgeHostIsIp) {
       warnings.push(
-        `TURN_BRIDGE_HOST is set to the IP '${turnBridgeHost}', but TURN_SCHEME is 'turns'. TLS certificates validate TURN_HOST '${turnHost}', not a raw IP, so the bridge will keep using the hostname. Add an extra_hosts entry mapping '${turnHost}' to '${turnBridgeHost}' inside the container so the hostname resolves to the LAN IP.`
+        `TURN_BRIDGE_HOST is set to the IP '${turnBridgeHost}' with TURN_SCHEME 'turns'. The bridge will connect to this IP directly for relay gathering, bypassing the DNS lookup that can fail for the native TURN client inside the container. TLS certificate chain and expiry are still validated; only hostname matching against the IP literal is skipped by the TURN client (the cert CN/SAN is '${turnHost}'). Browsers still use TURN_HOST '${turnHost}'.`
       );
     } else {
       warnings.push(
@@ -1727,7 +1732,7 @@ const server = http.createServer(async (req, res) => {
         url: buildTurnServerUrl(),
         bridgeHost: turnBridgeHost && turnBridgeHost !== turnHost ? turnBridgeHost : null,
         bridgeUrl:
-          turnBridgeHost && turnBridgeHost !== turnHost && !(turnScheme === "turns" && turnBridgeHostIsIp)
+          turnBridgeHost && turnBridgeHost !== turnHost
             ? buildTurnServerUrl(turnBridgeHost)
             : null,
       },

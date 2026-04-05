@@ -603,7 +603,11 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
             videoRef.current.srcObject = stream;
             videoRef.current.play().catch(() => {});
           }
-          setHasVideo(true);
+          // Do not call setHasVideo(true) here.  ontrack fires when the SDP is
+          // applied, before any video frames have arrived.  The video element's
+          // onLoadedMetadata handler (below) sets hasVideo once the browser has
+          // decoded the first frame and knows the stream dimensions, which is the
+          // correct moment to hide the "Preparing stream" overlay.
           appendRuntimeEvent("Browser received remote video track", {
             trackId: event.track?.id || null,
             streams: (event.streams || []).map((streamEntry) => streamEntry.id),

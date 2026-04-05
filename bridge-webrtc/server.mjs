@@ -366,7 +366,7 @@ async function probeTurnConnectivity() {
             (e) => ({ ok: false, ...probeErrorDetails(e) })
           )
         : effectiveBridgeScheme === "turn"
-          ? { ok: true, skipped: true, reason: "TURN_BRIDGE_SCHEME is 'turn', so TLS is not used for the bridge-to-TURN-server connection." }
+          ? { ok: true, skipped: true }
           : null;
     bridgeProbe = {
       host: turnBridgeHost,

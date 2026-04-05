@@ -4,12 +4,14 @@ import tempfile
 import shlex
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, request, stream_with_context
 
 app = Flask(__name__)
 
 ADB_TARGET = os.environ.get("ADB_TARGET", "emulator:5555")
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace")).resolve()
+SCREENRECORD_BIT_RATE = max(1_000_000, int(os.environ.get("SCREENRECORD_BIT_RATE", "12000000")))
+SCREENRECORD_TIME_LIMIT = max(10, min(180, int(os.environ.get("SCREENRECORD_TIME_LIMIT", "180"))))
 KEY_MAP = {"HOME": "3", "BACK": "4", "RECENTS": "187", "POWER": "26", "MENU": "82"}
 KEY_NAME_MAP = {
     "GoHome": KEY_MAP["HOME"],
@@ -17,6 +19,15 @@ KEY_NAME_MAP = {
     "AppSwitch": KEY_MAP["RECENTS"],
     "Power": KEY_MAP["POWER"],
     "Menu": KEY_MAP["MENU"],
+    "ArrowUp": "19",
+    "ArrowDown": "20",
+    "ArrowLeft": "21",
+    "ArrowRight": "22",
+    "Enter": "66",
+    "Tab": "61",
+    "Space": "62",
+    "Backspace": "67",
+    "Delete": "112",
 }
 
 
@@ -52,6 +63,14 @@ def adb_binary(*args, timeout=30):
     if rc != 0:
         raise RuntimeError((err or out or b"adb command failed").decode("utf-8", errors="replace"))
     return out
+
+
+def adb_popen(*args):
+    return subprocess.Popen(
+        ["adb", "-s", ADB_TARGET, *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
 
 
 def safe_workspace_path(rel):
@@ -376,6 +395,55 @@ def frame():
         return Response(png, mimetype="image/png")
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/screenrecord")
+def screenrecord():
+    bit_rate = request.args.get("bit_rate", str(SCREENRECORD_BIT_RATE)).strip()
+    time_limit = request.args.get("time_limit", str(SCREENRECORD_TIME_LIMIT)).strip()
+
+    try:
+        bit_rate_value = max(1_000_000, int(bit_rate))
+        time_limit_value = max(10, min(180, int(time_limit)))
+    except ValueError:
+        return jsonify({"ok": False, "error": "bit_rate and time_limit must be integers"}), 400
+
+    proc = adb_popen(
+        "exec-out",
+        "screenrecord",
+        "--output-format=h264",
+        "--bit-rate",
+        str(bit_rate_value),
+        "--time-limit",
+        str(time_limit_value),
+        "-",
+    )
+
+    def generate():
+        try:
+            while True:
+                chunk = proc.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="video/h264",
+        headers={"Cache-Control": "no-store"},
+        direct_passthrough=True,
+    )
 
 
 @app.get("/device-info")

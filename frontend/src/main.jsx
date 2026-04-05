@@ -153,6 +153,7 @@ function buildInboundVideoStats(reports) {
     bytesReceived: inbound?.bytesReceived ?? 0,
     framesDecoded: inbound?.framesDecoded ?? track?.framesDecoded ?? 0,
     framesReceived: inbound?.framesReceived ?? track?.framesReceived ?? 0,
+    framesPerSecond: inbound?.framesPerSecond ?? null,
     keyFramesDecoded: inbound?.keyFramesDecoded ?? 0,
     firCount: inbound?.firCount ?? 0,
     pliCount: inbound?.pliCount ?? 0,
@@ -1059,6 +1060,9 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
               frames: {sessionInfo?.media?.framesDelivered ?? 0}
               {sessionInfo?.media?.width && sessionInfo?.media?.height
                 ? ` | ${sessionInfo.media.width}x${sessionInfo.media.height}`
+                : ""}
+              {receiverStats?.framesPerSecond != null
+                ? ` | ${Math.round(receiverStats.framesPerSecond)} fps`
                 : ""}
             </div>
             {logs[logs.length - 1] && <div>{logs[logs.length - 1].message}</div>}

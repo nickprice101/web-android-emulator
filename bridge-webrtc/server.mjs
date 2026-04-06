@@ -29,6 +29,10 @@ const screenrecordFirstFrameTimeoutMs = Math.max(
   1000,
   Number.parseInt(process.env.CAPTURE_SCREENRECORD_FIRST_FRAME_TIMEOUT_MS || "15000", 10)
 );
+const screenrecordDecodeGraceTimeoutMs = Math.max(
+  1000,
+  Number.parseInt(process.env.CAPTURE_SCREENRECORD_DECODE_GRACE_TIMEOUT_MS || "15000", 10)
+);
 const turnKey = process.env.TURN_KEY || process.env.TURN_SECRET || "";
 const turnSecretSource = process.env.TURN_KEY ? "TURN_KEY" : process.env.TURN_SECRET ? "TURN_SECRET" : null;
 const turnHost = process.env.TURN_HOST || "";
@@ -919,6 +923,7 @@ function sessionPayload(session) {
       activeReason: session.media.activeReason || null,
       fallbackReason: session.media.fallbackReason || null,
       usingFallback: Boolean(session.media.usingFallback),
+      screenrecord: session.media.screenrecord || null,
     },
     answerDiagnostics: session.answerDiagnostics || null,
     answerAttempts: session.answerAttempts || [],
@@ -1024,6 +1029,16 @@ function createSession(offer) {
       activeReason: "initial-start",
       fallbackReason: null,
       usingFallback: false,
+      screenrecord: {
+        connectedAt: null,
+        firstChunkAt: null,
+        lastChunkAt: null,
+        firstDecodedFrameAt: null,
+        bytesReceived: 0,
+        chunksReceived: 0,
+        decodeGraceUsed: false,
+        verification: captureMode === "adb-screenrecord" ? "pending" : "not-requested",
+      },
     },
     logs: [],
     listeners: new Set(),
@@ -1245,6 +1260,7 @@ class EmulatorVideoCapture {
     this.pipelineRestartInProgress = false;
     this.fallbackActivated = false;
     this.pipelineFirstFrameDelivered = false;
+    this.screenrecordDecodeGraceUsed = false;
   }
 
   async start() {
@@ -1293,6 +1309,26 @@ class EmulatorVideoCapture {
     this.session.media.activeReason = reason || null;
     this.session.media.usingFallback = mode !== this.session.mode;
     this.session.media.fallbackReason = this.session.media.usingFallback ? reason || null : null;
+    if (mode === "adb-screenrecord") {
+      this.session.media.screenrecord = {
+        connectedAt: null,
+        firstChunkAt: null,
+        lastChunkAt: null,
+        firstDecodedFrameAt: null,
+        bytesReceived: 0,
+        chunksReceived: 0,
+        decodeGraceUsed: false,
+        verification: "pending",
+      };
+      this.screenrecordDecodeGraceUsed = false;
+    } else {
+      this.session.media.screenrecord = {
+        ...(this.session.media.screenrecord || {}),
+        decodeGraceUsed: this.screenrecordDecodeGraceUsed,
+        verification:
+          this.session.mode === "adb-screenrecord" ? "fallback-active" : "not-requested",
+      };
+    }
 
     recordSessionLog(this.session, "info", "Emulator capture initialized", {
       width: this.width,
@@ -1419,8 +1455,42 @@ class EmulatorVideoCapture {
         return;
       }
 
+      const screenrecordStats = this.session.media.screenrecord || null;
+      const receivedBytes = Number(screenrecordStats?.bytesReceived || 0);
+      const receivedChunks = Number(screenrecordStats?.chunksReceived || 0);
+
+      if (receivedBytes > 0 && !this.screenrecordDecodeGraceUsed) {
+        this.screenrecordDecodeGraceUsed = true;
+        this.session.media.screenrecord = {
+          ...(screenrecordStats || {}),
+          decodeGraceUsed: true,
+          verification: "waiting-for-decoded-frame",
+        };
+        recordSessionLog(
+          this.session,
+          "warn",
+          "Screenrecord stream produced H.264 data but no decoded frame yet; extending verification window before falling back",
+          {
+            timeoutMs: screenrecordFirstFrameTimeoutMs,
+            decodeGraceTimeoutMs: screenrecordDecodeGraceTimeoutMs,
+            bytesReceived: receivedBytes,
+            chunksReceived: receivedChunks,
+          }
+        );
+        clearTimeout(this.firstFrameTimer);
+        this.firstFrameTimer = setTimeout(() => {
+          this.armFirstFrameWatchdog();
+        }, screenrecordDecodeGraceTimeoutMs);
+        broadcastSessionStatus(this.session);
+        return;
+      }
+
       recordSessionLog(this.session, "warn", "Screenrecord capture did not deliver a first frame in time; falling back to screencap polling", {
-        timeoutMs: screenrecordFirstFrameTimeoutMs,
+        timeoutMs: this.screenrecordDecodeGraceUsed
+          ? screenrecordFirstFrameTimeoutMs + screenrecordDecodeGraceTimeoutMs
+          : screenrecordFirstFrameTimeoutMs,
+        bytesReceived: receivedBytes,
+        chunksReceived: receivedChunks,
       });
       this.fallbackActivated = true;
       this.fallbackToScreencap().catch((error) => {
@@ -1492,6 +1562,14 @@ class EmulatorVideoCapture {
         this.firstFrameTimer = null;
         clearTimeout(this.screenrecordRetryTimer);
         this.screenrecordRetryTimer = null;
+        if (this.mode === "adb-screenrecord") {
+          this.session.media.screenrecord = {
+            ...(this.session.media.screenrecord || {}),
+            firstDecodedFrameAt: this.session.media.lastFrameAt,
+            decodeGraceUsed: this.screenrecordDecodeGraceUsed,
+            verification: "verified",
+          };
+        }
         if (this.mode === "adb-screenrecord" && this.fallbackActivated) {
           this.fallbackActivated = false;
           this.session.media.activeReason = "screenrecord-restored";
@@ -1559,6 +1637,11 @@ class EmulatorVideoCapture {
 
         const reader = response.body.getReader();
         this.consecutiveFailures = 0;
+        this.session.media.screenrecord = {
+          ...(this.session.media.screenrecord || {}),
+          connectedAt: nowIso(),
+          verification: "pending",
+        };
         recordSessionLog(this.session, "info", "Connected to apkbridge screenrecord stream", {
           bitrate: captureBitrate,
           fps: captureFps,
@@ -1570,6 +1653,19 @@ class EmulatorVideoCapture {
             break;
           }
           if (value?.length) {
+            const receivedAt = nowIso();
+            this.session.media.screenrecord = {
+              ...(this.session.media.screenrecord || {}),
+              firstChunkAt: this.session.media.screenrecord?.firstChunkAt || receivedAt,
+              lastChunkAt: receivedAt,
+              bytesReceived: Number(this.session.media.screenrecord?.bytesReceived || 0) + value.length,
+              chunksReceived: Number(this.session.media.screenrecord?.chunksReceived || 0) + 1,
+              decodeGraceUsed: this.screenrecordDecodeGraceUsed,
+              verification:
+                this.pipelineFirstFrameDelivered || this.session.media.screenrecord?.firstDecodedFrameAt
+                  ? "verified"
+                  : "receiving-h264",
+            };
             await writeToStream(this.ffmpeg.stdin, Buffer.from(value));
           }
         }

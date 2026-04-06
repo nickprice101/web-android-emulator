@@ -391,11 +391,32 @@ function describeCaptureReason(reason, activeMode) {
   return reason.replace(/-/g, " ");
 }
 
+function describeScreenrecordVerification(screenrecord) {
+  const verification = screenrecord?.verification || null;
+  if (verification === "verified") {
+    return "Screen streaming is verified: the bridge received H.264 data and decoded at least one frame.";
+  }
+  if (verification === "receiving-h264") {
+    return "Screen streaming connected and H.264 bytes are arriving; waiting for the first decoded frame.";
+  }
+  if (verification === "waiting-for-decoded-frame") {
+    return "Screen streaming is receiving H.264 data, but the bridge has not decoded a frame yet and is using an extended grace window before fallback.";
+  }
+  if (verification === "fallback-active") {
+    return "The bridge fell back to screen captures before screen streaming could be verified.";
+  }
+  if (verification === "pending") {
+    return "Screen streaming is still being verified.";
+  }
+  return "";
+}
+
 function buildCaptureOverlay(sessionInfo, logs, receiverStats) {
   const requestedMode = sessionInfo?.media?.requestedSource || sessionInfo?.mode || null;
   const activeMode = sessionInfo?.media?.source || requestedMode || null;
   const usingFallback = Boolean(sessionInfo?.media?.usingFallback);
   const activeReason = sessionInfo?.media?.fallbackReason || sessionInfo?.media?.activeReason || null;
+  const screenrecord = sessionInfo?.media?.screenrecord || null;
   const latestLog = (Array.isArray(logs) ? [...logs].reverse() : []).find((entry) =>
     ["Capture fallback activated", "Capture pipeline started", "Connected to apkbridge screenrecord stream"].includes(
       entry?.message
@@ -410,9 +431,14 @@ function buildCaptureOverlay(sessionInfo, logs, receiverStats) {
     requestedLabel: describeCaptureMode(requestedMode),
     activeLabel: describeCaptureMode(activeMode),
     backendLabel: describeCaptureBackend(activeMode),
+    verificationLine: describeScreenrecordVerification(screenrecord),
     usingFallback,
     statusLine:
-      requestedMode && activeMode && requestedMode !== activeMode
+      requestedMode === "adb-screenrecord" &&
+      activeMode === "adb-screenrecord" &&
+      screenrecord?.verification === "verified"
+        ? "verified streaming active"
+        : requestedMode && activeMode && requestedMode !== activeMode
         ? `requested ${describeCaptureMode(requestedMode)} -> active ${describeCaptureMode(activeMode)}`
         : `${describeCaptureMode(activeMode)} active`,
     reasonLine:
@@ -1751,12 +1777,12 @@ function App() {
                       ? `${deviceInfo.screen.width}x${deviceInfo.screen.height}`
                       : "unavailable"}
                   </div>
-                  <div>
-                    WebRTC frame:{" "}
-                    {streamMode === "webrtc"
-                      ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}`
+                <div>
+                  WebRTC frame:{" "}
+                  {streamMode === "webrtc"
+                      ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}${captureOverlay.verificationLine ? ` | ${captureOverlay.verificationLine}` : ""}`
                       : "switch to Custom WebRTC to compare"}
-                  </div>
+                </div>
                   <div>
                     Tip: if the preview below is visible but WebRTC stays black, the bug is in the bridge/render path.
                   </div>
@@ -1804,6 +1830,20 @@ function App() {
                 <div>
                   Capture backend: requested {captureOverlay.requestedLabel} | active {captureOverlay.activeLabel}
                   {captureOverlay.usingFallback ? " | fallback yes" : " | fallback no"}
+                </div>
+                <div>
+                  Screenrecord verification: {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.verification || "n/a"}
+                  {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.firstChunkAt
+                    ? ` | first chunk ${formatClockTime(webrtcDiagnostics.sessionInfo.media.screenrecord.firstChunkAt)}`
+                    : ""}
+                  {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.firstDecodedFrameAt
+                    ? ` | first decoded frame ${formatClockTime(webrtcDiagnostics.sessionInfo.media.screenrecord.firstDecodedFrameAt)}`
+                    : ""}
+                </div>
+                <div>
+                  Screenrecord upstream: chunks {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.chunksReceived ?? 0} | bytes{" "}
+                  {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.bytesReceived ?? 0}
+                  {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.decodeGraceUsed ? " | decode grace used yes" : " | decode grace used no"}
                 </div>
                 <div>
                   Bridge states: session {webrtcDiagnostics?.sessionInfo?.peerConnectionState || "new"} | ice{" "}

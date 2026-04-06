@@ -1,7 +1,9 @@
 import os
+import queue
+import shlex
 import subprocess
 import tempfile
-import shlex
+import threading
 import time
 from pathlib import Path
 
@@ -73,6 +75,7 @@ def adb_popen(*args):
         ["adb", "-s", ADB_TARGET, *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        bufsize=0,
     )
 
 
@@ -431,14 +434,52 @@ def screenrecord():
                 "-",
             )
             delivered = False
+            stderr_chunks = []
+            stream_queue = queue.Queue()
+
+            def pump_stream(fileobj, stream_name):
+                try:
+                    while True:
+                        chunk = os.read(fileobj.fileno(), 64 * 1024)
+                        stream_queue.put((stream_name, chunk))
+                        if not chunk:
+                            break
+                finally:
+                    fileobj.close()
+
+            if proc.stdout:
+                threading.Thread(
+                    target=pump_stream,
+                    args=(proc.stdout, "stdout"),
+                    daemon=True,
+                ).start()
+            if proc.stderr:
+                threading.Thread(
+                    target=pump_stream,
+                    args=(proc.stderr, "stderr"),
+                    daemon=True,
+                ).start()
+
+            open_streams = sum(1 for stream in (proc.stdout, proc.stderr) if stream)
             try:
-                while True:
-                    chunk = proc.stdout.read(64 * 1024)
+                while open_streams > 0:
+                    try:
+                        stream_name, chunk = stream_queue.get(timeout=1)
+                    except queue.Empty:
+                        if proc.poll() is not None:
+                            break
+                        continue
+
                     if not chunk:
-                        break
-                    delivered = True
-                    consecutive_failures = 0
-                    yield chunk
+                        open_streams -= 1
+                        continue
+
+                    if stream_name == "stdout":
+                        delivered = True
+                        consecutive_failures = 0
+                        yield chunk
+                    else:
+                        stderr_chunks.append(chunk)
             finally:
                 if proc.poll() is None:
                     proc.terminate()
@@ -455,6 +496,9 @@ def screenrecord():
                 # screenrecord exited immediately without producing any data;
                 # treat as a transient error and back off briefly before retrying.
                 consecutive_failures += 1
+                stderr_text = b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
+                if stderr_text:
+                    app.logger.warning("screenrecord exited without data: %s", stderr_text)
                 time.sleep(SCREENRECORD_RETRY_DELAY_SECONDS)
             # Normal exit (time limit reached): loop immediately.
 

@@ -76,62 +76,6 @@ services:
         aliases:
           - apkbridge
 
-  bridge-webrtc:
-    container_name: google-emu-bridge-webrtc
-    build:
-      context: ./bridge-webrtc
-    image: google-emu-bridge-webrtc:latest
-    environment:
-      PORT: "8090"
-      CAPTURE_MODE: "adb-screenrecord"
-      CAPTURE_FPS: "30"
-      CAPTURE_BIT_RATE: "12000000"
-      APKBRIDGE_BASE_URL: "http://apkbridge:5000"
-      TURN_HOST: "turn.corsicanescape.com"
-      TURN_PORT: "443"
-      TURN_PROTOCOL: "tcp"
-      TURN_SCHEME: "turns"
-      TURN_KEY: "PLACEHOLDER_TURN_KEY"
-      TURN_TTL: "86400"
-      TURN_USERNAME_SUFFIX: "emuuser"
-      TURN_BRIDGE_HOST: "192.168.1.152"
-      TURN_BRIDGE_SCHEME: "turn"
-      TURN_BRIDGE_PORT: "3478"
-      # TURN_BRIDGE_HOST: Set to the TURN server's LAN/internal IP when the
-      # bridge container cannot reach TURN_HOST directly (e.g. coturn listens
-      # on a LAN IP and the router does not support hairpin NAT for the public
-      # DNS name).
-      # TURN_BRIDGE_SCHEME / TURN_BRIDGE_PORT: Override the scheme and port
-      # used for the bridge's own TURN connection. Set TURN_BRIDGE_SCHEME=turn
-      # and TURN_BRIDGE_PORT=3478 to use plain (unencrypted) TURN on coturn's
-      # standard listening port, which avoids both libwebrtc's DNS lookup
-      # failure for /etc/hosts entries and TLS certificate hostname mismatches
-      # that occur when connecting to a TURN server via its LAN IP with turns:.
-      # Browsers still use TURN_HOST with TURN_SCHEME (turns:/443).
-      # Leave all TURN_BRIDGE_* vars unset if the bridge can reach TURN_HOST
-      # without issue.
-    extra_hosts:
-      - "turn.corsicanescape.com:192.168.1.152"
-    expose:
-      - "8090"
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/health').then((r) => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    depends_on:
-      - emulator
-      - apkbridge
-    restart: unless-stopped
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
-    networks:
-      google-emu:
-        aliases:
-          - bridge-webrtc
-
   envoy:
     container_name: google-emu-envoy
     image: envoyproxy/envoy:v1.31-latest
@@ -139,7 +83,6 @@ services:
       - emulator
       - frontend
       - apkbridge
-      - bridge-webrtc
     ports:
       - "18080:8080"
     volumes:

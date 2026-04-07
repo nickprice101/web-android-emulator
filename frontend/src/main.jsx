@@ -477,6 +477,195 @@ function formatBridgeLog(entry) {
   return `[${formatClockTime(entry.at)}] ${level} ${entry.message}${entry.details ? ` ${formatDiagnosticDetails(entry.details)}` : ""}`;
 }
 
+function appendBoundedEvent(previous, message, details = null, limit = 40) {
+  const entry = {
+    at: new Date().toISOString(),
+    message,
+    details,
+  };
+  return [...previous, entry].slice(-limit);
+}
+
+function summarizeIceServers(iceServers) {
+  const urls = (Array.isArray(iceServers) ? iceServers : [])
+    .flatMap((server) => (Array.isArray(server?.urls) ? server.urls : server?.urls ? [server.urls] : []))
+    .map((value) => String(value));
+
+  return {
+    count: urls.length,
+    hasTurn: urls.some((value) => value.startsWith("turn:") || value.startsWith("turns:")),
+    hasStun: urls.some((value) => value.startsWith("stun:") || value.startsWith("stuns:")),
+    urls,
+  };
+}
+
+function formatIceServerSummary(summary) {
+  if (!summary) {
+    return "n/a";
+  }
+  return [
+    `urls=${summary.count ?? 0}`,
+    `turn=${summary.hasTurn ? "yes" : "no"}`,
+    `stun=${summary.hasStun ? "yes" : "no"}`,
+    summary.urls?.length ? `first=${summary.urls[0]}` : null,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function buildPeerConnectionStats(reports) {
+  let inbound = null;
+  let track = null;
+  let transport = null;
+  let selectedPair = null;
+  let localCandidate = null;
+  let remoteCandidate = null;
+
+  reports.forEach((report) => {
+    if (report.type === "inbound-rtp" && report.kind === "video" && !report.isRemote) {
+      inbound = report;
+      return;
+    }
+    if (report.type === "track" && report.kind === "video") {
+      track = report;
+      return;
+    }
+    if (report.type === "transport" && inbound?.transportId && report.id === inbound.transportId) {
+      transport = report;
+      return;
+    }
+    if (report.type === "candidate-pair" && transport?.selectedCandidatePairId && report.id === transport.selectedCandidatePairId) {
+      selectedPair = report;
+    }
+  });
+
+  if (inbound?.transportId) {
+    transport = reports.get(inbound.transportId) || transport;
+  }
+  if (transport?.selectedCandidatePairId) {
+    selectedPair = reports.get(transport.selectedCandidatePairId) || selectedPair;
+  }
+  if (selectedPair?.localCandidateId) {
+    localCandidate = reports.get(selectedPair.localCandidateId) || null;
+  }
+  if (selectedPair?.remoteCandidateId) {
+    remoteCandidate = reports.get(selectedPair.remoteCandidateId) || null;
+  }
+
+  return {
+    packetsReceived: inbound?.packetsReceived ?? 0,
+    bytesReceived: inbound?.bytesReceived ?? 0,
+    framesReceived: inbound?.framesReceived ?? track?.framesReceived ?? 0,
+    framesDecoded: inbound?.framesDecoded ?? track?.framesDecoded ?? 0,
+    framesPerSecond: inbound?.framesPerSecond ?? null,
+    keyFramesDecoded: inbound?.keyFramesDecoded ?? 0,
+    pliCount: inbound?.pliCount ?? 0,
+    firCount: inbound?.firCount ?? 0,
+    nackCount: inbound?.nackCount ?? 0,
+    jitter: inbound?.jitter ?? null,
+    decoderImplementation: inbound?.decoderImplementation || null,
+    frameWidth: inbound?.frameWidth ?? track?.frameWidth ?? 0,
+    frameHeight: inbound?.frameHeight ?? track?.frameHeight ?? 0,
+    selectedCandidatePair: selectedPair
+      ? {
+          state: selectedPair.state || null,
+          currentRoundTripTime: selectedPair.currentRoundTripTime ?? null,
+          availableIncomingBitrate: selectedPair.availableIncomingBitrate ?? null,
+          localCandidateType: localCandidate?.candidateType || null,
+          remoteCandidateType: remoteCandidate?.candidateType || null,
+          localAddress: localCandidate?.address || null,
+          remoteAddress: remoteCandidate?.address || null,
+          localProtocol: localCandidate?.protocol || null,
+          remoteProtocol: remoteCandidate?.protocol || null,
+        }
+      : null,
+  };
+}
+
+function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDiagnostics) {
+  const peerStats = nativeDiagnostics?.peerStats || null;
+  const startSummary = nativeDiagnostics?.startIceServers || null;
+  const remoteCandidates = nativeDiagnostics?.remoteCandidateSummary || parseSdpCandidateDiagnostics(nativeDiagnostics?.remoteDescriptionSdp || "");
+  const localCandidates = nativeDiagnostics?.localCandidateSummary || parseSdpCandidateDiagnostics(nativeDiagnostics?.localDescriptionSdp || "");
+  const tinyVideo = isTinyVideoFrame(videoStats);
+  const renderableVideo = hasRenderableVideo(videoStats, peerStats, hasVideoFrame);
+  const packetsReceived = Number(peerStats?.packetsReceived ?? 0);
+  const bytesReceived = Number(peerStats?.bytesReceived ?? 0);
+  const framesReceived = Number(peerStats?.framesReceived ?? 0);
+  const framesDecoded = Number(peerStats?.framesDecoded ?? 0);
+  const selectedPair = peerStats?.selectedCandidatePair || null;
+
+  if (renderableVideo) {
+    return {
+      code: "rendering",
+      summary: "The browser has decoded at least one real emulator frame from the native WebRTC stream.",
+    };
+  }
+
+  if (tinyVideo && framesDecoded > 0) {
+    return {
+      code: "placeholder-frame",
+      summary:
+        "Inbound RTP is arriving and the browser decoded frames, but the video element is still stuck on a tiny placeholder frame instead of the emulator surface.",
+    };
+  }
+
+  if (emuState === "connected" && startSummary && !startSummary.hasTurn && !startSummary.hasStun) {
+    return {
+      code: "missing-ice-servers",
+      summary:
+        "The emulator created a native WebRTC session without advertising any STUN or TURN servers, so remote browsers may have no reachable ICE path.",
+    };
+  }
+
+  const hostOnlyRemote =
+    remoteCandidates.total > 0 &&
+    remoteCandidates.relay === 0 &&
+    remoteCandidates.srflx === 0 &&
+    remoteCandidates.publicHost === 0;
+  const hostOnlyLocal =
+    localCandidates.total > 0 &&
+    localCandidates.relay === 0 &&
+    localCandidates.srflx === 0 &&
+    localCandidates.publicHost === 0;
+
+  if (!selectedPair && packetsReceived === 0 && hostOnlyRemote && hostOnlyLocal) {
+    return {
+      code: "unreachable-host-candidates",
+      summary:
+        "The native session only exposed private or loopback ICE candidates and never selected a working pair, so the browser had no reachable media path.",
+    };
+  }
+
+  if (emuState === "connected" && packetsReceived === 0 && bytesReceived === 0) {
+    return {
+      code: "no-inbound-rtp",
+      summary:
+        "Signaling completed and the peer connection reported connected, but the browser never received inbound RTP packets from the emulator.",
+    };
+  }
+
+  if ((packetsReceived > 0 || bytesReceived > 0 || framesReceived > 0) && framesDecoded === 0) {
+    return {
+      code: "decode-stalled",
+      summary:
+        "The browser is receiving native WebRTC video packets, but no frames have been decoded yet. This points to a decode, codec, or keyframe problem rather than pure connectivity.",
+    };
+  }
+
+  if (emuState === "disconnected" || emuState === "error") {
+    return {
+      code: "disconnected",
+      summary: "The native emulator session dropped before the browser rendered a usable frame.",
+    };
+  }
+
+  return {
+    code: "awaiting-first-frame",
+    summary: "Signaling reached the emulator, but the browser has not decoded the first usable emulator frame yet.",
+  };
+}
+
 function hasRenderableVideo(videoStats, receiverStats, hasVideo = false) {
   const readyState = Number(videoStats?.readyState ?? 0);
   const videoWidth = Number(videoStats?.videoWidth ?? 0);
@@ -560,21 +749,30 @@ function buildCustomWebrtcOverlay(webrtcDiagnostics) {
   };
 }
 
-function buildNativeWebrtcOverlay(emuState, videoStats, hasVideoFrame) {
-  const videoReady = hasRenderableVideo(videoStats, null, hasVideoFrame);
+function buildNativeWebrtcOverlay(emuState, videoStats, hasVideoFrame, nativeDiagnostics) {
+  const videoReady = hasRenderableVideo(videoStats, nativeDiagnostics?.peerStats, hasVideoFrame);
   const tinyVideo = isTinyVideoFrame(videoStats);
   const videoSize =
     videoStats?.videoWidth > 0 && videoStats?.videoHeight > 0
       ? `${videoStats.videoWidth}x${videoStats.videoHeight}`
       : "unknown";
   const readyState = Number(videoStats?.readyState ?? 0);
+  const peerStats = nativeDiagnostics?.peerStats || null;
+  const failure = buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDiagnostics);
+  const verificationParts = [`Browser video readyState ${readyState} | size ${videoSize}`];
+  if (peerStats) {
+    verificationParts.push(
+      `RTP packets ${peerStats.packetsReceived ?? 0} | decoded ${peerStats.framesDecoded ?? 0}`
+    );
+  }
+  const verificationLine = verificationParts.join(" | ");
 
   if (videoReady) {
     return {
       backendLabel: "native emulator WebRTC / gRPC-Web",
       statusLine: "native WebRTC rendering",
       reasonLine: "The browser decoded at least one frame from the emulator's direct WebRTC stream.",
-      verificationLine: `Browser video readyState ${readyState} | size ${videoSize}`,
+      verificationLine,
     };
   }
 
@@ -582,9 +780,8 @@ function buildNativeWebrtcOverlay(emuState, videoStats, hasVideoFrame) {
     return {
       backendLabel: "native emulator WebRTC / gRPC-Web",
       statusLine: "native WebRTC placeholder frame",
-      reasonLine:
-        "The browser attached the native stream, but the decoder only exposed a tiny placeholder frame instead of the real emulator surface.",
-      verificationLine: `Browser video readyState ${readyState} | size ${videoSize}`,
+      reasonLine: failure.summary,
+      verificationLine,
     };
   }
 
@@ -592,8 +789,8 @@ function buildNativeWebrtcOverlay(emuState, videoStats, hasVideoFrame) {
     return {
       backendLabel: "native emulator WebRTC / gRPC-Web",
       statusLine: "native WebRTC awaiting first frame",
-      reasonLine: "Signaling reached the emulator, but the browser has not decoded a frame yet.",
-      verificationLine: `Browser video readyState ${readyState} | size ${videoSize}`,
+      reasonLine: failure.summary,
+      verificationLine,
     };
   }
 
@@ -601,17 +798,18 @@ function buildNativeWebrtcOverlay(emuState, videoStats, hasVideoFrame) {
     return {
       backendLabel: "native emulator WebRTC / gRPC-Web",
       statusLine: "native WebRTC disconnected",
-      reasonLine: "The native emulator session dropped before the browser rendered a frame.",
+      reasonLine: failure.summary,
       verificationLine:
-        "If TURN used to work and now shows no allocations, inspect the emulator's native ICE/TURN advertisement rather than the old bridge path.",
+        verificationLine +
+        " | If TURN used to work and now shows no allocations, inspect the emulator's native ICE/TURN advertisement rather than the old bridge path.",
     };
   }
 
   return {
     backendLabel: "native emulator WebRTC / gRPC-Web",
     statusLine: "native WebRTC connecting",
-    reasonLine: "The browser is still negotiating the emulator's direct WebRTC session.",
-    verificationLine: `Browser video readyState ${readyState} | size ${videoSize}`,
+    reasonLine: failure.summary,
+    verificationLine,
   };
 }
 
@@ -1448,15 +1646,29 @@ function App() {
   const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
   const [nativeVideoStats, setNativeVideoStats] = useState(null);
   const [nativeHasVideoFrame, setNativeHasVideoFrame] = useState(false);
+  const [nativeDiagnostics, setNativeDiagnostics] = useState({
+    runtimeEvents: [],
+    startIceServers: null,
+    localDescriptionSdp: "",
+    remoteDescriptionSdp: "",
+    localCandidateSummary: null,
+    remoteCandidateSummary: null,
+    peerStates: null,
+    peerStats: null,
+    lastError: null,
+  });
   const [nativeWebrtcKey, setNativeWebrtcKey] = useState(0);
   const [nativeRetryCount, setNativeRetryCount] = useState(0);
   const webrtcFailureRef = useRef(false);
   const nativeTinyFrameSinceRef = useRef(null);
+  const nativePeerCleanupRef = useRef(() => {});
+  const nativeJsepPatchedRef = useRef(null);
+  const nativeRootCauseRef = useRef(null);
   const captureOverlay =
     streamMode === "custom-webrtc"
       ? buildCustomWebrtcOverlay(webrtcDiagnostics)
       : buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
-  const nativeWebrtcOverlay = buildNativeWebrtcOverlay(emuState, nativeVideoStats, nativeHasVideoFrame);
+  const nativeWebrtcOverlay = buildNativeWebrtcOverlay(emuState, nativeVideoStats, nativeHasVideoFrame, nativeDiagnostics);
   const bridgeCaptureOverlay =
     webrtcDiagnostics?.captureOverlay ||
     buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
@@ -1467,6 +1679,24 @@ function App() {
   const runtimeEventSummary = webrtcDiagnostics?.runtimeEventSummary || "No browser runtime events yet.";
   const bridgeLogSummary = webrtcDiagnostics?.bridgeLogSummary || "No bridge logs yet.";
   const ffmpegStderrSummary = webrtcDiagnostics?.ffmpegStderrSummary || "No ffmpeg stderr yet.";
+  const nativeFailureReason = buildNativeFailureReason(emuState, nativeVideoStats, nativeHasVideoFrame, nativeDiagnostics);
+  const nativeRuntimeEventSummary =
+    nativeDiagnostics.runtimeEvents.length > 0
+      ? nativeDiagnostics.runtimeEvents.map(formatRuntimeEvent).join("\n")
+      : "No native WebRTC runtime events yet.";
+  const nativeFirstFrameDiagnostics = [
+    `emu=${emuState} | browserVideo=${nativeVideoStats?.readyState ?? "n/a"} | size=${nativeVideoStats?.videoWidth ?? 0}x${nativeVideoStats?.videoHeight ?? 0}`,
+    `start ice servers: ${formatIceServerSummary(nativeDiagnostics.startIceServers)}`,
+    `local candidates: ${formatCandidateTypeSummary(nativeDiagnostics.localCandidateSummary)}`,
+    `remote candidates: ${formatCandidateTypeSummary(nativeDiagnostics.remoteCandidateSummary)}`,
+    `peer states: connection=${nativeDiagnostics.peerStates?.connectionState || "n/a"} | ice=${nativeDiagnostics.peerStates?.iceConnectionState || "n/a"} | signaling=${nativeDiagnostics.peerStates?.signalingState || "n/a"} | gathering=${nativeDiagnostics.peerStates?.iceGatheringState || "n/a"}`,
+    `peer stats: packets=${nativeDiagnostics.peerStats?.packetsReceived ?? 0} | bytes=${nativeDiagnostics.peerStats?.bytesReceived ?? 0} | framesReceived=${nativeDiagnostics.peerStats?.framesReceived ?? 0} | framesDecoded=${nativeDiagnostics.peerStats?.framesDecoded ?? 0} | fps=${nativeDiagnostics.peerStats?.framesPerSecond ?? "n/a"}`,
+    nativeDiagnostics.peerStats?.selectedCandidatePair
+      ? `selected pair: ${nativeDiagnostics.peerStats.selectedCandidatePair.localCandidateType || "n/a"} ${nativeDiagnostics.peerStats.selectedCandidatePair.localAddress || "n/a"} -> ${nativeDiagnostics.peerStats.selectedCandidatePair.remoteCandidateType || "n/a"} ${nativeDiagnostics.peerStats.selectedCandidatePair.remoteAddress || "n/a"} | state=${nativeDiagnostics.peerStats.selectedCandidatePair.state || "n/a"}`
+      : "selected pair: none",
+    `diagnosis: ${nativeFailureReason.summary}`,
+    nativeDiagnostics.lastError ? `last error: ${nativeDiagnostics.lastError}` : "last error: none",
+  ].join("\n");
 
   const handleWebrtcMessage = useCallback((nextMessage) => {
     setMessage(nextMessage);
@@ -1612,6 +1842,256 @@ function App() {
 
   useEffect(() => {
     if (streamMode !== "native-webrtc") {
+      nativePeerCleanupRef.current();
+      nativePeerCleanupRef.current = () => {};
+      nativeJsepPatchedRef.current = null;
+      nativeRootCauseRef.current = null;
+      setNativeDiagnostics({
+        runtimeEvents: [],
+        startIceServers: null,
+        localDescriptionSdp: "",
+        remoteDescriptionSdp: "",
+        localCandidateSummary: null,
+        remoteCandidateSummary: null,
+        peerStates: null,
+        peerStats: null,
+        lastError: null,
+      });
+      return;
+    }
+
+    setNativeDiagnostics({
+      runtimeEvents: [],
+      startIceServers: null,
+      localDescriptionSdp: "",
+      remoteDescriptionSdp: "",
+      localCandidateSummary: null,
+      remoteCandidateSummary: null,
+      peerStates: null,
+      peerStats: null,
+      lastError: null,
+    });
+    nativeRootCauseRef.current = null;
+  }, [streamMode, nativeWebrtcKey]);
+
+  useEffect(() => {
+    if (streamMode !== "native-webrtc") {
+      return undefined;
+    }
+
+    let active = true;
+    let lastPeer = null;
+    let detachPeerListeners = () => {};
+
+    const pushNativeEvent = (messageText, details = null) => {
+      if (!active) {
+        return;
+      }
+      setNativeDiagnostics((previous) => ({
+        ...previous,
+        runtimeEvents: appendBoundedEvent(previous.runtimeEvents, messageText, details),
+      }));
+    };
+
+    const updatePeerStats = async (peer) => {
+      if (!peer) {
+        return;
+      }
+      try {
+        const reports = await peer.getStats();
+        if (!active || peer !== lastPeer) {
+          return;
+        }
+        setNativeDiagnostics((previous) => ({
+          ...previous,
+          peerStats: buildPeerConnectionStats(reports),
+        }));
+      } catch (error) {
+        pushNativeEvent("Failed to read native RTCPeerConnection stats", { error: error.message });
+      }
+    };
+
+    const attachPeerListeners = (peer) => {
+      const syncPeerState = () => {
+        setNativeDiagnostics((previous) => ({
+          ...previous,
+          peerStates: {
+            connectionState: peer.connectionState || "unknown",
+            iceConnectionState: peer.iceConnectionState || "unknown",
+            signalingState: peer.signalingState || "unknown",
+            iceGatheringState: peer.iceGatheringState || "unknown",
+          },
+          localDescriptionSdp: peer.localDescription?.sdp || previous.localDescriptionSdp,
+          remoteDescriptionSdp: peer.remoteDescription?.sdp || previous.remoteDescriptionSdp,
+          localCandidateSummary: peer.localDescription?.sdp
+            ? parseSdpCandidateDiagnostics(peer.localDescription.sdp)
+            : previous.localCandidateSummary,
+          remoteCandidateSummary: peer.remoteDescription?.sdp
+            ? parseSdpCandidateDiagnostics(peer.remoteDescription.sdp)
+            : previous.remoteCandidateSummary,
+        }));
+      };
+
+      const onConnectionStateChange = () => {
+        syncPeerState();
+        pushNativeEvent("Native peer connection state changed", { state: peer.connectionState || "unknown" });
+      };
+      const onIceConnectionStateChange = () => {
+        syncPeerState();
+        pushNativeEvent("Native ICE connection state changed", { state: peer.iceConnectionState || "unknown" });
+      };
+      const onSignalingStateChange = () => {
+        syncPeerState();
+        pushNativeEvent("Native signaling state changed", { state: peer.signalingState || "unknown" });
+      };
+      const onIceGatheringStateChange = () => {
+        syncPeerState();
+        pushNativeEvent("Native ICE gathering state changed", { state: peer.iceGatheringState || "unknown" });
+      };
+      const onIceCandidate = (event) => {
+        if (!event.candidate) {
+          pushNativeEvent("Native browser ICE gathering completed");
+          return;
+        }
+        pushNativeEvent("Native browser ICE candidate gathered", { candidate: event.candidate.candidate || "" });
+        syncPeerState();
+      };
+      const onIceCandidateError = (event) =>
+        pushNativeEvent("Native ICE candidate error", {
+          address: event.address || null,
+          port: event.port || null,
+          url: event.url || null,
+          errorCode: event.errorCode || null,
+          errorText: event.errorText || null,
+        });
+      const onTrack = (event) =>
+        pushNativeEvent("Native peer received remote track", {
+          kind: event.track?.kind || "unknown",
+          id: event.track?.id || null,
+          muted: Boolean(event.track?.muted),
+          readyState: event.track?.readyState || "unknown",
+        });
+
+      peer.addEventListener("connectionstatechange", onConnectionStateChange);
+      peer.addEventListener("iceconnectionstatechange", onIceConnectionStateChange);
+      peer.addEventListener("signalingstatechange", onSignalingStateChange);
+      peer.addEventListener("icegatheringstatechange", onIceGatheringStateChange);
+      peer.addEventListener("icecandidate", onIceCandidate);
+      peer.addEventListener("icecandidateerror", onIceCandidateError);
+      peer.addEventListener("track", onTrack);
+      syncPeerState();
+      updatePeerStats(peer);
+
+      detachPeerListeners = () => {
+        peer.removeEventListener("connectionstatechange", onConnectionStateChange);
+        peer.removeEventListener("iceconnectionstatechange", onIceConnectionStateChange);
+        peer.removeEventListener("signalingstatechange", onSignalingStateChange);
+        peer.removeEventListener("icegatheringstatechange", onIceGatheringStateChange);
+        peer.removeEventListener("icecandidate", onIceCandidate);
+        peer.removeEventListener("icecandidateerror", onIceCandidateError);
+        peer.removeEventListener("track", onTrack);
+      };
+    };
+
+    const patchJsep = (jsep) => {
+      if (!jsep || nativeJsepPatchedRef.current === jsep) {
+        return;
+      }
+      nativeJsepPatchedRef.current = jsep;
+
+      const originalHandleStart = jsep._handleStart?.bind(jsep);
+      const originalHandleSignal = jsep._handleSignal?.bind(jsep);
+      const originalDisconnect = jsep.disconnect?.bind(jsep);
+      if (!originalHandleStart || !originalHandleSignal || !originalDisconnect) {
+        return;
+      }
+
+      jsep._handleStart = (signal) => {
+        const startSummary = summarizeIceServers(signal?.start?.iceServers || []);
+        pushNativeEvent("Native emulator advertised RTC configuration", {
+          iceServers: startSummary.count,
+          hasTurn: startSummary.hasTurn,
+          hasStun: startSummary.hasStun,
+        });
+        setNativeDiagnostics((previous) => ({
+          ...previous,
+          startIceServers: startSummary,
+        }));
+        originalHandleStart(signal);
+      };
+
+      jsep._handleSignal = (signal) => {
+        if (signal?.sdp?.sdp) {
+          const kind = signal.sdp.type || "offer";
+          pushNativeEvent(`Native emulator sent ${kind} SDP`, {
+            candidates: countSdpIceCandidates(signal.sdp.sdp),
+          });
+          setNativeDiagnostics((previous) => ({
+            ...previous,
+            remoteDescriptionSdp: signal.sdp.sdp,
+            remoteCandidateSummary: parseSdpCandidateDiagnostics(signal.sdp.sdp),
+          }));
+        }
+        if (signal?.candidate?.candidate) {
+          pushNativeEvent("Native emulator sent ICE candidate", {
+            candidate: signal.candidate.candidate,
+          });
+        }
+        originalHandleSignal(signal);
+      };
+
+      jsep.disconnect = () => {
+        pushNativeEvent("Native JSEP session disconnected");
+        originalDisconnect();
+      };
+
+      nativePeerCleanupRef.current = () => {
+        detachPeerListeners();
+        jsep._handleStart = originalHandleStart;
+        jsep._handleSignal = originalHandleSignal;
+        jsep.disconnect = originalDisconnect;
+      };
+    };
+
+    const scan = window.setInterval(() => {
+      const emulator = emuRef.current;
+      const jsep = emulator?.jsep || null;
+      if (jsep) {
+        patchJsep(jsep);
+      }
+      const peer = jsep?.peerConnection || null;
+      if (peer && peer !== lastPeer) {
+        detachPeerListeners();
+        lastPeer = peer;
+        pushNativeEvent("Attached native WebRTC diagnostics to browser peer connection");
+        attachPeerListeners(peer);
+      }
+      if (peer) {
+        updatePeerStats(peer);
+        setNativeDiagnostics((previous) => ({
+          ...previous,
+          localDescriptionSdp: peer.localDescription?.sdp || previous.localDescriptionSdp,
+          remoteDescriptionSdp: peer.remoteDescription?.sdp || previous.remoteDescriptionSdp,
+          localCandidateSummary: peer.localDescription?.sdp
+            ? parseSdpCandidateDiagnostics(peer.localDescription.sdp)
+            : previous.localCandidateSummary,
+          remoteCandidateSummary: peer.remoteDescription?.sdp
+            ? parseSdpCandidateDiagnostics(peer.remoteDescription.sdp)
+            : previous.remoteCandidateSummary,
+        }));
+      }
+    }, 500);
+
+    return () => {
+      active = false;
+      window.clearInterval(scan);
+      detachPeerListeners();
+      nativePeerCleanupRef.current();
+    };
+  }, [streamMode, nativeWebrtcKey]);
+
+  useEffect(() => {
+    if (streamMode !== "native-webrtc") {
       setNativeVideoStats(null);
       setNativeHasVideoFrame(false);
       nativeTinyFrameSinceRef.current = null;
@@ -1668,6 +2148,82 @@ function App() {
 
   useEffect(() => {
     if (streamMode !== "native-webrtc") {
+      return undefined;
+    }
+
+    let active = true;
+    let video = null;
+    let detachVideoListeners = () => {};
+
+    const pushVideoEvent = (messageText, details = null) => {
+      if (!active) {
+        return;
+      }
+      setNativeDiagnostics((previous) => ({
+        ...previous,
+        runtimeEvents: appendBoundedEvent(previous.runtimeEvents, messageText, details),
+      }));
+    };
+
+    const attachVideoListeners = (nextVideo) => {
+      const handlers = {
+        loadedmetadata: () =>
+          pushVideoEvent("Native video element loaded metadata", {
+            width: nextVideo.videoWidth || 0,
+            height: nextVideo.videoHeight || 0,
+          }),
+        loadeddata: () =>
+          pushVideoEvent("Native video element loaded current frame data", {
+            readyState: nextVideo.readyState,
+          }),
+        canplay: () =>
+          pushVideoEvent("Native video element can play", {
+            readyState: nextVideo.readyState,
+          }),
+        playing: () => pushVideoEvent("Native video element started playing"),
+        waiting: () => pushVideoEvent("Native video element waiting for data"),
+        stalled: () => pushVideoEvent("Native video element stalled"),
+        suspend: () => pushVideoEvent("Native video element suspended"),
+        emptied: () => pushVideoEvent("Native video element emptied"),
+        resize: () =>
+          pushVideoEvent("Native video element resized", {
+            width: nextVideo.videoWidth || 0,
+            height: nextVideo.videoHeight || 0,
+          }),
+        error: () =>
+          pushVideoEvent("Native video element error", {
+            code: nextVideo.error?.code || null,
+            message: nextVideo.error?.message || null,
+          }),
+      };
+
+      Object.entries(handlers).forEach(([eventName, handler]) => nextVideo.addEventListener(eventName, handler));
+      detachVideoListeners = () => {
+        Object.entries(handlers).forEach(([eventName, handler]) => nextVideo.removeEventListener(eventName, handler));
+      };
+    };
+
+    const poll = window.setInterval(() => {
+      const nextVideo = displaySurfaceRef.current?.querySelector("video") || null;
+      if (!nextVideo) {
+        return;
+      }
+      if (nextVideo !== video) {
+        detachVideoListeners();
+        video = nextVideo;
+        attachVideoListeners(nextVideo);
+      }
+    }, 500);
+
+    return () => {
+      active = false;
+      window.clearInterval(poll);
+      detachVideoListeners();
+    };
+  }, [streamMode]);
+
+  useEffect(() => {
+    if (streamMode !== "native-webrtc") {
       nativeTinyFrameSinceRef.current = null;
       return;
     }
@@ -1710,6 +2266,39 @@ function App() {
     setNativeRetryCount((count) => count + 1);
     setNativeWebrtcKey((value) => value + 1);
   }, [emuState, nativeHasVideoFrame, nativeRetryCount, nativeVideoStats, streamMode]);
+
+  useEffect(() => {
+    if (streamMode !== "native-webrtc") {
+      nativeRootCauseRef.current = null;
+      return;
+    }
+
+    const definitiveReasons = new Set([
+      "missing-ice-servers",
+      "unreachable-host-candidates",
+      "no-inbound-rtp",
+      "decode-stalled",
+      "placeholder-frame",
+    ]);
+
+    if (!definitiveReasons.has(nativeFailureReason.code)) {
+      return;
+    }
+
+    const packetsReceived = Number(nativeDiagnostics.peerStats?.packetsReceived ?? 0);
+    const framesDecoded = Number(nativeDiagnostics.peerStats?.framesDecoded ?? 0);
+    const candidatePairState = nativeDiagnostics.peerStats?.selectedCandidatePair?.state || "none";
+    const detailSummary = `ICE ${candidatePairState} | packets ${packetsReceived} | decoded ${framesDecoded}`;
+    const nextNotice = `Native WebRTC diagnosis: ${nativeFailureReason.summary} ${detailSummary}`;
+
+    if (nativeRootCauseRef.current === nextNotice) {
+      return;
+    }
+
+    nativeRootCauseRef.current = nextNotice;
+    setWebrtcNotice(nextNotice);
+    setMessage(nextNotice);
+  }, [nativeDiagnostics, nativeFailureReason, streamMode]);
 
   useEffect(() => {
     if (streamMode === "custom-webrtc") {
@@ -1910,6 +2499,7 @@ function App() {
   function handleStreamModeChange(nextMode) {
     setWebrtcDiagnostics(null);
     nativeTinyFrameSinceRef.current = null;
+    nativeRootCauseRef.current = null;
     setNativeRetryCount(0);
     if (nextMode === "native-webrtc") {
       setWebrtcNotice("");
@@ -2024,7 +2614,15 @@ function App() {
               width={layout.width}
               height={layout.height}
               onStateChange={(state) => setEmuState(state)}
-              onError={(error) => setMessage(`Emulator error: ${String(error)}`)}
+              onError={(error) => {
+                const text = String(error);
+                setNativeDiagnostics((previous) => ({
+                  ...previous,
+                  lastError: text,
+                  runtimeEvents: appendBoundedEvent(previous.runtimeEvents, "Native emulator component error", { error: text }),
+                }));
+                setMessage(`Emulator error: ${text}`);
+              }}
             />
           </div>
         </div>
@@ -2260,6 +2858,72 @@ function App() {
                     }}
                   >
                     {ffmpegStderrSummary}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {streamMode === "native-webrtc" && (
+            <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Native WebRTC diagnostics</div>
+              <div style={{ fontSize: 12, lineHeight: 1.7, color: "#d7dfed", marginBottom: 10 }}>
+                <div>Transport: {nativeWebrtcOverlay.backendLabel}</div>
+                <div>Mode: {nativeWebrtcOverlay.statusLine}</div>
+                <div>{nativeWebrtcOverlay.reasonLine}</div>
+                <div>{nativeWebrtcOverlay.verificationLine}</div>
+                <div>Diagnosis: {nativeFailureReason.summary}</div>
+                <div>
+                  ICE servers: {formatIceServerSummary(nativeDiagnostics.startIceServers)}
+                </div>
+                <div>
+                  Candidate path: local {formatCandidateTypeSummary(nativeDiagnostics.localCandidateSummary)} | remote{" "}
+                  {formatCandidateTypeSummary(nativeDiagnostics.remoteCandidateSummary)}
+                </div>
+                <div>
+                  Selected pair:{" "}
+                  {nativeDiagnostics.peerStats?.selectedCandidatePair
+                    ? `${nativeDiagnostics.peerStats.selectedCandidatePair.localCandidateType || "n/a"} ${nativeDiagnostics.peerStats.selectedCandidatePair.localAddress || "n/a"} -> ${nativeDiagnostics.peerStats.selectedCandidatePair.remoteCandidateType || "n/a"} ${nativeDiagnostics.peerStats.selectedCandidatePair.remoteAddress || "n/a"}`
+                    : "none"}
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>First-frame path</div>
+                  <pre
+                    style={{
+                      margin: 0,
+                      padding: 10,
+                      background: "#0f1218",
+                      border: "1px solid #2b313d",
+                      borderRadius: 8,
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "Consolas, monospace",
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {nativeFirstFrameDiagnostics}
+                  </pre>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Browser runtime events</div>
+                  <pre
+                    style={{
+                      margin: 0,
+                      padding: 10,
+                      background: "#0f1218",
+                      border: "1px solid #2b313d",
+                      borderRadius: 8,
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "Consolas, monospace",
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                      maxHeight: 220,
+                      overflow: "auto",
+                    }}
+                  >
+                    {nativeRuntimeEventSummary}
                   </pre>
                 </div>
               </div>

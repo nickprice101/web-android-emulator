@@ -459,7 +459,7 @@ function buildNativeWebrtcOverlay() {
     verificationLine: "The browser is receiving video from the repository's custom WebRTC bridge.",
     usingFallback: false,
     statusLine: "custom WebRTC active",
-    reasonLine: "Video is flowing through the repository's bridge-webrtc session instead of the PNG fallback.",
+    reasonLine: "Video is flowing through the repository's bridge-webrtc session while emulator capture details stay behind the scenes.",
     fpsLine: null,
   };
 }
@@ -1242,10 +1242,12 @@ function App() {
   const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
   const webrtcFailureRef = useRef(false);
   const captureOverlay =
-    webrtcDiagnostics?.captureOverlay ||
-    (streamMode === "webrtc"
+    streamMode === "webrtc"
       ? buildNativeWebrtcOverlay()
-      : buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats));
+      : buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
+  const bridgeCaptureOverlay =
+    webrtcDiagnostics?.captureOverlay ||
+    buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
 
   const handleWebrtcMessage = useCallback((nextMessage) => {
     setMessage(nextMessage);
@@ -1793,12 +1795,12 @@ function App() {
                       ? `${deviceInfo.screen.width}x${deviceInfo.screen.height}`
                       : "unavailable"}
                   </div>
-                <div>
-                  WebRTC frame:{" "}
-                  {streamMode === "webrtc"
+                  <div>
+                    WebRTC frame:{" "}
+                    {streamMode === "webrtc"
                       ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}${captureOverlay.verificationLine ? ` | ${captureOverlay.verificationLine}` : ""}`
                       : "switch to WebRTC mode to compare"}
-                </div>
+                  </div>
                   <div>
                     Tip: if the preview below is visible but WebRTC mode stays black, inspect the bridge diagnostics below before blaming ADB capture.
                   </div>
@@ -1831,6 +1833,10 @@ function App() {
                 <div>Mode: {captureOverlay.statusLine}</div>
                 <div>{captureOverlay.reasonLine}</div>
                 <div>{captureOverlay.verificationLine}</div>
+                <div>Capture backend: {bridgeCaptureOverlay.backendLabel}</div>
+                <div>Capture state: {bridgeCaptureOverlay.statusLine}</div>
+                <div>{bridgeCaptureOverlay.reasonLine}</div>
+                <div>{bridgeCaptureOverlay.verificationLine}</div>
                 <div>
                   Input path: keyboard, mouse, and touch events are sent through the custom WebRTC bridge session.
                 </div>

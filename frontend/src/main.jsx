@@ -4,6 +4,9 @@ import { Emulator } from "android-emulator-webrtc/emulator";
 
 const EMULATOR_ASPECT = 1080 / 1920;
 const RAW_FRAME_URL = "/api/frame";
+const MIN_RENDERABLE_VIDEO_DIMENSION = 16;
+const NATIVE_TINY_FRAME_RETRY_DELAY_MS = 1500;
+const NATIVE_TINY_FRAME_MAX_RETRIES = 2;
 function clampRatio(value) {
   if (!Number.isFinite(value)) {
     return null;
@@ -486,8 +489,19 @@ function hasRenderableVideo(videoStats, receiverStats, hasVideo = false) {
     framesDecoded > 0 ||
     (framesReceived > 0 &&
       readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
-      videoWidth > 0 &&
-      videoHeight > 0)
+      videoWidth >= MIN_RENDERABLE_VIDEO_DIMENSION &&
+      videoHeight >= MIN_RENDERABLE_VIDEO_DIMENSION)
+  );
+}
+
+function isTinyVideoFrame(videoStats) {
+  const videoWidth = Number(videoStats?.videoWidth ?? 0);
+  const videoHeight = Number(videoStats?.videoHeight ?? 0);
+  return (
+    videoWidth > 0 &&
+    videoHeight > 0 &&
+    videoWidth < MIN_RENDERABLE_VIDEO_DIMENSION &&
+    videoHeight < MIN_RENDERABLE_VIDEO_DIMENSION
   );
 }
 
@@ -548,6 +562,7 @@ function buildCustomWebrtcOverlay(webrtcDiagnostics) {
 
 function buildNativeWebrtcOverlay(emuState, videoStats, hasVideoFrame) {
   const videoReady = hasRenderableVideo(videoStats, null, hasVideoFrame);
+  const tinyVideo = isTinyVideoFrame(videoStats);
   const videoSize =
     videoStats?.videoWidth > 0 && videoStats?.videoHeight > 0
       ? `${videoStats.videoWidth}x${videoStats.videoHeight}`
@@ -559,6 +574,16 @@ function buildNativeWebrtcOverlay(emuState, videoStats, hasVideoFrame) {
       backendLabel: "native emulator WebRTC / gRPC-Web",
       statusLine: "native WebRTC rendering",
       reasonLine: "The browser decoded at least one frame from the emulator's direct WebRTC stream.",
+      verificationLine: `Browser video readyState ${readyState} | size ${videoSize}`,
+    };
+  }
+
+  if (tinyVideo) {
+    return {
+      backendLabel: "native emulator WebRTC / gRPC-Web",
+      statusLine: "native WebRTC placeholder frame",
+      reasonLine:
+        "The browser attached the native stream, but the decoder only exposed a tiny placeholder frame instead of the real emulator surface.",
       verificationLine: `Browser video readyState ${readyState} | size ${videoSize}`,
     };
   }
@@ -1423,7 +1448,10 @@ function App() {
   const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
   const [nativeVideoStats, setNativeVideoStats] = useState(null);
   const [nativeHasVideoFrame, setNativeHasVideoFrame] = useState(false);
+  const [nativeWebrtcKey, setNativeWebrtcKey] = useState(0);
+  const [nativeRetryCount, setNativeRetryCount] = useState(0);
   const webrtcFailureRef = useRef(false);
+  const nativeTinyFrameSinceRef = useRef(null);
   const captureOverlay =
     streamMode === "custom-webrtc"
       ? buildCustomWebrtcOverlay(webrtcDiagnostics)
@@ -1586,6 +1614,7 @@ function App() {
     if (streamMode !== "native-webrtc") {
       setNativeVideoStats(null);
       setNativeHasVideoFrame(false);
+      nativeTinyFrameSinceRef.current = null;
       return undefined;
     }
 
@@ -1599,7 +1628,11 @@ function App() {
       }
       const snapshot = buildVideoStatsSnapshot(video);
       setNativeVideoStats(snapshot);
-      if (snapshot && snapshot.videoWidth > 0 && snapshot.videoHeight > 0) {
+      if (
+        snapshot &&
+        snapshot.videoWidth >= MIN_RENDERABLE_VIDEO_DIMENSION &&
+        snapshot.videoHeight >= MIN_RENDERABLE_VIDEO_DIMENSION
+      ) {
         setNativeHasVideoFrame(true);
       }
     };
@@ -1632,6 +1665,51 @@ function App() {
       detachVideoListeners();
     };
   }, [streamMode]);
+
+  useEffect(() => {
+    if (streamMode !== "native-webrtc") {
+      nativeTinyFrameSinceRef.current = null;
+      return;
+    }
+
+    if (nativeHasVideoFrame || !isTinyVideoFrame(nativeVideoStats)) {
+      nativeTinyFrameSinceRef.current = null;
+      return;
+    }
+
+    if (emuState !== "connected") {
+      return;
+    }
+
+    const now = Date.now();
+    if (!nativeTinyFrameSinceRef.current) {
+      nativeTinyFrameSinceRef.current = now;
+      return;
+    }
+
+    if (now - nativeTinyFrameSinceRef.current < NATIVE_TINY_FRAME_RETRY_DELAY_MS) {
+      return;
+    }
+
+    nativeTinyFrameSinceRef.current = null;
+
+    if (nativeRetryCount >= NATIVE_TINY_FRAME_MAX_RETRIES) {
+      setMessage(
+        `Native WebRTC stayed stuck on a ${nativeVideoStats?.videoWidth || 0}x${nativeVideoStats?.videoHeight || 0} placeholder frame after ${nativeRetryCount} retries. Use PNG mode for recovery while debugging the emulator's direct stream.`
+      );
+      setEmuState("error");
+      return;
+    }
+
+    setMessage(
+      `Native WebRTC produced a ${nativeVideoStats?.videoWidth || 0}x${nativeVideoStats?.videoHeight || 0} placeholder frame. Retrying session ${nativeRetryCount + 1}/${NATIVE_TINY_FRAME_MAX_RETRIES}...`
+    );
+    setEmuState("connecting");
+    setNativeVideoStats(null);
+    setNativeHasVideoFrame(false);
+    setNativeRetryCount((count) => count + 1);
+    setNativeWebrtcKey((value) => value + 1);
+  }, [emuState, nativeHasVideoFrame, nativeRetryCount, nativeVideoStats, streamMode]);
 
   useEffect(() => {
     if (streamMode === "custom-webrtc") {
@@ -1831,10 +1909,15 @@ function App() {
 
   function handleStreamModeChange(nextMode) {
     setWebrtcDiagnostics(null);
+    nativeTinyFrameSinceRef.current = null;
+    setNativeRetryCount(0);
     if (nextMode === "native-webrtc") {
       setWebrtcNotice("");
       setEmuState("connecting");
       setMessage("Connecting to the emulator's native WebRTC stream...");
+      setNativeVideoStats(null);
+      setNativeHasVideoFrame(false);
+      setNativeWebrtcKey((value) => value + 1);
     } else {
       setWebrtcNotice("");
       setMessage("Switching to PNG preview mode...");
@@ -1933,6 +2016,7 @@ function App() {
             }}
           >
             <Emulator
+              key={streamMode === "native-webrtc" ? `native-webrtc-${nativeWebrtcKey}` : `png-${nativeWebrtcKey}`}
               ref={emuRef}
               uri={window.location.origin}
               view={streamMode === "png" ? "png" : "webrtc"}

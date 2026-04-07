@@ -22,10 +22,6 @@ const captureFps = Math.max(1, Number.parseInt(process.env.CAPTURE_FPS || "30", 
 const captureBitrate = Math.max(1_000_000, Number.parseInt(process.env.CAPTURE_BIT_RATE || "12000000", 10));
 const defaultScreenWidth = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_WIDTH || "1080", 10));
 const defaultScreenHeight = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_HEIGHT || "1920", 10));
-const screenrecordRetryIntervalMs = Math.max(
-  1000,
-  Number.parseInt(process.env.CAPTURE_SCREENRECORD_RETRY_INTERVAL_MS || "5000", 10)
-);
 const screenrecordFirstFrameTimeoutMs = Math.max(
   1000,
   Number.parseInt(process.env.CAPTURE_SCREENRECORD_FIRST_FRAME_TIMEOUT_MS || "15000", 10)
@@ -925,6 +921,7 @@ function sessionPayload(session) {
       fallbackReason: session.media.fallbackReason || null,
       usingFallback: Boolean(session.media.usingFallback),
       screenrecord: session.media.screenrecord || null,
+      ffmpeg: session.media.ffmpeg || null,
     },
     answerDiagnostics: session.answerDiagnostics || null,
     answerAttempts: session.answerAttempts || [],
@@ -1037,8 +1034,23 @@ function createSession(offer) {
         firstDecodedFrameAt: null,
         bytesReceived: 0,
         chunksReceived: 0,
+        firstChunkSize: 0,
+        lastChunkSize: 0,
+        largestChunkSize: 0,
         decodeGraceUsed: false,
         verification: captureMode === "adb-screenrecord" ? "pending" : "not-requested",
+      },
+      ffmpeg: {
+        startedAt: null,
+        pid: null,
+        firstStdoutAt: null,
+        lastStdoutAt: null,
+        stdoutBytes: 0,
+        stdoutChunks: 0,
+        rawBufferLength: 0,
+        frameSize: 0,
+        stderrLines: [],
+        lastStderrAt: null,
       },
     },
     logs: [],
@@ -1160,16 +1172,26 @@ function attachPeerObservers(session) {
 
   peer.onicegatheringstatechange = () => {
     session.iceGatheringState = peer.iceGatheringState || "unknown";
+    recordSessionLog(session, "info", "Bridge ICE gathering state changed", {
+      state: session.iceGatheringState,
+      localCandidates: session.localIceCandidates.length,
+    });
     broadcastSessionStatus(session);
   };
 
   peer.oniceconnectionstatechange = () => {
     session.iceConnectionState = peer.iceConnectionState || "unknown";
+    recordSessionLog(session, "info", "Bridge ICE connection state changed", {
+      state: session.iceConnectionState,
+    });
     broadcastSessionStatus(session);
   };
 
   peer.onconnectionstatechange = () => {
     session.peerConnectionState = peer.connectionState || "unknown";
+    recordSessionLog(session, "info", "Bridge peer connection state changed", {
+      state: session.peerConnectionState,
+    });
 
     switch (peer.connectionState) {
       case "connecting":
@@ -1310,6 +1332,18 @@ class EmulatorVideoCapture {
     this.session.media.activeReason = reason || null;
     this.session.media.usingFallback = mode !== this.session.mode;
     this.session.media.fallbackReason = this.session.media.usingFallback ? reason || null : null;
+    this.session.media.ffmpeg = {
+      startedAt: null,
+      pid: null,
+      firstStdoutAt: null,
+      lastStdoutAt: null,
+      stdoutBytes: 0,
+      stdoutChunks: 0,
+      rawBufferLength: 0,
+      frameSize: this.frameSize,
+      stderrLines: [],
+      lastStderrAt: null,
+    };
     if (mode === "adb-screenrecord") {
       this.session.media.screenrecord = {
         connectedAt: null,
@@ -1318,6 +1352,9 @@ class EmulatorVideoCapture {
         firstDecodedFrameAt: null,
         bytesReceived: 0,
         chunksReceived: 0,
+        firstChunkSize: 0,
+        lastChunkSize: 0,
+        largestChunkSize: 0,
         decodeGraceUsed: false,
         verification: "pending",
       };
@@ -1325,6 +1362,9 @@ class EmulatorVideoCapture {
     } else {
       this.session.media.screenrecord = {
         ...(this.session.media.screenrecord || {}),
+        firstChunkSize: Number(this.session.media.screenrecord?.firstChunkSize || 0),
+        lastChunkSize: Number(this.session.media.screenrecord?.lastChunkSize || 0),
+        largestChunkSize: Number(this.session.media.screenrecord?.largestChunkSize || 0),
         decodeGraceUsed: this.screenrecordDecodeGraceUsed,
         verification:
           this.session.mode === "adb-screenrecord" ? "fallback-active" : "not-requested",
@@ -1364,12 +1404,10 @@ class EmulatorVideoCapture {
       mode,
       reason,
       requestedMode: this.session.mode,
-      usingFallback: mode !== this.session.mode,
+      usingFallback: false,
     });
     if (mode === "adb-screenrecord") {
       this.armFirstFrameWatchdog();
-    } else {
-      this.armScreenrecordRetry();
     }
   }
 
@@ -1413,11 +1451,26 @@ class EmulatorVideoCapture {
     this.ffmpeg = spawn("ffmpeg", args, {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    this.session.media.ffmpeg = {
+      ...(this.session.media.ffmpeg || {}),
+      startedAt: nowIso(),
+      pid: this.ffmpeg.pid || null,
+      frameSize: this.frameSize,
+    };
 
     this.ffmpeg.stdout.on("data", (chunk) => this.handleStdout(chunk));
     this.ffmpeg.stderr.on("data", (chunk) => {
       const text = chunk.toString().trim();
       if (text) {
+        const lines = text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        this.session.media.ffmpeg = {
+          ...(this.session.media.ffmpeg || {}),
+          lastStderrAt: nowIso(),
+          stderrLines: [...(this.session.media.ffmpeg?.stderrLines || []), ...lines].slice(-8),
+        };
         recordSessionLog(this.session, "warn", "ffmpeg stderr", { text });
       }
     });
@@ -1441,6 +1494,7 @@ class EmulatorVideoCapture {
       }
 
       const screenrecordStats = this.session.media.screenrecord || null;
+      const ffmpegStats = this.session.media.ffmpeg || null;
       const receivedBytes = Number(screenrecordStats?.bytesReceived || 0);
       const receivedChunks = Number(screenrecordStats?.chunksReceived || 0);
 
@@ -1454,7 +1508,7 @@ class EmulatorVideoCapture {
         recordSessionLog(
           this.session,
           "warn",
-          "Screenrecord stream produced H.264 data but no decoded frame yet; extending verification window before falling back",
+          "Screenrecord stream produced H.264 data but no decoded frame yet; extending the verification window",
           {
             timeoutMs: screenrecordFirstFrameTimeoutMs,
             decodeGraceTimeoutMs: screenrecordDecodeGraceTimeoutMs,
@@ -1470,69 +1524,66 @@ class EmulatorVideoCapture {
         return;
       }
 
-      recordSessionLog(this.session, "warn", "Screenrecord capture did not deliver a first frame in time; falling back to screencap polling", {
+      recordSessionLog(this.session, "error", "Screenrecord capture did not deliver a first frame in time; keeping WebRTC on the native stream only", {
         timeoutMs: this.screenrecordDecodeGraceUsed
           ? screenrecordFirstFrameTimeoutMs + screenrecordDecodeGraceTimeoutMs
           : screenrecordFirstFrameTimeoutMs,
         bytesReceived: receivedBytes,
         chunksReceived: receivedChunks,
+        connectedAt: screenrecordStats?.connectedAt || null,
+        firstChunkAt: screenrecordStats?.firstChunkAt || null,
+        lastChunkAt: screenrecordStats?.lastChunkAt || null,
+        firstChunkSize: Number(screenrecordStats?.firstChunkSize || 0),
+        lastChunkSize: Number(screenrecordStats?.lastChunkSize || 0),
+        largestChunkSize: Number(screenrecordStats?.largestChunkSize || 0),
+        ffmpegStartedAt: ffmpegStats?.startedAt || null,
+        ffmpegPid: ffmpegStats?.pid || null,
+        ffmpegFirstStdoutAt: ffmpegStats?.firstStdoutAt || null,
+        ffmpegLastStdoutAt: ffmpegStats?.lastStdoutAt || null,
+        ffmpegStdoutBytes: Number(ffmpegStats?.stdoutBytes || 0),
+        ffmpegStdoutChunks: Number(ffmpegStats?.stdoutChunks || 0),
+        ffmpegRawBufferLength: Number(ffmpegStats?.rawBufferLength || 0),
+        ffmpegFrameSize: Number(ffmpegStats?.frameSize || 0),
+        ffmpegRecentStderr: Array.isArray(ffmpegStats?.stderrLines) ? ffmpegStats.stderrLines : [],
+        peerConnectionState: this.session.peerConnectionState || null,
+        iceConnectionState: this.session.iceConnectionState || null,
+        iceGatheringState: this.session.iceGatheringState || null,
       });
-      this.fallbackActivated = true;
-      this.fallbackToScreencap().catch((error) => {
-        if (!this.running) {
-          return;
-        }
-        closeSession(this.session, "media-failed", `Failed to fall back to screencap capture: ${error.message}`);
-      });
+      closeSession(
+        this.session,
+        "media-failed",
+        "Screenrecord capture never produced a decoded frame. WebRTC stays on the native stream only; switch to PNG mode explicitly if you want screencap polling."
+      );
     }, screenrecordFirstFrameTimeoutMs);
-  }
-
-  armScreenrecordRetry() {
-    clearTimeout(this.screenrecordRetryTimer);
-    this.screenrecordRetryTimer = null;
-
-    if (!this.running || this.session.mode !== "adb-screenrecord" || this.mode !== "adb-screencap") {
-      return;
-    }
-
-    this.screenrecordRetryTimer = setTimeout(() => {
-      this.screenrecordRetryTimer = null;
-      if (!this.running || this.pipelineRestartInProgress || this.mode !== "adb-screencap") {
-        return;
-      }
-
-      recordSessionLog(this.session, "info", "Retrying screenrecord capture so the bridge can return to the streaming path", {
-        retryIntervalMs: screenrecordRetryIntervalMs,
-      });
-      this.restoreScreenrecord().catch((error) => {
-        if (!this.running) {
-          return;
-        }
-        recordSessionLog(this.session, "warn", "Failed to restore screenrecord capture", {
-          error: error.message,
-        });
-        this.armScreenrecordRetry();
-      });
-    }, screenrecordRetryIntervalMs);
-  }
-
-  async fallbackToScreencap() {
-    await this.switchPipeline("adb-screencap", "screenrecord-first-frame-timeout");
-    recordSessionLog(this.session, "warn", "Capture fallback activated", {
-      activeMode: this.mode,
-    });
-  }
-
-  async restoreScreenrecord() {
-    await this.switchPipeline("adb-screenrecord", "screenrecord-retry");
   }
 
   handleStdout(chunk) {
     this.rawBuffer = Buffer.concat([this.rawBuffer, chunk]);
+    const stdoutAt = nowIso();
+    const previousStdoutChunks = Number(this.session.media.ffmpeg?.stdoutChunks || 0);
+    this.session.media.ffmpeg = {
+      ...(this.session.media.ffmpeg || {}),
+      firstStdoutAt: this.session.media.ffmpeg?.firstStdoutAt || stdoutAt,
+      lastStdoutAt: stdoutAt,
+      stdoutBytes: Number(this.session.media.ffmpeg?.stdoutBytes || 0) + chunk.length,
+      stdoutChunks: previousStdoutChunks + 1,
+      rawBufferLength: this.rawBuffer.length,
+      frameSize: this.frameSize,
+    };
+    if (previousStdoutChunks === 0) {
+      recordSessionLog(this.session, "info", "ffmpeg emitted the first raw video bytes", {
+        chunkBytes: chunk.length,
+        frameSize: this.frameSize,
+      });
+    }
 
     while (this.rawBuffer.length >= this.frameSize) {
       const frame = this.rawBuffer.subarray(0, this.frameSize);
       this.rawBuffer = this.rawBuffer.subarray(this.frameSize);
+      this.session.media.ffmpeg = {
+        ...(this.session.media.ffmpeg || {}),
+        rawBufferLength: this.rawBuffer.length,
+      };
       this.videoSource.onFrame({
         width: this.width,
         height: this.height,
@@ -1545,8 +1596,6 @@ class EmulatorVideoCapture {
         this.pipelineFirstFrameDelivered = true;
         clearTimeout(this.firstFrameTimer);
         this.firstFrameTimer = null;
-        clearTimeout(this.screenrecordRetryTimer);
-        this.screenrecordRetryTimer = null;
         if (this.mode === "adb-screenrecord") {
           this.session.media.screenrecord = {
             ...(this.session.media.screenrecord || {}),
@@ -1554,15 +1603,6 @@ class EmulatorVideoCapture {
             decodeGraceUsed: this.screenrecordDecodeGraceUsed,
             verification: "verified",
           };
-        }
-        if (this.mode === "adb-screenrecord" && this.fallbackActivated) {
-          this.fallbackActivated = false;
-          this.session.media.activeReason = "screenrecord-restored";
-          this.session.media.fallbackReason = null;
-          this.session.media.usingFallback = false;
-          recordSessionLog(this.session, "info", "Screenrecord capture restored; switched back to the streaming path", {
-            activeMode: this.mode,
-          });
         }
         if (!this.session.media.firstFrameAt) {
           this.session.media.firstFrameAt = this.session.media.lastFrameAt;
@@ -1639,18 +1679,36 @@ class EmulatorVideoCapture {
           }
           if (value?.length) {
             const receivedAt = nowIso();
+            const previousChunksReceived = Number(this.session.media.screenrecord?.chunksReceived || 0);
+            const previousBytesReceived = Number(this.session.media.screenrecord?.bytesReceived || 0);
             this.session.media.screenrecord = {
               ...(this.session.media.screenrecord || {}),
               firstChunkAt: this.session.media.screenrecord?.firstChunkAt || receivedAt,
               lastChunkAt: receivedAt,
-              bytesReceived: Number(this.session.media.screenrecord?.bytesReceived || 0) + value.length,
-              chunksReceived: Number(this.session.media.screenrecord?.chunksReceived || 0) + 1,
+              bytesReceived: previousBytesReceived + value.length,
+              chunksReceived: previousChunksReceived + 1,
+              firstChunkSize: Number(this.session.media.screenrecord?.firstChunkSize || 0) || value.length,
+              lastChunkSize: value.length,
+              largestChunkSize: Math.max(Number(this.session.media.screenrecord?.largestChunkSize || 0), value.length),
               decodeGraceUsed: this.screenrecordDecodeGraceUsed,
               verification:
                 this.pipelineFirstFrameDelivered || this.session.media.screenrecord?.firstDecodedFrameAt
                   ? "verified"
                   : "receiving-h264",
             };
+            if (previousChunksReceived === 0) {
+              recordSessionLog(this.session, "info", "Received first H.264 chunk from apkbridge screenrecord", {
+                chunkBytes: value.length,
+              });
+            } else if ((previousChunksReceived + 1) % 120 === 0 && !this.pipelineFirstFrameDelivered) {
+              recordSessionLog(this.session, "info", "Screenrecord stream is still delivering H.264 while waiting for the first decoded frame", {
+                chunksReceived: previousChunksReceived + 1,
+                bytesReceived: previousBytesReceived + value.length,
+                lastChunkSize: value.length,
+                ffmpegStdoutBytes: Number(this.session.media.ffmpeg?.stdoutBytes || 0),
+                ffmpegStdoutChunks: Number(this.session.media.ffmpeg?.stdoutChunks || 0),
+              });
+            }
             await writeToStream(this.ffmpeg.stdin, Buffer.from(value));
           }
         }
@@ -2138,7 +2196,7 @@ const server = http.createServer(async (req, res) => {
         captureMode === "stub"
           ? "Media capture is disabled in stub mode."
           : captureMode === "adb-screenrecord"
-            ? `Video is captured from the emulator through an apkbridge-backed adb screenrecord H.264 stream and piped into WebRTC. If screenrecord stalls before the first frame, the bridge automatically falls back to adb screencap polling after ${screenrecordFirstFrameTimeoutMs}ms.`
+            ? "Video is captured from the emulator through an apkbridge-backed adb screenrecord H.264 stream and piped into WebRTC. If screenrecord stalls before the first frame, the bridge surfaces that failure instead of switching to screencap polling."
             : "Video is captured from the emulator through apkbridge screencaps and piped into WebRTC.",
         ...turnWarnings,
       ],

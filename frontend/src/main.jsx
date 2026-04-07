@@ -383,7 +383,7 @@ function describeCaptureReason(reason, activeMode) {
     return "Screen streaming delivered a frame again, so the bridge switched back to streaming.";
   }
   if (reason === "screenrecord-first-frame-timeout") {
-    return "Screen streaming never produced a first frame, so the bridge fell back to screen captures.";
+    return "Screen streaming never produced a first frame, so the WebRTC session stayed on the native stream path and failed.";
   }
   if (!reason) {
     return "";
@@ -400,10 +400,7 @@ function describeScreenrecordVerification(screenrecord) {
     return "Screen streaming connected and H.264 bytes are arriving; waiting for the first decoded frame.";
   }
   if (verification === "waiting-for-decoded-frame") {
-    return "Screen streaming is receiving H.264 data, but the bridge has not decoded a frame yet and is using an extended grace window before fallback.";
-  }
-  if (verification === "fallback-active") {
-    return "The bridge fell back to screen captures before screen streaming could be verified.";
+    return "Screen streaming is receiving H.264 data, but the bridge has not decoded a frame yet and is using an extended grace window.";
   }
   if (verification === "pending") {
     return "Screen streaming is still being verified.";
@@ -418,7 +415,7 @@ function buildCaptureOverlay(sessionInfo, logs, receiverStats) {
   const activeReason = sessionInfo?.media?.fallbackReason || sessionInfo?.media?.activeReason || null;
   const screenrecord = sessionInfo?.media?.screenrecord || null;
   const latestLog = (Array.isArray(logs) ? [...logs].reverse() : []).find((entry) =>
-    ["Capture fallback activated", "Capture pipeline started", "Connected to apkbridge screenrecord stream"].includes(
+    ["Capture pipeline started", "Connected to apkbridge screenrecord stream"].includes(
       entry?.message
     )
   );
@@ -449,6 +446,32 @@ function buildCaptureOverlay(sessionInfo, logs, receiverStats) {
         : "The bridge is polling still frames from the emulator."),
     fpsLine: fpsValue == null ? null : `${fpsValue} fps in browser`,
   };
+}
+
+function formatDiagnosticDetails(details) {
+  if (!details) {
+    return "";
+  }
+  try {
+    return JSON.stringify(details);
+  } catch {
+    return String(details);
+  }
+}
+
+function formatRuntimeEvent(entry) {
+  if (!entry) {
+    return "";
+  }
+  return `[${formatClockTime(entry.at)}] ${entry.message}${entry.details ? ` ${formatDiagnosticDetails(entry.details)}` : ""}`;
+}
+
+function formatBridgeLog(entry) {
+  if (!entry) {
+    return "";
+  }
+  const level = entry.level ? entry.level.toUpperCase() : "INFO";
+  return `[${formatClockTime(entry.at)}] ${level} ${entry.message}${entry.details ? ` ${formatDiagnosticDetails(entry.details)}` : ""}`;
 }
 
 function hasRenderableVideo(videoStats, receiverStats, hasVideo = false) {
@@ -634,7 +657,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
       message,
       details,
     };
-    setRuntimeEvents((previous) => [...previous, entry].slice(-10));
+    setRuntimeEvents((previous) => [...previous, entry].slice(-20));
   }, []);
 
   useEffect(() => {
@@ -694,7 +717,11 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
           const stream = event.streams?.[0] || new MediaStream([event.track]);
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
-            videoRef.current.play().catch(() => {});
+            videoRef.current.play().catch((error) => {
+              appendRuntimeEvent("Video element play() rejected", {
+                error: error.message,
+              });
+            });
           }
           // Do not call setHasVideo(true) here.  ontrack fires when the SDP is
           // applied, before any video frames have arrived.  The video element's
@@ -723,6 +750,8 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
           setSessionState(peer.connectionState || "unknown");
           appendRuntimeEvent("Peer connection state changed", { state: peer.connectionState || "unknown" });
         };
+        peer.onsignalingstatechange = () =>
+          appendRuntimeEvent("Signaling state changed", { state: peer.signalingState || "unknown" });
         peer.oniceconnectionstatechange = () =>
           appendRuntimeEvent("ICE connection state changed", { state: peer.iceConnectionState || "unknown" });
         peer.onicegatheringstatechange = () =>
@@ -773,7 +802,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         setSessionMessage(session.message || "Session created.");
         setAnswerSdp(session.answer?.sdp || "");
         if (Array.isArray(session.recentLogs)) {
-          setLogs(session.recentLogs.slice(-6));
+          setLogs(session.recentLogs.slice(-20));
         }
 
         if (session.eventStreamUrl) {
@@ -790,7 +819,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
                 setSessionMessage(payload.message);
               }
               if (Array.isArray(payload.recentLogs)) {
-                setLogs(payload.recentLogs.slice(-6));
+                setLogs(payload.recentLogs.slice(-20));
               }
             } catch {
               // ignore malformed status events
@@ -799,7 +828,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
           source.addEventListener("log", (event) => {
             try {
               const payload = JSON.parse(event.data);
-              setLogs((previous) => [...previous, payload].slice(-6));
+              setLogs((previous) => [...previous, payload].slice(-20));
             } catch {
               // ignore malformed log events
             }
@@ -871,9 +900,23 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
           width: video.videoWidth || 0,
           height: video.videoHeight || 0,
         }),
+      loadeddata: () =>
+        appendRuntimeEvent("Video element loaded current frame data", {
+          readyState: video.readyState,
+        }),
+      canplay: () =>
+        appendRuntimeEvent("Video element can play", {
+          readyState: video.readyState,
+        }),
       playing: () => appendRuntimeEvent("Video element started playing"),
       waiting: () => appendRuntimeEvent("Video element waiting for data"),
       stalled: () => appendRuntimeEvent("Video element stalled"),
+      suspend: () => appendRuntimeEvent("Video element suspended"),
+      resize: () =>
+        appendRuntimeEvent("Video element resized", {
+          width: video.videoWidth || 0,
+          height: video.videoHeight || 0,
+        }),
       error: () =>
         appendRuntimeEvent("Video element error", {
           code: video.error?.code || null,
@@ -951,6 +994,34 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
   const captureOverlay = useMemo(() => {
     return buildCaptureOverlay(sessionInfo, logs, receiverStats);
   }, [logs, receiverStats, sessionInfo]);
+
+  const firstFrameDiagnostics = useMemo(() => {
+    const screenrecord = sessionInfo?.media?.screenrecord || null;
+    const ffmpeg = sessionInfo?.media?.ffmpeg || null;
+    return [
+      `bridge session=${sessionInfo?.state || "n/a"} | peer=${sessionInfo?.peerConnectionState || "n/a"} | ice=${sessionInfo?.iceConnectionState || "n/a"} | gather=${sessionInfo?.iceGatheringState || "n/a"}`,
+      `screenrecord verification=${screenrecord?.verification || "n/a"} | chunks=${screenrecord?.chunksReceived ?? 0} | bytes=${screenrecord?.bytesReceived ?? 0}`,
+      `screenrecord connected=${formatClockTime(screenrecord?.connectedAt)} | firstChunk=${formatClockTime(screenrecord?.firstChunkAt)} | lastChunk=${formatClockTime(screenrecord?.lastChunkAt)}`,
+      `screenrecord chunk sizes first=${screenrecord?.firstChunkSize ?? 0} | last=${screenrecord?.lastChunkSize ?? 0} | max=${screenrecord?.largestChunkSize ?? 0}`,
+      `ffmpeg pid=${ffmpeg?.pid ?? "n/a"} | started=${formatClockTime(ffmpeg?.startedAt)} | firstStdout=${formatClockTime(ffmpeg?.firstStdoutAt)} | lastStdout=${formatClockTime(ffmpeg?.lastStdoutAt)}`,
+      `ffmpeg stdout chunks=${ffmpeg?.stdoutChunks ?? 0} | bytes=${ffmpeg?.stdoutBytes ?? 0} | rawBuffer=${ffmpeg?.rawBufferLength ?? 0}/${ffmpeg?.frameSize ?? 0}`,
+      `video readyState=${videoStats?.readyState ?? "n/a"} | size=${videoStats?.videoWidth ?? 0}x${videoStats?.videoHeight ?? 0} | paused=${videoStats?.paused ?? "n/a"} | currentTime=${videoStats?.currentTime ?? "0.00"}`,
+      `receiver packets=${receiverStats?.packetsReceived ?? 0} | framesReceived=${receiverStats?.framesReceived ?? 0} | framesDecoded=${receiverStats?.framesDecoded ?? 0} | fps=${receiverStats?.framesPerSecond ?? "n/a"}`,
+    ].join("\n");
+  }, [receiverStats, sessionInfo, videoStats]);
+
+  const ffmpegStderrSummary = useMemo(() => {
+    const lines = sessionInfo?.media?.ffmpeg?.stderrLines;
+    return Array.isArray(lines) && lines.length > 0 ? lines.join("\n") : "No ffmpeg stderr yet.";
+  }, [sessionInfo]);
+
+  const runtimeEventSummary = useMemo(() => {
+    return runtimeEvents.length > 0 ? runtimeEvents.map(formatRuntimeEvent).join("\n") : "No browser runtime events yet.";
+  }, [runtimeEvents]);
+
+  const bridgeLogSummary = useMemo(() => {
+    return logs.length > 0 ? logs.map(formatBridgeLog).join("\n") : "No bridge logs yet.";
+  }, [logs]);
 
   useEffect(() => {
     if (!onDiagnosticsChange) {
@@ -1897,7 +1968,105 @@ function App() {
                 </div>
                 <div>
                   Fallbacks: the PNG preview remains available for comparison while the custom bridge manages the live video
-                  session and any adb-based capture fallback behind the scenes.
+                  session, but WebRTC itself stays on its native stream path.
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>First-frame path</div>
+                  <pre
+                    style={{
+                      margin: 0,
+                      padding: 10,
+                      background: "#0f1218",
+                      border: "1px solid #2b313d",
+                      borderRadius: 8,
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "Consolas, monospace",
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {firstFrameDiagnostics}
+                  </pre>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Offer / answer</div>
+                  <pre
+                    style={{
+                      margin: 0,
+                      padding: 10,
+                      background: "#0f1218",
+                      border: "1px solid #2b313d",
+                      borderRadius: 8,
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "Consolas, monospace",
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {`offer: ${offerSummary}\nanswer: ${answerSummary}\n${answerAttemptSummary}`}
+                  </pre>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Browser runtime events</div>
+                  <pre
+                    style={{
+                      margin: 0,
+                      padding: 10,
+                      background: "#0f1218",
+                      border: "1px solid #2b313d",
+                      borderRadius: 8,
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "Consolas, monospace",
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                      maxHeight: 220,
+                      overflow: "auto",
+                    }}
+                  >
+                    {runtimeEventSummary}
+                  </pre>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Bridge logs</div>
+                  <pre
+                    style={{
+                      margin: 0,
+                      padding: 10,
+                      background: "#0f1218",
+                      border: "1px solid #2b313d",
+                      borderRadius: 8,
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "Consolas, monospace",
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                      maxHeight: 220,
+                      overflow: "auto",
+                    }}
+                  >
+                    {bridgeLogSummary}
+                  </pre>
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>ffmpeg stderr</div>
+                  <pre
+                    style={{
+                      margin: 0,
+                      padding: 10,
+                      background: "#0f1218",
+                      border: "1px solid #2b313d",
+                      borderRadius: 8,
+                      whiteSpace: "pre-wrap",
+                      fontFamily: "Consolas, monospace",
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                      maxHeight: 220,
+                      overflow: "auto",
+                    }}
+                  >
+                    {ffmpegStderrSummary}
+                  </pre>
                 </div>
               </div>
             </div>

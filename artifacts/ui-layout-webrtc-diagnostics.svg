@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#11151C"/>
+  <rect x="0" y="0" width="1440" height="58" fill="#171A21"/>
+  <rect x="14" y="14" width="82" height="30" rx="8" fill="#252D3B"/>
+  <rect x="106" y="14" width="82" height="30" rx="8" fill="#252D3B"/>
+  <rect x="198" y="14" width="82" height="30" rx="8" fill="#252D3B"/>
+  <rect x="290" y="14" width="82" height="30" rx="8" fill="#252D3B"/>
+  <rect x="382" y="14" width="82" height="30" rx="8" fill="#252D3B"/>
+  <rect x="474" y="14" width="110" height="30" rx="8" fill="#252D3B"/>
+  <rect x="594" y="14" width="160" height="30" rx="8" fill="#252D3B"/>
+  <rect x="764" y="14" width="180" height="30" rx="8" fill="#6B4F1D"/>
+  <text x="836" y="34" text-anchor="middle" fill="#F3D9A4" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC (custom bridge)</text>
+  <rect x="16" y="78" width="500" height="790" rx="20" fill="#05070B" stroke="#202634"/>
+  <rect x="16" y="78" width="500" height="48" rx="20" fill="#0B1018"/>
+  <text x="34" y="108" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="14">Custom WebRTC bridge</text>
+  <text x="248" y="108" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="13">state: connected | transport: bridge-webrtc /bridge/api/session</text>
+  <rect x="42" y="146" width="448" height="520" rx="26" fill="url(#screen)"/>
+  <rect x="42" y="566" width="228" height="86" rx="12" fill="#09111C" fill-opacity="0.82"/>
+  <text x="58" y="590" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Connected through the repository's</text>
+  <text x="58" y="608" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">custom WebRTC bridge session.</text>
+  <text x="58" y="626" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">Input is forwarded through the bridge</text>
+  <text x="58" y="644" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">instead of the emulator's native client.</text>
+  <rect x="284" y="566" width="180" height="118" rx="12" fill="#09111C" fill-opacity="0.82"/>
+  <text x="300" y="590" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">mode: custom WebRTC awaiting</text>
+  <text x="300" y="610" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">the first decoded browser frame</text>
+  <text x="300" y="628" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">from bridge-webrtc</text>
+  <text x="300" y="648" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">verification: signaling finished but</text>
+  <text x="300" y="666" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">the browser still has no decoded frame</text>
+  <text x="300" y="684" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">backend: bridge-webrtc /bridge/api/session</text>
+  <rect x="538" y="78" width="886" height="790" rx="18" fill="#171A21"/>
+  <rect x="560" y="102" width="842" height="86" rx="12" fill="#111823" stroke="#2B313D"/>
+  <text x="578" y="126" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Package name</text>
+  <rect x="578" y="138" width="650" height="30" rx="8" fill="#0F1218" stroke="#30394A"/>
+  <rect x="1242" y="138" width="142" height="30" rx="8" fill="#2D4E2F"/>
+  <text x="1292" y="158" text-anchor="middle" fill="#E8F5E9" font-family="Segoe UI, Arial, sans-serif" font-size="13">Launch</text>
+  <rect x="560" y="206" width="412" height="92" rx="12" fill="#111823" stroke="#2B313D"/>
+  <rect x="990" y="206" width="412" height="92" rx="12" fill="#111823" stroke="#2B313D"/>
+  <text x="578" y="232" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Emulator state</text>
+  <text x="578" y="266" fill="#3FB950" font-family="Segoe UI, Arial, sans-serif" font-size="28">connected</text>
+  <text x="1008" y="232" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Bridge API</text>
+  <text x="1008" y="266" fill="#3FB950" font-family="Segoe UI, Arial, sans-serif" font-size="28">ready</text>
+  <rect x="560" y="318" width="842" height="104" rx="12" fill="#111823" stroke="#2B313D"/>
+  <text x="578" y="344" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Last message</text>
+  <text x="578" y="370" fill="#D7DFED" font-family="Consolas, monospace" font-size="13">TURN relay gathering failed for turns:turn.corsicanescape.com:443?transport=tcp.</text>
+  <text x="578" y="390" fill="#D7DFED" font-family="Consolas, monospace" font-size="13">DNS/TCP/TLS preflight passed, but no relay candidate was allocated.</text>
+  <rect x="560" y="440" width="842" height="158" rx="12" fill="#111823" stroke="#2B313D"/>
+  <text x="578" y="466" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Display diagnostics</text>
+  <text x="578" y="494" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">Raw ADB frame endpoint: /api/frame</text>
+  <text x="578" y="520" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Emulator screen: 1080x1920</text>
+  <text x="578" y="544" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC frame: custom WebRTC awaiting first frame | The bridge session exists, but the browser has not rendered a frame yet.</text>
+  <text x="578" y="568" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Tip: if this stays black while the preview updates, inspect the bridge diagnostics before blaming ADB capture.</text>
+  <rect x="1220" y="472" width="146" height="102" rx="10" fill="url(#screen)" stroke="#2B313D"/>
+  <text x="1228" y="590" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="11">Raw screencap preview</text>
+  <rect x="560" y="616" width="842" height="212" rx="12" fill="#111823" stroke="#2B313D"/>
+  <text x="578" y="642" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">WebRTC diagnostics</text>
+  <text x="578" y="668" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Transport: bridge-webrtc /bridge/api/session</text>
+  <text x="578" y="688" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Mode: custom WebRTC awaiting first frame</text>
+  <text x="578" y="708" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Input path: keyboard, mouse, and touch events use the custom WebRTC bridge session.</text>
+  <text x="578" y="728" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Fallbacks: PNG preview remains available while the bridge manages the live video session.</text>
+  <rect x="578" y="742" width="396" height="68" rx="10" fill="#0F1218" stroke="#2B313D"/>
+  <text x="594" y="764" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">[09:26:09] Custom WebRTC bridge session selected</text>
+  <text x="594" y="784" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">[09:26:30] Video and input are attached to the repository's bridge-webrtc session</text>
+  <rect x="988" y="742" width="396" height="68" rx="10" fill="#0F1218" stroke="#2B313D"/>
+  <text x="1004" y="764" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">Browser video element attached</text>
+  <text x="1004" y="784" fill="#A8B3C7" font-family="Consolas, monospace" font-size="10">Waiting for the first decoded frame before claiming success</text>
+  <defs>
+    <linearGradient id="screen" x1="42" y1="146" x2="490" y2="834" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2B3951"/>
+      <stop offset="0.4" stop-color="#182434"/>
+      <stop offset="1" stop-color="#081018"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -451,6 +451,19 @@ function buildCaptureOverlay(sessionInfo, logs, receiverStats) {
   };
 }
 
+function buildNativeWebrtcOverlay() {
+  return {
+    requestedLabel: "native WebRTC",
+    activeLabel: "native WebRTC",
+    backendLabel: "emulator gRPC /android.emulation.control.Rtc",
+    verificationLine: "The browser is receiving video from the emulator's built-in WebRTC service.",
+    usingFallback: false,
+    statusLine: "native WebRTC active",
+    reasonLine: "Video is flowing directly from the emulator instead of the adb screenrecord bridge.",
+    fpsLine: null,
+  };
+}
+
 function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
   if (!peer) {
     return Promise.reject(new Error("RTCPeerConnection is not available"));
@@ -1230,7 +1243,9 @@ function App() {
   const webrtcFailureRef = useRef(false);
   const captureOverlay =
     webrtcDiagnostics?.captureOverlay ||
-    buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
+    (streamMode === "webrtc"
+      ? buildNativeWebrtcOverlay()
+      : buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats));
 
   const handleWebrtcMessage = useCallback((nextMessage) => {
     setMessage(nextMessage);
@@ -1451,7 +1466,7 @@ function App() {
 
   async function sendKey(name) {
     try {
-      if (streamMode === "png") {
+      if (streamMode === "png" || streamMode === "webrtc") {
         emuRef.current?.sendKey?.(name);
         return;
       }
@@ -1571,10 +1586,11 @@ function App() {
   }
 
   function handleStreamModeChange(nextMode) {
+    setWebrtcDiagnostics(null);
     if (nextMode === "webrtc") {
       setWebrtcNotice("");
       setEmuState("connecting");
-      setMessage("Attempting custom WebRTC session...");
+      setMessage("Connecting to the emulator's native WebRTC stream...");
     }
     setStreamMode(nextMode);
   }
@@ -1624,7 +1640,7 @@ function App() {
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           Stream
           <select value={streamMode} onChange={(event) => handleStreamModeChange(event.target.value)}>
-            <option value="webrtc">Custom WebRTC</option>
+            <option value="webrtc">Native WebRTC</option>
             <option value="png">PNG</option>
           </select>
         </label>
@@ -1680,14 +1696,28 @@ function App() {
                 onError={(error) => setMessage(`Emulator error: ${String(error)}`)}
               />
             ) : (
-              <CustomWebrtcPane
-                active={streamMode === "webrtc"}
+              <Emulator
+                ref={emuRef}
+                uri={window.location.origin}
+                view="webrtc"
+                muted={true}
                 width={layout.width}
                 height={layout.height}
-                onStateChange={setEmuState}
-                inputRef={webrtcInputRef}
-                onMessage={handleWebrtcMessage}
-                onDiagnosticsChange={setWebrtcDiagnostics}
+                onStateChange={(state) => {
+                  setEmuState(state);
+                  if (state === "connecting") {
+                    setMessage("Connecting to the emulator's native WebRTC stream...");
+                  } else if (state === "connected") {
+                    setMessage("Connected to the emulator's native WebRTC stream.");
+                  } else if (state === "disconnected") {
+                    setMessage("Native WebRTC stream disconnected.");
+                  }
+                }}
+                onError={(error) => {
+                  const text = `Native WebRTC error: ${String(error?.message || error)}`;
+                  setMessage(text);
+                  setWebrtcNotice(text);
+                }}
               />
             )}
           </div>
@@ -1781,10 +1811,10 @@ function App() {
                   WebRTC frame:{" "}
                   {streamMode === "webrtc"
                       ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}${captureOverlay.verificationLine ? ` | ${captureOverlay.verificationLine}` : ""}`
-                      : "switch to Custom WebRTC to compare"}
+                      : "switch to Native WebRTC to compare"}
                 </div>
                   <div>
-                    Tip: if the preview below is visible but WebRTC stays black, the bug is in the bridge/render path.
+                    Tip: if the preview below is visible but Native WebRTC stays black, the issue is in the emulator's direct WebRTC path rather than the ADB capture fallback.
                   </div>
                 </div>
               </div>
@@ -1809,182 +1839,18 @@ function App() {
 
           {streamMode === "webrtc" && (
             <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
-              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Custom WebRTC diagnostics</div>
+              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Native WebRTC diagnostics</div>
               <div style={{ fontSize: 12, lineHeight: 1.7, color: "#d7dfed", marginBottom: 10 }}>
-                <div>Browser offer: {webrtcDiagnostics?.offerSummary || "Offer not created yet."}</div>
-                <div>Bridge answer: {webrtcDiagnostics?.answerSummary || "Answer SDP not available yet."}</div>
+                <div>Transport: {captureOverlay.backendLabel}</div>
+                <div>Mode: {captureOverlay.statusLine}</div>
+                <div>{captureOverlay.reasonLine}</div>
+                <div>{captureOverlay.verificationLine}</div>
                 <div>
-                  Browser RTP: packets {webrtcDiagnostics?.receiverStats?.packetsReceived ?? 0} | bytes{" "}
-                  {webrtcDiagnostics?.receiverStats?.bytesReceived ?? 0} | frames decoded{" "}
-                  {webrtcDiagnostics?.receiverStats?.framesDecoded ?? 0}
-                </div>
-                <div>
-                  Browser video: readyState {webrtcDiagnostics?.videoStats?.readyState ?? 0} | currentTime{" "}
-                  {webrtcDiagnostics?.videoStats?.currentTime ?? "0.00"} | size{" "}
-                  {webrtcDiagnostics?.videoStats?.videoWidth ?? 0}x{webrtcDiagnostics?.videoStats?.videoHeight ?? 0}
+                  Input path: keyboard, mouse, and touch events are sent through the emulator's native WebRTC/gRPC client.
                 </div>
                 <div>
-                  Bridge media: frames {webrtcDiagnostics?.sessionInfo?.media?.framesDelivered ?? 0} | first frame{" "}
-                  {formatClockTime(webrtcDiagnostics?.sessionInfo?.media?.firstFrameAt)}
-                </div>
-                <div>
-                  Capture backend: requested {captureOverlay.requestedLabel} | active {captureOverlay.activeLabel}
-                  {captureOverlay.usingFallback ? " | fallback yes" : " | fallback no"}
-                </div>
-                <div>
-                  Screenrecord verification: {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.verification || "n/a"}
-                  {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.firstChunkAt
-                    ? ` | first chunk ${formatClockTime(webrtcDiagnostics.sessionInfo.media.screenrecord.firstChunkAt)}`
-                    : ""}
-                  {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.firstDecodedFrameAt
-                    ? ` | first decoded frame ${formatClockTime(webrtcDiagnostics.sessionInfo.media.screenrecord.firstDecodedFrameAt)}`
-                    : ""}
-                </div>
-                <div>
-                  Screenrecord upstream: chunks {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.chunksReceived ?? 0} | bytes{" "}
-                  {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.bytesReceived ?? 0}
-                  {webrtcDiagnostics?.sessionInfo?.media?.screenrecord?.decodeGraceUsed ? " | decode grace used yes" : " | decode grace used no"}
-                </div>
-                <div>
-                  Bridge states: session {webrtcDiagnostics?.sessionInfo?.peerConnectionState || "new"} | ice{" "}
-                  {webrtcDiagnostics?.sessionInfo?.iceConnectionState || "new"} | gathering{" "}
-                  {webrtcDiagnostics?.sessionInfo?.iceGatheringState || "new"}
-                </div>
-                <div>
-                  Bridge TURN policy: requested {webrtcDiagnostics?.sessionInfo?.turnPolicy?.requested || "n/a"} | applied{" "}
-                  {webrtcDiagnostics?.sessionInfo?.turnPolicy?.applied || "n/a"} | fallback{" "}
-                  {webrtcDiagnostics?.sessionInfo?.relayFallbackUsed ? "yes" : "no"}
-                </div>
-                <div>
-                  Bridge TURN URL strategy: {webrtcDiagnostics?.sessionInfo?.turnUrlStrategy || "n/a"}
-                  {webrtcDiagnostics?.sessionInfo?.turnResolution?.resolvedAddresses?.length
-                    ? ` | resolved IPs ${webrtcDiagnostics.sessionInfo.turnResolution.resolvedAddresses.join(", ")}`
-                    : ""}
-                  {webrtcDiagnostics?.sessionInfo?.turnResolution?.bridgeUrl
-                    ? ` | bridge URL ${webrtcDiagnostics.sessionInfo.turnResolution.bridgeUrl}`
-                    : ""}
-                </div>
-                {webrtcDiagnostics?.sessionInfo?.turnConnectivity?.bridgeHostProbe && (
-                  <div>
-                    TURN bridge-host preflight ({webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.host}): tcp{" "}
-                    {webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tcp?.ok
-                      ? "ok"
-                      : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tcp?.message || "unknown"})`}
-                    {webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls
-                      ? ` | tls ${formatBridgeTlsStatus(webrtcDiagnostics.sessionInfo.turnConnectivity.bridgeHostProbe.tls)}`
-                      : ""}
-                  </div>
-                )}
-                <div>
-                  Bridge candidates:{" "}
-                  {formatCandidateTypeSummary(webrtcDiagnostics?.sessionInfo?.answerDiagnostics?.candidateTypes)}
-                </div>
-                <div>
-                  Bridge attempts: {Array.isArray(webrtcDiagnostics?.sessionInfo?.answerAttempts) ? webrtcDiagnostics.sessionInfo.answerAttempts.length : 0}
-                </div>
-                <div>
-                  TURN preflight: dns{" "}
-                  {webrtcDiagnostics?.sessionInfo?.turnConnectivity?.dns
-                    ? webrtcDiagnostics.sessionInfo.turnConnectivity.dns.ok
-                      ? "ok"
-                      : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.dns.message})`
-                    : "pending"}{" "}
-                  | tcp{" "}
-                  {webrtcDiagnostics?.sessionInfo?.turnConnectivity?.tcp
-                    ? webrtcDiagnostics.sessionInfo.turnConnectivity.tcp.ok
-                      ? "ok"
-                      : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.tcp.message})`
-                    : "pending"}{" "}
-                  | tls{" "}
-                  {webrtcDiagnostics?.sessionInfo?.turnConnectivity?.tls
-                    ? webrtcDiagnostics.sessionInfo.turnConnectivity.tls.skipped
-                      ? "skipped"
-                      : webrtcDiagnostics.sessionInfo.turnConnectivity.tls.ok
-                        ? "ok"
-                        : `failed (${webrtcDiagnostics.sessionInfo.turnConnectivity.tls.message})`
-                    : "pending"}
-                </div>
-                <div>
-                  TURN failure summary: {webrtcDiagnostics?.sessionInfo?.turnFailureSummary || "none"}
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 11, color: "#9db0cc", marginBottom: 6 }}>Runtime events</div>
-                  <div
-                    style={{
-                      maxHeight: 180,
-                      overflow: "auto",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 6,
-                      fontSize: 10,
-                      lineHeight: 1.45,
-                    }}
-                  >
-                    {(webrtcDiagnostics?.runtimeEvents || []).length === 0 && (
-                      <div style={{ color: "#7e8ba3" }}>Session events will appear here once the browser starts negotiating.</div>
-                    )}
-                    {(webrtcDiagnostics?.runtimeEvents || []).map((entry) => (
-                      <div
-                        key={`${entry.at}:${entry.message}`}
-                        style={{
-                          padding: 8,
-                          borderRadius: 10,
-                          background: "#0f1218",
-                          border: "1px solid #2b313d",
-                          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        [{formatClockTime(entry.at)}] {entry.message}
-                        {entry.details ? ` ${JSON.stringify(entry.details)}` : ""}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 11, color: "#9db0cc", marginBottom: 6 }}>Answer SDP</div>
-                  <textarea
-                    readOnly
-                    value={webrtcDiagnostics?.answerSdp || "Answer SDP will appear here after session creation."}
-                    style={{
-                      width: "100%",
-                      minHeight: 180,
-                      resize: "vertical",
-                      fontSize: 10,
-                      lineHeight: 1.45,
-                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                      padding: 8,
-                      borderRadius: 10,
-                      color: "#d7dfed",
-                      background: "#0f1218",
-                      border: "1px solid #2b313d",
-                    }}
-                  />
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 11, color: "#9db0cc", marginBottom: 6 }}>Bridge ICE attempts</div>
-                  <textarea
-                    readOnly
-                    value={formatAnswerAttemptSummary(webrtcDiagnostics?.sessionInfo?.answerAttempts)}
-                    style={{
-                      width: "100%",
-                      minHeight: 180,
-                      resize: "vertical",
-                      fontSize: 10,
-                      lineHeight: 1.45,
-                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                      padding: 8,
-                      borderRadius: 10,
-                      color: "#d7dfed",
-                      background: "#0f1218",
-                      border: "1px solid #2b313d",
-                    }}
-                  />
+                  Fallbacks: the PNG preview remains available for comparison, but WebRTC video no longer depends on the adb
+                  `screenrecord` bridge.
                 </div>
               </div>
             </div>

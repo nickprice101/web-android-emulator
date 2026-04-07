@@ -9,7 +9,7 @@ if [ -n "${TURN_SHARED_SECRET:-}" ]; then
   TURN_PORT="${TURN_PORT:-443}"
   TURN_PROTOCOL="${TURN_PROTOCOL:-tcp}"
   TURN_SCHEME="${TURN_SCHEME:-turns}"
-  TURN_TTL="${TURN_TTL:-86400}"
+  TURN_TTL="${TURN_TTL:-2592000}"
   TURN_USERNAME_SUFFIX="${TURN_USERNAME_SUFFIX:-emuuser}"
 
   now="$(date +%s)"

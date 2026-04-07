@@ -5,8 +5,8 @@ import { Emulator } from "android-emulator-webrtc/emulator";
 const EMULATOR_ASPECT = 1080 / 1920;
 const RAW_FRAME_URL = "/api/frame";
 const MIN_RENDERABLE_VIDEO_DIMENSION = 16;
-const NATIVE_TINY_FRAME_RETRY_DELAY_MS = 1500;
-const NATIVE_TINY_FRAME_MAX_RETRIES = 2;
+const NATIVE_WEBRTC_RECOVERY_DELAY_MS = 1500;
+const NATIVE_WEBRTC_MAX_RETRIES = 3;
 function clampRatio(value) {
   if (!Number.isFinite(value)) {
     return null;
@@ -513,6 +513,13 @@ function formatIceServerSummary(summary) {
     .join(" | ");
 }
 
+function buildMissingTurnNotice(summary) {
+  if (!summary || summary.hasTurn) {
+    return "";
+  }
+  return "The emulator's native RTC config did not advertise any TURN server, so coturn will not receive traffic for this session.";
+}
+
 function buildPeerConnectionStats(reports) {
   let inbound = null;
   let track = null;
@@ -584,6 +591,7 @@ function buildPeerConnectionStats(reports) {
 
 function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDiagnostics) {
   const peerStats = nativeDiagnostics?.peerStats || null;
+  const peerStates = nativeDiagnostics?.peerStates || null;
   const startSummary = nativeDiagnostics?.startIceServers || null;
   const remoteCandidates = nativeDiagnostics?.remoteCandidateSummary || parseSdpCandidateDiagnostics(nativeDiagnostics?.remoteDescriptionSdp || "");
   const localCandidates = nativeDiagnostics?.localCandidateSummary || parseSdpCandidateDiagnostics(nativeDiagnostics?.localDescriptionSdp || "");
@@ -594,11 +602,25 @@ function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDia
   const framesReceived = Number(peerStats?.framesReceived ?? 0);
   const framesDecoded = Number(peerStats?.framesDecoded ?? 0);
   const selectedPair = peerStats?.selectedCandidatePair || null;
+  const connectionState = peerStates?.connectionState || "";
+  const iceConnectionState = peerStates?.iceConnectionState || "";
+  const transportConnected =
+    connectionState === "connected" ||
+    iceConnectionState === "connected" ||
+    iceConnectionState === "completed" ||
+    Boolean(selectedPair);
 
   if (renderableVideo) {
     return {
       code: "rendering",
       summary: "The browser has decoded at least one real emulator frame from the native WebRTC stream.",
+    };
+  }
+
+  if (emuState === "disconnected" || emuState === "error") {
+    return {
+      code: "disconnected",
+      summary: "The native emulator session dropped before the browser rendered a usable frame.",
     };
   }
 
@@ -637,7 +659,7 @@ function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDia
     };
   }
 
-  if (emuState === "connected" && packetsReceived === 0 && bytesReceived === 0) {
+  if (emuState === "connected" && transportConnected && packetsReceived === 0 && bytesReceived === 0) {
     return {
       code: "no-inbound-rtp",
       summary:
@@ -650,13 +672,6 @@ function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDia
       code: "decode-stalled",
       summary:
         "The browser is receiving native WebRTC video packets, but no frames have been decoded yet. This points to a decode, codec, or keyframe problem rather than pure connectivity.",
-    };
-  }
-
-  if (emuState === "disconnected" || emuState === "error") {
-    return {
-      code: "disconnected",
-      summary: "The native emulator session dropped before the browser rendered a usable frame.",
     };
   }
 
@@ -776,6 +791,17 @@ function buildNativeWebrtcOverlay(emuState, videoStats, hasVideoFrame, nativeDia
     };
   }
 
+  if (emuState === "disconnected" || emuState === "error") {
+    return {
+      backendLabel: "native emulator WebRTC / gRPC-Web",
+      statusLine: "native WebRTC disconnected",
+      reasonLine: failure.summary,
+      verificationLine:
+        verificationLine +
+        " | If TURN used to work and now shows no allocations, inspect the emulator's native ICE/TURN advertisement rather than the old bridge path.",
+    };
+  }
+
   if (tinyVideo) {
     return {
       backendLabel: "native emulator WebRTC / gRPC-Web",
@@ -791,17 +817,6 @@ function buildNativeWebrtcOverlay(emuState, videoStats, hasVideoFrame, nativeDia
       statusLine: "native WebRTC awaiting first frame",
       reasonLine: failure.summary,
       verificationLine,
-    };
-  }
-
-  if (emuState === "disconnected" || emuState === "error") {
-    return {
-      backendLabel: "native emulator WebRTC / gRPC-Web",
-      statusLine: "native WebRTC disconnected",
-      reasonLine: failure.summary,
-      verificationLine:
-        verificationLine +
-        " | If TURN used to work and now shows no allocations, inspect the emulator's native ICE/TURN advertisement rather than the old bridge path.",
     };
   }
 
@@ -1660,7 +1675,8 @@ function App() {
   const [nativeWebrtcKey, setNativeWebrtcKey] = useState(0);
   const [nativeRetryCount, setNativeRetryCount] = useState(0);
   const webrtcFailureRef = useRef(false);
-  const nativeTinyFrameSinceRef = useRef(null);
+  const nativeFailureSinceRef = useRef(null);
+  const nativeFailureSignatureRef = useRef(null);
   const nativePeerCleanupRef = useRef(() => {});
   const nativeJsepPatchedRef = useRef(null);
   const nativeRootCauseRef = useRef(null);
@@ -1680,6 +1696,7 @@ function App() {
   const bridgeLogSummary = webrtcDiagnostics?.bridgeLogSummary || "No bridge logs yet.";
   const ffmpegStderrSummary = webrtcDiagnostics?.ffmpegStderrSummary || "No ffmpeg stderr yet.";
   const nativeFailureReason = buildNativeFailureReason(emuState, nativeVideoStats, nativeHasVideoFrame, nativeDiagnostics);
+  const nativeMissingTurnNotice = buildMissingTurnNotice(nativeDiagnostics.startIceServers);
   const nativeRuntimeEventSummary =
     nativeDiagnostics.runtimeEvents.length > 0
       ? nativeDiagnostics.runtimeEvents.map(formatRuntimeEvent).join("\n")
@@ -1687,6 +1704,7 @@ function App() {
   const nativeFirstFrameDiagnostics = [
     `emu=${emuState} | browserVideo=${nativeVideoStats?.readyState ?? "n/a"} | size=${nativeVideoStats?.videoWidth ?? 0}x${nativeVideoStats?.videoHeight ?? 0}`,
     `start ice servers: ${formatIceServerSummary(nativeDiagnostics.startIceServers)}`,
+    nativeMissingTurnNotice || "turn advertisement: present or not yet known",
     `local candidates: ${formatCandidateTypeSummary(nativeDiagnostics.localCandidateSummary)}`,
     `remote candidates: ${formatCandidateTypeSummary(nativeDiagnostics.remoteCandidateSummary)}`,
     `peer states: connection=${nativeDiagnostics.peerStates?.connectionState || "n/a"} | ice=${nativeDiagnostics.peerStates?.iceConnectionState || "n/a"} | signaling=${nativeDiagnostics.peerStates?.signalingState || "n/a"} | gathering=${nativeDiagnostics.peerStates?.iceGatheringState || "n/a"}`,
@@ -2094,7 +2112,8 @@ function App() {
     if (streamMode !== "native-webrtc") {
       setNativeVideoStats(null);
       setNativeHasVideoFrame(false);
-      nativeTinyFrameSinceRef.current = null;
+      nativeFailureSinceRef.current = null;
+      nativeFailureSignatureRef.current = null;
       return undefined;
     }
 
@@ -2224,52 +2243,89 @@ function App() {
 
   useEffect(() => {
     if (streamMode !== "native-webrtc") {
-      nativeTinyFrameSinceRef.current = null;
+      nativeFailureSinceRef.current = null;
+      nativeFailureSignatureRef.current = null;
       return;
     }
 
-    if (nativeHasVideoFrame || !isTinyVideoFrame(nativeVideoStats)) {
-      nativeTinyFrameSinceRef.current = null;
+    if (hasRenderableVideo(nativeVideoStats, nativeDiagnostics?.peerStats, nativeHasVideoFrame)) {
+      nativeFailureSinceRef.current = null;
+      nativeFailureSignatureRef.current = null;
+      if (nativeRetryCount !== 0) {
+        setNativeRetryCount(0);
+      }
       return;
     }
 
-    if (emuState !== "connected") {
+    const retryableReasons = new Set(["placeholder-frame", "no-inbound-rtp", "decode-stalled", "disconnected"]);
+    if (!retryableReasons.has(nativeFailureReason.code)) {
+      nativeFailureSinceRef.current = null;
+      nativeFailureSignatureRef.current = null;
       return;
     }
+
+    const packetsReceived = Number(nativeDiagnostics.peerStats?.packetsReceived ?? 0);
+    const framesDecoded = Number(nativeDiagnostics.peerStats?.framesDecoded ?? 0);
+    const candidatePairState =
+      nativeDiagnostics.peerStats?.selectedCandidatePair?.state ||
+      nativeDiagnostics.peerStates?.iceConnectionState ||
+      "none";
+    const signature = [
+      nativeFailureReason.code,
+      emuState,
+      candidatePairState,
+      packetsReceived,
+      framesDecoded,
+      nativeVideoStats?.videoWidth || 0,
+      nativeVideoStats?.videoHeight || 0,
+    ].join("|");
 
     const now = Date.now();
-    if (!nativeTinyFrameSinceRef.current) {
-      nativeTinyFrameSinceRef.current = now;
+    if (nativeFailureSignatureRef.current !== signature) {
+      nativeFailureSignatureRef.current = signature;
+      nativeFailureSinceRef.current = now;
       return;
     }
 
-    if (now - nativeTinyFrameSinceRef.current < NATIVE_TINY_FRAME_RETRY_DELAY_MS) {
+    if (!nativeFailureSinceRef.current || now - nativeFailureSinceRef.current < NATIVE_WEBRTC_RECOVERY_DELAY_MS) {
       return;
     }
 
-    nativeTinyFrameSinceRef.current = null;
+    nativeFailureSinceRef.current = null;
+    nativeFailureSignatureRef.current = null;
 
-    if (nativeRetryCount >= NATIVE_TINY_FRAME_MAX_RETRIES) {
+    if (nativeRetryCount >= NATIVE_WEBRTC_MAX_RETRIES) {
       setMessage(
-        `Native WebRTC stayed stuck on a ${nativeVideoStats?.videoWidth || 0}x${nativeVideoStats?.videoHeight || 0} placeholder frame after ${nativeRetryCount} retries. Use PNG mode for recovery while debugging the emulator's direct stream.`
+        `Native WebRTC failed to recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries. Use PNG mode for recovery while debugging the emulator's direct stream.`
       );
       setEmuState("error");
       return;
     }
 
     setMessage(
-      `Native WebRTC produced a ${nativeVideoStats?.videoWidth || 0}x${nativeVideoStats?.videoHeight || 0} placeholder frame. Retrying session ${nativeRetryCount + 1}/${NATIVE_TINY_FRAME_MAX_RETRIES}...`
+      `Native WebRTC hit "${nativeFailureReason.summary}" and is restarting session ${nativeRetryCount + 1}/${NATIVE_WEBRTC_MAX_RETRIES}...`
     );
     setEmuState("connecting");
     setNativeVideoStats(null);
     setNativeHasVideoFrame(false);
     setNativeRetryCount((count) => count + 1);
     setNativeWebrtcKey((value) => value + 1);
-  }, [emuState, nativeHasVideoFrame, nativeRetryCount, nativeVideoStats, streamMode]);
+  }, [emuState, nativeDiagnostics, nativeFailureReason, nativeHasVideoFrame, nativeRetryCount, nativeVideoStats, streamMode]);
 
   useEffect(() => {
     if (streamMode !== "native-webrtc") {
       nativeRootCauseRef.current = null;
+      return;
+    }
+
+    if (nativeFailureReason.code === "missing-ice-servers") {
+      const nextNotice = `${nativeFailureReason.summary} The emulator did not advertise TURN, so coturn will not receive any traffic for this session.`;
+      if (nativeRootCauseRef.current === nextNotice) {
+        return;
+      }
+      nativeRootCauseRef.current = nextNotice;
+      setWebrtcNotice(nextNotice);
+      setMessage(nextNotice);
       return;
     }
 
@@ -2287,7 +2343,10 @@ function App() {
 
     const packetsReceived = Number(nativeDiagnostics.peerStats?.packetsReceived ?? 0);
     const framesDecoded = Number(nativeDiagnostics.peerStats?.framesDecoded ?? 0);
-    const candidatePairState = nativeDiagnostics.peerStats?.selectedCandidatePair?.state || "none";
+    const candidatePairState =
+      nativeDiagnostics.peerStats?.selectedCandidatePair?.state ||
+      nativeDiagnostics.peerStates?.iceConnectionState ||
+      "none";
     const detailSummary = `ICE ${candidatePairState} | packets ${packetsReceived} | decoded ${framesDecoded}`;
     const nextNotice = `Native WebRTC diagnosis: ${nativeFailureReason.summary} ${detailSummary}`;
 
@@ -2498,7 +2557,8 @@ function App() {
 
   function handleStreamModeChange(nextMode) {
     setWebrtcDiagnostics(null);
-    nativeTinyFrameSinceRef.current = null;
+    nativeFailureSinceRef.current = null;
+    nativeFailureSignatureRef.current = null;
     nativeRootCauseRef.current = null;
     setNativeRetryCount(0);
     if (nextMode === "native-webrtc") {
@@ -2876,6 +2936,7 @@ function App() {
                 <div>
                   ICE servers: {formatIceServerSummary(nativeDiagnostics.startIceServers)}
                 </div>
+                {nativeMissingTurnNotice ? <div>{nativeMissingTurnNotice}</div> : null}
                 <div>
                   Candidate path: local {formatCandidateTypeSummary(nativeDiagnostics.localCandidateSummary)} | remote{" "}
                   {formatCandidateTypeSummary(nativeDiagnostics.remoteCandidateSummary)}

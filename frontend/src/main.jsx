@@ -546,6 +546,50 @@ function buildCustomWebrtcOverlay(webrtcDiagnostics) {
   };
 }
 
+function buildNativeWebrtcOverlay(emuState, videoStats, hasVideoFrame) {
+  const videoReady = hasRenderableVideo(videoStats, null, hasVideoFrame);
+  const videoSize =
+    videoStats?.videoWidth > 0 && videoStats?.videoHeight > 0
+      ? `${videoStats.videoWidth}x${videoStats.videoHeight}`
+      : "unknown";
+  const readyState = Number(videoStats?.readyState ?? 0);
+
+  if (videoReady) {
+    return {
+      backendLabel: "native emulator WebRTC / gRPC-Web",
+      statusLine: "native WebRTC rendering",
+      reasonLine: "The browser decoded at least one frame from the emulator's direct WebRTC stream.",
+      verificationLine: `Browser video readyState ${readyState} | size ${videoSize}`,
+    };
+  }
+
+  if (emuState === "connected") {
+    return {
+      backendLabel: "native emulator WebRTC / gRPC-Web",
+      statusLine: "native WebRTC awaiting first frame",
+      reasonLine: "Signaling reached the emulator, but the browser has not decoded a frame yet.",
+      verificationLine: `Browser video readyState ${readyState} | size ${videoSize}`,
+    };
+  }
+
+  if (emuState === "disconnected" || emuState === "error") {
+    return {
+      backendLabel: "native emulator WebRTC / gRPC-Web",
+      statusLine: "native WebRTC disconnected",
+      reasonLine: "The native emulator session dropped before the browser rendered a frame.",
+      verificationLine:
+        "If TURN used to work and now shows no allocations, inspect the emulator's native ICE/TURN advertisement rather than the old bridge path.",
+    };
+  }
+
+  return {
+    backendLabel: "native emulator WebRTC / gRPC-Web",
+    statusLine: "native WebRTC connecting",
+    reasonLine: "The browser is still negotiating the emulator's direct WebRTC session.",
+    verificationLine: `Browser video readyState ${readyState} | size ${videoSize}`,
+  };
+}
+
 function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
   if (!peer) {
     return Promise.reject(new Error("RTCPeerConnection is not available"));
@@ -1347,6 +1391,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
 function App() {
   const emuRef = useRef(null);
   const wrapRef = useRef(null);
+  const displaySurfaceRef = useRef(null);
   const browserSectionRef = useRef(null);
   const webrtcInputRef = useRef(null);
   const isResizingRef = useRef(false);
@@ -1376,11 +1421,14 @@ function App() {
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [framePreviewTick, setFramePreviewTick] = useState(0);
   const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
+  const [nativeVideoStats, setNativeVideoStats] = useState(null);
+  const [nativeHasVideoFrame, setNativeHasVideoFrame] = useState(false);
   const webrtcFailureRef = useRef(false);
   const captureOverlay =
     streamMode === "custom-webrtc"
       ? buildCustomWebrtcOverlay(webrtcDiagnostics)
       : buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
+  const nativeWebrtcOverlay = buildNativeWebrtcOverlay(emuState, nativeVideoStats, nativeHasVideoFrame);
   const bridgeCaptureOverlay =
     webrtcDiagnostics?.captureOverlay ||
     buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
@@ -1533,6 +1581,57 @@ function App() {
     }, 2000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (streamMode !== "native-webrtc") {
+      setNativeVideoStats(null);
+      setNativeHasVideoFrame(false);
+      return undefined;
+    }
+
+    let active = true;
+    let video = null;
+    let detachVideoListeners = () => {};
+
+    const updateVideoStats = () => {
+      if (!active || !video) {
+        return;
+      }
+      const snapshot = buildVideoStatsSnapshot(video);
+      setNativeVideoStats(snapshot);
+      if (snapshot && snapshot.videoWidth > 0 && snapshot.videoHeight > 0) {
+        setNativeHasVideoFrame(true);
+      }
+    };
+
+    const attachVideoListeners = (nextVideo) => {
+      const events = ["loadedmetadata", "loadeddata", "canplay", "playing", "resize", "waiting", "stalled", "suspend", "emptied", "error"];
+      events.forEach((eventName) => nextVideo.addEventListener(eventName, updateVideoStats));
+      updateVideoStats();
+      detachVideoListeners = () => {
+        events.forEach((eventName) => nextVideo.removeEventListener(eventName, updateVideoStats));
+      };
+    };
+
+    const poll = window.setInterval(() => {
+      const nextVideo = displaySurfaceRef.current?.querySelector("video") || null;
+      if (!nextVideo) {
+        return;
+      }
+      if (nextVideo !== video) {
+        detachVideoListeners();
+        video = nextVideo;
+        attachVideoListeners(nextVideo);
+      }
+      updateVideoStats();
+    }, 500);
+
+    return () => {
+      active = false;
+      window.clearInterval(poll);
+      detachVideoListeners();
+    };
+  }, [streamMode]);
 
   useEffect(() => {
     if (streamMode === "custom-webrtc") {
@@ -1817,6 +1916,7 @@ function App() {
           }}
         >
           <div
+            ref={displaySurfaceRef}
             onMouseDown={(event) => event.preventDefault()}
             onDragStart={(event) => event.preventDefault()}
             style={{
@@ -1934,7 +2034,7 @@ function App() {
                     {streamMode === "custom-webrtc"
                       ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}${captureOverlay.verificationLine ? ` | ${captureOverlay.verificationLine}` : ""}`
                       : streamMode === "native-webrtc"
-                        ? "native WebRTC active | Video is flowing directly from the emulator."
+                        ? `${nativeWebrtcOverlay.statusLine}${nativeWebrtcOverlay.reasonLine ? ` | ${nativeWebrtcOverlay.reasonLine}` : ""}${nativeWebrtcOverlay.verificationLine ? ` | ${nativeWebrtcOverlay.verificationLine}` : ""}`
                         : "switch to WebRTC mode to compare"}
                   </div>
                   <div>

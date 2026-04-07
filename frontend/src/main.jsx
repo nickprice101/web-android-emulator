@@ -1041,17 +1041,27 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
       receiverStats,
       answerSdp,
       answerSummary,
+      answerAttemptSummary,
+      firstFrameDiagnostics,
+      ffmpegStderrSummary,
       offerSummary,
+      runtimeEventSummary,
+      bridgeLogSummary,
     });
   }, [
     answerSdp,
+    answerAttemptSummary,
     answerSummary,
     bridgeState,
+    bridgeLogSummary,
     captureOverlay,
+    ffmpegStderrSummary,
+    firstFrameDiagnostics,
     logs,
     offerSummary,
     onDiagnosticsChange,
     receiverStats,
+    runtimeEventSummary,
     runtimeEvents,
     sessionInfo,
     sessionMessage,
@@ -1374,6 +1384,13 @@ function App() {
   const bridgeCaptureOverlay =
     webrtcDiagnostics?.captureOverlay ||
     buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
+  const firstFrameDiagnostics = webrtcDiagnostics?.firstFrameDiagnostics || "First-frame diagnostics are not available yet.";
+  const offerSummary = webrtcDiagnostics?.offerSummary || "Offer not created yet.";
+  const answerSummary = webrtcDiagnostics?.answerSummary || "Answer SDP not available yet.";
+  const answerAttemptSummary = webrtcDiagnostics?.answerAttemptSummary || "No answer attempts yet.";
+  const runtimeEventSummary = webrtcDiagnostics?.runtimeEventSummary || "No browser runtime events yet.";
+  const bridgeLogSummary = webrtcDiagnostics?.bridgeLogSummary || "No bridge logs yet.";
+  const ffmpegStderrSummary = webrtcDiagnostics?.ffmpegStderrSummary || "No ffmpeg stderr yet.";
 
   const handleWebrtcMessage = useCallback((nextMessage) => {
     setMessage(nextMessage);

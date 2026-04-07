@@ -9,7 +9,7 @@ RUN apt-get update \
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY server.mjs ./
+COPY server.mjs ffmpeg-config.mjs ./
 
 EXPOSE 8090
 

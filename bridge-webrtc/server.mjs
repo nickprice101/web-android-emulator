@@ -6,6 +6,7 @@ import net from "node:net";
 import tls from "node:tls";
 import { URL } from "node:url";
 import wrtc from "@roamhq/wrtc";
+import { buildFfmpegArgs } from "./ffmpeg-config.mjs";
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, nonstandard = {} } = wrtc;
 const { RTCVideoSource } = nonstandard;
@@ -1402,28 +1403,12 @@ class EmulatorVideoCapture {
   }
 
   async startFfmpeg() {
-    const args = [
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-fflags",
-      "nobuffer",
-      "-flags",
-      "low_delay",
-      "-max_delay",
-      "0",
-      ...(this.mode === "adb-screenrecord"
-        ? ["-probesize", "128", "-analyzeduration", "0", "-f", "h264", "-r", String(captureFps)]
-        : ["-f", "image2pipe", "-codec:v", "png"]),
-      "-i",
-      "pipe:0",
-      "-an",
-      "-pix_fmt",
-      "yuv420p",
-      "-f",
-      "rawvideo",
-      "pipe:1",
-    ];
+    const args = buildFfmpegArgs({
+      mode: this.mode,
+      fps: captureFps,
+      width: this.width,
+      height: this.height,
+    });
 
     this.ffmpeg = spawn("ffmpeg", args, {
       stdio: ["pipe", "pipe", "pipe"],

@@ -1370,7 +1370,7 @@ function App() {
   const [logPaneHeight, setLogPaneHeight] = useState(260);
   const lastSeenLogRef = useRef(null);
   const [leftPanePercent, setLeftPanePercent] = useState(35);
-  const [streamMode, setStreamMode] = useState("webrtc");
+  const [streamMode, setStreamMode] = useState("native-webrtc");
   const [webrtcNotice, setWebrtcNotice] = useState("");
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [deviceInfo, setDeviceInfo] = useState(null);
@@ -1378,7 +1378,7 @@ function App() {
   const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
   const webrtcFailureRef = useRef(false);
   const captureOverlay =
-    streamMode === "webrtc"
+    streamMode === "custom-webrtc"
       ? buildCustomWebrtcOverlay(webrtcDiagnostics)
       : buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
   const bridgeCaptureOverlay =
@@ -1535,13 +1535,13 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (streamMode === "webrtc") {
+    if (streamMode === "custom-webrtc") {
       webrtcFailureRef.current = false;
     }
   }, [streamMode]);
 
   useEffect(() => {
-    if (streamMode !== "webrtc" || webrtcFailureRef.current) {
+    if (streamMode !== "custom-webrtc" || webrtcFailureRef.current) {
       return;
     }
 
@@ -1611,7 +1611,7 @@ function App() {
 
   async function sendKey(name) {
     try {
-      if (streamMode === "png") {
+      if (streamMode !== "custom-webrtc") {
         emuRef.current?.sendKey?.(name);
         return;
       }
@@ -1732,10 +1732,13 @@ function App() {
 
   function handleStreamModeChange(nextMode) {
     setWebrtcDiagnostics(null);
-    if (nextMode === "webrtc") {
+    if (nextMode === "native-webrtc") {
       setWebrtcNotice("");
       setEmuState("connecting");
-      setMessage("Connecting to the emulator's custom WebRTC bridge...");
+      setMessage("Connecting to the emulator's native WebRTC stream...");
+    } else {
+      setWebrtcNotice("");
+      setMessage("Switching to PNG preview mode...");
     }
     setStreamMode(nextMode);
   }
@@ -1785,7 +1788,7 @@ function App() {
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           Stream
           <select value={streamMode} onChange={(event) => handleStreamModeChange(event.target.value)}>
-            <option value="webrtc">WebRTC (custom bridge)</option>
+            <option value="native-webrtc">WebRTC (native emulator)</option>
             <option value="png">PNG</option>
           </select>
         </label>
@@ -1829,28 +1832,16 @@ function App() {
               WebkitUserSelect: "none",
             }}
           >
-            {streamMode === "png" ? (
-              <Emulator
-                ref={emuRef}
-                uri={window.location.origin}
-                view="png"
-                muted={true}
-                width={layout.width}
-                height={layout.height}
-                onStateChange={(state) => setEmuState(state)}
-                onError={(error) => setMessage(`Emulator error: ${String(error)}`)}
-              />
-            ) : (
-              <CustomWebrtcPane
-                active={streamMode === "webrtc"}
-                width={layout.width}
-                height={layout.height}
-                onStateChange={setEmuState}
-                onMessage={handleWebrtcMessage}
-                inputRef={webrtcInputRef}
-                onDiagnosticsChange={setWebrtcDiagnostics}
-              />
-            )}
+            <Emulator
+              ref={emuRef}
+              uri={window.location.origin}
+              view={streamMode === "png" ? "png" : "webrtc"}
+              muted={true}
+              width={layout.width}
+              height={layout.height}
+              onStateChange={(state) => setEmuState(state)}
+              onError={(error) => setMessage(`Emulator error: ${String(error)}`)}
+            />
           </div>
         </div>
 
@@ -1940,12 +1931,14 @@ function App() {
                   </div>
                   <div>
                     WebRTC frame:{" "}
-                    {streamMode === "webrtc"
+                    {streamMode === "custom-webrtc"
                       ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}${captureOverlay.verificationLine ? ` | ${captureOverlay.verificationLine}` : ""}`
-                      : "switch to WebRTC mode to compare"}
+                      : streamMode === "native-webrtc"
+                        ? "native WebRTC active | Video is flowing directly from the emulator."
+                        : "switch to WebRTC mode to compare"}
                   </div>
                   <div>
-                    Tip: if the preview below is visible but WebRTC mode stays black, inspect the bridge diagnostics below before blaming ADB capture.
+                    Tip: if native WebRTC works while the custom bridge stays black, the problem is in the bridge path rather than the emulator stream.
                   </div>
                 </div>
               </div>
@@ -1968,7 +1961,7 @@ function App() {
             </div>
           </div>
 
-          {streamMode === "webrtc" && (
+          {streamMode === "custom-webrtc" && (
             <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
               <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>WebRTC diagnostics</div>
               <div style={{ fontSize: 12, lineHeight: 1.7, color: "#d7dfed", marginBottom: 10 }}>

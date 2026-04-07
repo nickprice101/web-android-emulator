@@ -33,12 +33,6 @@ static_resources:
                             max_stream_duration:
                               grpc_timeout_header_max: 0s
                         - match:
-                            prefix: "/bridge/"
-                          route:
-                            cluster: bridge_webrtc
-                            prefix_rewrite: "/"
-                            timeout: 0s
-                        - match:
                             prefix: "/api/"
                           route:
                             cluster: apkbridge
@@ -102,20 +96,6 @@ static_resources:
                     socket_address:
                       address: apkbridge
                       port_value: 5000
-
-    - name: bridge_webrtc
-      connect_timeout: 0.25s
-      type: STRICT_DNS
-      lb_policy: ROUND_ROBIN
-      load_assignment:
-        cluster_name: bridge_webrtc
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: bridge-webrtc
-                      port_value: 8090
 
 admin:
   address:

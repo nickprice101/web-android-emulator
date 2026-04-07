@@ -451,16 +451,75 @@ function buildCaptureOverlay(sessionInfo, logs, receiverStats) {
   };
 }
 
-function buildNativeWebrtcOverlay() {
+function hasRenderableVideo(videoStats, receiverStats, hasVideo = false) {
+  const readyState = Number(videoStats?.readyState ?? 0);
+  const videoWidth = Number(videoStats?.videoWidth ?? 0);
+  const videoHeight = Number(videoStats?.videoHeight ?? 0);
+  const framesReceived = Number(receiverStats?.framesReceived ?? 0);
+  const framesDecoded = Number(receiverStats?.framesDecoded ?? 0);
+
+  return (
+    Boolean(hasVideo) ||
+    framesDecoded > 0 ||
+    (framesReceived > 0 &&
+      readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+      videoWidth > 0 &&
+      videoHeight > 0)
+  );
+}
+
+function buildCustomWebrtcOverlay(webrtcDiagnostics) {
+  const bridgeOverlay = buildCaptureOverlay(
+    webrtcDiagnostics?.sessionInfo,
+    webrtcDiagnostics?.logs,
+    webrtcDiagnostics?.receiverStats
+  );
+  const sessionState = webrtcDiagnostics?.sessionInfo?.state || "initializing";
+  const sessionMessage = webrtcDiagnostics?.sessionMessage || "";
+  const videoReady = hasRenderableVideo(
+    webrtcDiagnostics?.videoStats,
+    webrtcDiagnostics?.receiverStats,
+    webrtcDiagnostics?.hasVideo
+  );
+  const disconnected = ["failed", "disconnected", "closed", "expired", "media-failed"].includes(sessionState);
+
+  if (videoReady) {
+    return {
+      requestedLabel: "custom WebRTC",
+      activeLabel: "custom WebRTC",
+      backendLabel: "bridge-webrtc /bridge/api/session",
+      verificationLine: "The browser has decoded emulator video from the repository's custom WebRTC bridge.",
+      usingFallback: false,
+      statusLine: "custom WebRTC rendering",
+      reasonLine: sessionMessage || "Decoded emulator frames are reaching the browser video element.",
+      fpsLine: bridgeOverlay.fpsLine,
+    };
+  }
+
+  if (disconnected) {
+    return {
+      requestedLabel: "custom WebRTC",
+      activeLabel: "custom WebRTC",
+      backendLabel: "bridge-webrtc /bridge/api/session",
+      verificationLine:
+        bridgeOverlay.verificationLine || "The browser never rendered a decoded frame before the WebRTC session dropped.",
+      usingFallback: false,
+      statusLine: "custom WebRTC disconnected",
+      reasonLine: sessionMessage || "The bridge session disconnected before the browser rendered a frame.",
+      fpsLine: bridgeOverlay.fpsLine,
+    };
+  }
+
   return {
     requestedLabel: "custom WebRTC",
     activeLabel: "custom WebRTC",
     backendLabel: "bridge-webrtc /bridge/api/session",
-    verificationLine: "The browser is receiving video from the repository's custom WebRTC bridge.",
+    verificationLine:
+      bridgeOverlay.verificationLine || "Negotiation completed, but the browser is still waiting for the first decoded frame.",
     usingFallback: false,
-    statusLine: "custom WebRTC active",
-    reasonLine: "Video is flowing through the repository's bridge-webrtc session while emulator capture details stay behind the scenes.",
-    fpsLine: null,
+    statusLine: "custom WebRTC awaiting first frame",
+    reasonLine: sessionMessage || "The bridge session exists, but the browser has not rendered a frame yet.",
+    fpsLine: bridgeOverlay.fpsLine,
   };
 }
 
@@ -519,8 +578,8 @@ async function parseJsonResponse(resp, label) {
   return data;
 }
 
-function mapBridgeSessionState(sessionState, hasVideo) {
-  if (hasVideo || sessionState === "connected" || sessionState === "media-ready") {
+function mapBridgeSessionState(sessionState, hasVideo, videoStats, receiverStats) {
+  if (hasRenderableVideo(videoStats, receiverStats, hasVideo)) {
     return "connected";
   }
 
@@ -591,8 +650,8 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
   }, [inputRef, sendSessionInput]);
 
   useEffect(() => {
-    onStateChange(mapBridgeSessionState(sessionState, hasVideo));
-  }, [hasVideo, onStateChange, sessionState]);
+    onStateChange(mapBridgeSessionState(sessionState, hasVideo, videoStats, receiverStats));
+  }, [hasVideo, onStateChange, receiverStats, sessionState, videoStats]);
 
   useEffect(() => {
     if (!active) {
@@ -903,6 +962,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
       sessionState,
       sessionMessage,
       sessionInfo,
+      hasVideo,
       logs,
       captureOverlay,
       runtimeEvents,
@@ -1238,7 +1298,7 @@ function App() {
   const webrtcFailureRef = useRef(false);
   const captureOverlay =
     streamMode === "webrtc"
-      ? buildNativeWebrtcOverlay()
+      ? buildCustomWebrtcOverlay(webrtcDiagnostics)
       : buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
   const bridgeCaptureOverlay =
     webrtcDiagnostics?.captureOverlay ||

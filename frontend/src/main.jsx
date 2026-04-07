@@ -453,13 +453,13 @@ function buildCaptureOverlay(sessionInfo, logs, receiverStats) {
 
 function buildNativeWebrtcOverlay() {
   return {
-    requestedLabel: "native WebRTC",
-    activeLabel: "native WebRTC",
-    backendLabel: "emulator gRPC /android.emulation.control.Rtc",
-    verificationLine: "The browser is receiving video from the emulator's built-in WebRTC service.",
+    requestedLabel: "custom WebRTC",
+    activeLabel: "custom WebRTC",
+    backendLabel: "bridge-webrtc /bridge/api/session",
+    verificationLine: "The browser is receiving video from the repository's custom WebRTC bridge.",
     usingFallback: false,
-    statusLine: "native WebRTC active",
-    reasonLine: "Video is flowing directly from the emulator instead of the adb screenrecord bridge.",
+    statusLine: "custom WebRTC active",
+    reasonLine: "Video is flowing through the repository's bridge-webrtc session instead of the PNG fallback.",
     fpsLine: null,
   };
 }
@@ -1466,7 +1466,7 @@ function App() {
 
   async function sendKey(name) {
     try {
-      if (streamMode === "png" || streamMode === "webrtc") {
+      if (streamMode === "png") {
         emuRef.current?.sendKey?.(name);
         return;
       }
@@ -1590,7 +1590,7 @@ function App() {
     if (nextMode === "webrtc") {
       setWebrtcNotice("");
       setEmuState("connecting");
-      setMessage("Connecting to the emulator's native WebRTC stream...");
+      setMessage("Connecting to the emulator's custom WebRTC bridge...");
     }
     setStreamMode(nextMode);
   }
@@ -1640,7 +1640,7 @@ function App() {
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           Stream
           <select value={streamMode} onChange={(event) => handleStreamModeChange(event.target.value)}>
-            <option value="webrtc">Native WebRTC</option>
+            <option value="webrtc">WebRTC (custom bridge)</option>
             <option value="png">PNG</option>
           </select>
         </label>
@@ -1696,28 +1696,14 @@ function App() {
                 onError={(error) => setMessage(`Emulator error: ${String(error)}`)}
               />
             ) : (
-              <Emulator
-                ref={emuRef}
-                uri={window.location.origin}
-                view="webrtc"
-                muted={true}
+              <CustomWebrtcPane
+                active={streamMode === "webrtc"}
                 width={layout.width}
                 height={layout.height}
-                onStateChange={(state) => {
-                  setEmuState(state);
-                  if (state === "connecting") {
-                    setMessage("Connecting to the emulator's native WebRTC stream...");
-                  } else if (state === "connected") {
-                    setMessage("Connected to the emulator's native WebRTC stream.");
-                  } else if (state === "disconnected") {
-                    setMessage("Native WebRTC stream disconnected.");
-                  }
-                }}
-                onError={(error) => {
-                  const text = `Native WebRTC error: ${String(error?.message || error)}`;
-                  setMessage(text);
-                  setWebrtcNotice(text);
-                }}
+                onStateChange={setEmuState}
+                onMessage={handleWebrtcMessage}
+                inputRef={webrtcInputRef}
+                onDiagnosticsChange={setWebrtcDiagnostics}
               />
             )}
           </div>
@@ -1811,10 +1797,10 @@ function App() {
                   WebRTC frame:{" "}
                   {streamMode === "webrtc"
                       ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}${captureOverlay.verificationLine ? ` | ${captureOverlay.verificationLine}` : ""}`
-                      : "switch to Native WebRTC to compare"}
+                      : "switch to WebRTC mode to compare"}
                 </div>
                   <div>
-                    Tip: if the preview below is visible but Native WebRTC stays black, the issue is in the emulator's direct WebRTC path rather than the ADB capture fallback.
+                    Tip: if the preview below is visible but WebRTC mode stays black, inspect the bridge diagnostics below before blaming ADB capture.
                   </div>
                 </div>
               </div>
@@ -1839,18 +1825,18 @@ function App() {
 
           {streamMode === "webrtc" && (
             <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
-              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Native WebRTC diagnostics</div>
+              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>WebRTC diagnostics</div>
               <div style={{ fontSize: 12, lineHeight: 1.7, color: "#d7dfed", marginBottom: 10 }}>
                 <div>Transport: {captureOverlay.backendLabel}</div>
                 <div>Mode: {captureOverlay.statusLine}</div>
                 <div>{captureOverlay.reasonLine}</div>
                 <div>{captureOverlay.verificationLine}</div>
                 <div>
-                  Input path: keyboard, mouse, and touch events are sent through the emulator's native WebRTC/gRPC client.
+                  Input path: keyboard, mouse, and touch events are sent through the custom WebRTC bridge session.
                 </div>
                 <div>
-                  Fallbacks: the PNG preview remains available for comparison, but WebRTC video no longer depends on the adb
-                  `screenrecord` bridge.
+                  Fallbacks: the PNG preview remains available for comparison while the custom bridge manages the live video
+                  session and any adb-based capture fallback behind the scenes.
                 </div>
               </div>
             </div>

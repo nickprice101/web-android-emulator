@@ -508,7 +508,7 @@ async function parseJsonResponse(resp, label) {
     const snippet = text.slice(0, 200);
     if (snippet.includes("no healthy upstream")) {
       throw new Error(
-        `${label} is unavailable because Envoy has no healthy bridge-webrtc upstream. The bridge container likely failed to start or is still booting.`
+        `${label} is unavailable because Envoy could not route to the bridge-webrtc upstream. This is separate from /api/health and usually means the custom bridge route is unavailable, unresolved, or not marked healthy yet.`
       );
     }
     throw new Error(`${label} returned non-JSON: ${snippet}`);
@@ -606,7 +606,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         setBridgeState("checking");
         setSessionState("initializing");
         setSessionInfo(null);
-        setSessionMessage("Checking custom bridge health...");
+        setSessionMessage("Loading custom bridge configuration...");
         setHasVideo(false);
         setLogs([]);
         setRuntimeEvents([]);
@@ -614,11 +614,6 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         setReceiverStats(null);
         setAnswerSdp("");
         onStateChange("connecting");
-
-        const health = await parseJsonResponse(await fetch("/bridge/health"), "/bridge/health");
-        if (!health.ok) {
-          throw new Error("Custom bridge health check failed.");
-        }
 
         const config = await parseJsonResponse(await fetch("/bridge/api/config"), "/bridge/api/config");
         if (cancelled) {

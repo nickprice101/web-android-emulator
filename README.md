@@ -7,7 +7,9 @@ NOTE: The emulator's native WebRTC stream is the default low-latency path. PNG r
 
 The emulator container generates short-lived coturn REST credentials at startup from the shared `TURN_KEY` secret. The browser receives an ephemeral TURN username/password pair, not the long-lived shared secret.
 
-Those credentials are minted when the emulator container starts, so `TURN_TTL` should be longer than your expected emulator uptime between restarts.
+Those credentials are minted when the emulator container starts, so `TURN_TTL` must be longer than your expected emulator uptime between restarts. If the emulator stays up past that TTL, new native WebRTC sessions can still complete signaling but fail to allocate relay media, which shows up as zero inbound RTP followed by an early disconnect.
+
+The stack now defaults `TURN_TTL` to 30 days (`2592000`) so long-lived deployments do not silently age out native TURN credentials after 24 hours.
 
 ## Native WebRTC path
 

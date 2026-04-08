@@ -30,7 +30,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "adb devices 2>/dev/null | awk 'NR>1 && $2==\"device\" {found=1} END {exit found ? 0 : 1}' && adb -s emulator-5554 shell getprop init.svc.bootanim 2>/dev/null | tr -d '\\r' | grep -q '^stopped$'",
+          "adb devices 2>/dev/null | awk 'NR>1 && $2==\"device\" {found=1} END {exit found ? 0 : 1}' && adb -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r' | grep -q '^1$'",
         ]
       interval: 10s
       timeout: 5s

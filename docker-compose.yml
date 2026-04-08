@@ -76,6 +76,38 @@ services:
         aliases:
           - apkbridge
 
+  bridge-webrtc:
+    container_name: google-emu-bridge-webrtc
+    build:
+      context: ./bridge-webrtc
+    image: google-emu-bridge-webrtc:latest
+    environment:
+      PORT: "8090"
+      CAPTURE_MODE: "native-rtc"
+      EMULATOR_GRPC_WEB_URL: "http://envoy:8080"
+      APKBRIDGE_BASE_URL: "http://apkbridge:5000"
+      TURN_HOST: "turn.corsicanescape.com"
+      TURN_PORT: "443"
+      TURN_PROTOCOL: "tcp"
+      TURN_SCHEME: "turns"
+      TURN_KEY: "PLACEHOLDER_TURN_KEY"
+      TURN_TTL: "2592000"
+      TURN_USERNAME_SUFFIX: "emuuser"
+    expose:
+      - "8090"
+    depends_on:
+      - emulator
+      - envoy
+      - apkbridge
+    restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    networks:
+      google-emu:
+        aliases:
+          - bridge-webrtc
+
   envoy:
     container_name: google-emu-envoy
     image: envoyproxy/envoy:v1.31-latest
@@ -83,6 +115,7 @@ services:
       - emulator
       - frontend
       - apkbridge
+      - bridge-webrtc
     ports:
       - "18080:8080"
     volumes:

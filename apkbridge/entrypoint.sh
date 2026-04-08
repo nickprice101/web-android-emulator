@@ -12,8 +12,10 @@ SLEEP_SECS="${ADB_CONNECT_RETRY_SECONDS:-2}"
 ATTEMPT=1
 
 while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
-  if adb connect "$ADB_TARGET" >/dev/null 2>&1; then
-    echo "ADB connected to $ADB_TARGET on attempt $ATTEMPT/$MAX_ATTEMPTS"
+  adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
+
+  if adb -s "$ADB_TARGET" get-state >/dev/null 2>&1; then
+    echo "ADB transport ready for $ADB_TARGET on attempt $ATTEMPT/$MAX_ATTEMPTS"
     break
   fi
 
@@ -26,8 +28,6 @@ if [ "$ATTEMPT" -gt "$MAX_ATTEMPTS" ]; then
   echo "Failed to connect to $ADB_TARGET after $MAX_ATTEMPTS attempts"
   exit 1
 fi
-
-adb -s "$ADB_TARGET" wait-for-device
 
 echo "Connected. Disabling background noise..."
 adb -s "$ADB_TARGET" shell svc wifi disable || true

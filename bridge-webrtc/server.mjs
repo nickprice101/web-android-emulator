@@ -9,10 +9,11 @@ import wrtc from "@roamhq/wrtc";
 import { buildFfmpegArgs } from "./ffmpeg-config.mjs";
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, nonstandard = {} } = wrtc;
-const { RTCVideoSource } = nonstandard;
+const { RTCVideoSource, RTCVideoSink } = nonstandard;
 
 const port = Number.parseInt(process.env.PORT || "8090", 10);
 const captureMode = process.env.CAPTURE_MODE || "adb-screencap";
+const emulatorGrpcWebUrl = process.env.EMULATOR_GRPC_WEB_URL || "http://envoy:8080";
 const apkbridgeBaseUrl = process.env.APKBRIDGE_BASE_URL || "http://apkbridge:5000";
 const apkbridgeFramePath = process.env.APKBRIDGE_FRAME_PATH || "/frame";
 const apkbridgeScreenrecordPath = process.env.APKBRIDGE_SCREENRECORD_PATH || "/screenrecord";
@@ -769,6 +770,9 @@ function writeToStream(stream, chunk) {
 }
 
 function captureSourceDescription() {
+  if (captureMode === "native-rtc") {
+    return "emulator gRPC-Web RTC -> RTCVideoSink -> RTCVideoSource";
+  }
   if (captureMode === "adb-screenrecord") {
     return "adb screenrecord -> ffmpeg -> RTCVideoSource";
   }
@@ -779,6 +783,9 @@ function captureSourceDescription() {
 }
 
 function captureSourceDescriptionForMode(mode) {
+  if (mode === "native-rtc") {
+    return "emulator gRPC-Web RTC -> RTCVideoSink -> RTCVideoSource";
+  }
   if (mode === "adb-screenrecord") {
     return "adb screenrecord -> ffmpeg -> RTCVideoSource";
   }

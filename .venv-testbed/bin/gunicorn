@@ -1,0 +1,6 @@
+#!/home/runner/work/web-android-emulator/web-android-emulator/.venv-testbed/bin/python3
+import sys
+from gunicorn.app.wsgiapp import run
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(run())

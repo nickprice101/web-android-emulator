@@ -21,6 +21,9 @@ python -m unittest discover -s apkbridge/tests -v
 echo "[testbed] running bridge-webrtc unit tests"
 node --test bridge-webrtc/test/*.test.mjs
 
+echo "[testbed] running native WebRTC configuration checks"
+node scripts/test-native-webrtc.mjs
+
 echo "[testbed] running frontend build"
 npm --prefix frontend run build
 

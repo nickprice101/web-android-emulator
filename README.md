@@ -44,6 +44,25 @@ http://YOUR_HOST:18080
 
 Native WebRTC should be the primary experience. PNG mode remains available as a fallback if you need to compare behavior or recover while debugging.
 
+## Test framework testbed
+
+To run the emulator applications under a repeatable test framework, use the repository testbed script. It bootstraps dependencies and executes backend + bridge + frontend checks in one pass.
+
+```bash
+bash scripts/testbed.sh
+```
+
+What the testbed runs:
+
+1. `npm --prefix frontend ci`
+2. `npm --prefix bridge-webrtc ci`
+3. Python virtualenv bootstrap at `.venv-testbed` with `apkbridge/requirements.txt`
+4. `python -m unittest discover -s apkbridge/tests -v`
+5. `node --test bridge-webrtc/test/*.test.mjs`
+6. `npm --prefix frontend run build`
+
+This is suitable for local smoke testing and CI pre-merge validation.
+
 ## Internet access defaults
 
 The Docker compose config pins public DNS resolvers (`1.1.1.1`, `8.8.8.8`) on all services and starts the emulator with an explicit `-dns-server` list. This keeps both the Linux containers and the Android guest able to resolve and reach external hosts for realistic app testing.

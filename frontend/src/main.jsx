@@ -2026,16 +2026,32 @@ function App() {
 
       jsep._handleStart = (signal) => {
         const startSummary = summarizeIceServers(signal?.start?.iceServers || []);
+        const shouldPreferRelay = startSummary.hasTurn;
+        const patchedSignal =
+          signal?.start && shouldPreferRelay && signal.start.iceTransportPolicy !== "relay"
+            ? {
+                ...signal,
+                start: {
+                  ...signal.start,
+                  iceTransportPolicy: "relay",
+                },
+              }
+            : signal;
         pushNativeEvent("Native emulator advertised RTC configuration", {
           iceServers: startSummary.count,
           hasTurn: startSummary.hasTurn,
           hasStun: startSummary.hasStun,
+          iceTransportPolicy:
+            patchedSignal?.start?.iceTransportPolicy || signal?.start?.iceTransportPolicy || "all",
         });
         setNativeDiagnostics((previous) => ({
           ...previous,
           startIceServers: startSummary,
         }));
-        originalHandleStart(signal);
+        if (patchedSignal !== signal) {
+          pushNativeEvent("Forcing native browser ICE transport policy to relay because TURN is configured");
+        }
+        originalHandleStart(patchedSignal);
       };
 
       jsep._handleSignal = (signal) => {

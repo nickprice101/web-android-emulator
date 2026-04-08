@@ -30,8 +30,8 @@ const screenrecordDecodeGraceTimeoutMs = Math.max(
   1000,
   Number.parseInt(process.env.CAPTURE_SCREENRECORD_DECODE_GRACE_TIMEOUT_MS || "15000", 10)
 );
-const turnKey = process.env.TURN_KEY || process.env.TURN_SECRET || "";
-const turnSecretSource = process.env.TURN_KEY ? "TURN_KEY" : process.env.TURN_SECRET ? "TURN_SECRET" : null;
+const turnKey = process.env.TURN_KEY || "";
+const turnSecretSource = process.env.TURN_KEY ? "TURN_KEY" : null;
 const turnHost = process.env.TURN_HOST || "";
 const turnBridgeHost = process.env.TURN_BRIDGE_HOST?.trim() || "";
 const turnBridgeHostIsIp = Boolean(turnBridgeHost && net.isIP(turnBridgeHost));
@@ -190,10 +190,6 @@ async function resolveTurnServerUrls() {
 
 function buildTurnWarnings() {
   const warnings = [];
-
-  if (process.env.TURN_SECRET && !process.env.TURN_KEY) {
-    warnings.push("TURN_SECRET is deprecated here. Set TURN_KEY so the bridge and emulator use the documented secret name.");
-  }
 
   if (!turnHost) {
     warnings.push("TURN_HOST is not configured, so relay ICE cannot be used.");

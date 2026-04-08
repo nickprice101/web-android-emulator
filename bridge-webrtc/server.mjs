@@ -686,14 +686,12 @@ function toServiceUrl(path) {
 
 async function fetchServiceJson(path, options = {}) {
   const timeoutMs = options.timeoutMs ?? 5000;
-  const { timeoutMs: _ignored, ...fetchOptions } = options;
-  const signal = AbortSignal.timeout(timeoutMs);
   const response = await fetch(toServiceUrl(path), {
-    ...fetchOptions,
-    signal,
+    ...options,
+    signal: AbortSignal.timeout(timeoutMs),
     headers: {
       Accept: "application/json",
-      ...(fetchOptions.headers || {}),
+      ...(options.headers || {}),
     },
   });
 
@@ -2571,20 +2569,18 @@ const server = http.createServer(async (req, res) => {
   const rawPath = req.url || "(none)";
   console.log(`[http] ${method} ${rawPath}`);
 
-  const finish = (status) => {
-    console.log(`[http] ${method} ${rawPath} -> ${status} (${Date.now() - startMs}ms)`);
-  };
+  res.on("finish", () => {
+    console.log(`[http] ${method} ${rawPath} -> ${res.statusCode} (${Date.now() - startMs}ms)`);
+  });
 
   try {
     if (!req.url) {
       sendJson(res, 400, { ok: false, error: "Missing URL" });
-      finish(400);
       return;
     }
 
     if (req.method === "OPTIONS") {
       handleOptions(res);
-      finish(204);
       return;
     }
 
@@ -2603,7 +2599,6 @@ const server = http.createServer(async (req, res) => {
         turnServerUrl: buildTurnServerUrl(),
         warnings: turnWarnings,
       });
-      finish(200);
       return;
     }
 
@@ -2668,7 +2663,6 @@ const server = http.createServer(async (req, res) => {
             : null,
       },
     });
-    finish(200);
     return;
   }
 
@@ -2678,7 +2672,6 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       if (!body?.sdp || !body?.type) {
         sendJson(res, 400, { ok: false, error: "Expected SDP offer payload with type and sdp." });
-        finish(400);
         return;
       }
 
@@ -2692,16 +2685,13 @@ const server = http.createServer(async (req, res) => {
         ...sessionPayload(session),
         answer,
       });
-      finish(201);
     } catch (error) {
       console.error(`[session] buildAnswer failed: ${error.message}`);
       if (session) {
         closeSession(session, "failed", error.message);
         sendJson(res, 500, { ok: false, error: error.message, ...sessionPayload(session) });
-        finish(500);
       } else {
         sendJson(res, 400, { ok: false, error: error.message });
-        finish(400);
       }
     }
     return;
@@ -2713,13 +2703,11 @@ const server = http.createServer(async (req, res) => {
     const session = sessions.get(sessionId);
     if (!session) {
       sendJson(res, 404, { ok: false, error: "Unknown session" });
-      finish(404);
       return;
     }
 
     if (req.method === "GET" && !action) {
       sendJson(res, 200, { ok: true, ...sessionPayload(session) });
-      finish(200);
       return;
     }
 
@@ -2741,7 +2729,6 @@ const server = http.createServer(async (req, res) => {
         session.listeners.delete(res);
         console.log(`[session:${session.id.slice(0, 8)}] SSE client disconnected`);
       });
-      finish(200);
       return;
     }
 
@@ -2767,11 +2754,9 @@ const server = http.createServer(async (req, res) => {
           translated,
           upstream,
         });
-        finish(202);
       } catch (error) {
         recordSessionLog(session, "error", "Failed to deliver input", { error: error.message });
         sendJson(res, 400, { ok: false, error: error.message });
-        finish(400);
       }
       return;
     }
@@ -2779,13 +2764,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "DELETE" && !action) {
       destroySession(session, "closed", "Session deleted by client.");
       sendJson(res, 200, { ok: true, id: sessionId, state: "closed" });
-      finish(200);
       return;
     }
   }
 
     sendJson(res, 404, { ok: false, error: "Not found" });
-    finish(404);
   } catch (err) {
     console.error(`[http] unhandled error in ${method} ${rawPath}: ${err.stack || err.message}`);
     if (!res.headersSent) {
@@ -2817,6 +2800,7 @@ server.listen(port, "0.0.0.0", () => {
 
 process.on("uncaughtException", (err) => {
   console.error(`[process] uncaughtException: ${err.stack || err.message}`);
+  process.exit(1);
 });
 
 process.on("unhandledRejection", (reason) => {

@@ -7,6 +7,12 @@ const RAW_FRAME_URL = "/api/frame";
 const MIN_RENDERABLE_VIDEO_DIMENSION = 16;
 const NATIVE_WEBRTC_RECOVERY_DELAY_MS = 1500;
 const NATIVE_WEBRTC_MAX_RETRIES = 3;
+// Public STUN server used as a fallback when the emulator advertises no ICE
+// servers.  Set VITE_FALLBACK_STUN_URL at build time to override.
+const FALLBACK_STUN_URL =
+  typeof import.meta !== "undefined" && import.meta.env?.VITE_FALLBACK_STUN_URL
+    ? import.meta.env.VITE_FALLBACK_STUN_URL
+    : "stun:stun.l.google.com:19302";
 function clampRatio(value) {
   if (!Number.isFinite(value)) {
     return null;
@@ -2071,7 +2077,7 @@ function App() {
         // the browser at least gets srflx candidates when TURN is not configured.
         const injectedIceServers =
           signal?.start && !startSummary.hasTurn && !startSummary.hasStun
-            ? [{ urls: "stun:stun.l.google.com:19302" }]
+            ? [{ urls: FALLBACK_STUN_URL }]
             : null;
 
         const baseSignal =

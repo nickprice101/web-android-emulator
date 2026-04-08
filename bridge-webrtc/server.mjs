@@ -1774,7 +1774,7 @@ class EmulatorVideoCapture {
 // ---------------------------------------------------------------------------
 
 function grpcWebEncodeFrame(messageBytes) {
-  const frame = Buffer.allocUnsafe(5 + messageBytes.length);
+  const frame = Buffer.alloc(5 + messageBytes.length);
   frame[0] = 0; // not compressed
   frame.writeUInt32BE(messageBytes.length, 1);
   messageBytes.copy(frame, 5);
@@ -1850,19 +1850,26 @@ function grpcWebServerStream(baseUrl, path, reqBytes, onFrame, signal) {
       },
     },
     (res) => {
-      let buf = Buffer.alloc(0);
-      res.on("data", (chunk) => {
-        buf = Buffer.concat([buf, chunk]);
+      // incomplete bytes that don't yet form a complete frame
+      let partial = Buffer.alloc(0);
+
+      const processFrames = () => {
         for (;;) {
-          const frame = grpcWebParseNextFrame(buf);
+          const frame = grpcWebParseNextFrame(partial);
           if (!frame) {
             break;
           }
-          buf = buf.slice(frame.consumed);
+          partial = partial.slice(frame.consumed);
           if (!frame.isTrailer) {
             onFrame(frame.data);
           }
         }
+      };
+
+      res.on("data", (chunk) => {
+        // Accumulate with leftover partial bytes and scan for complete frames.
+        partial = partial.length > 0 ? Buffer.concat([partial, chunk]) : chunk;
+        processFrames();
       });
       res.on("end", () => onFrame(null));
       res.on("error", (err) => onFrame(null, err));

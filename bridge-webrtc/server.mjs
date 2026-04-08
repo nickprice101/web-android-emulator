@@ -685,8 +685,10 @@ function toServiceUrl(path) {
 }
 
 async function fetchServiceJson(path, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 5000;
   const response = await fetch(toServiceUrl(path), {
     ...options,
+    signal: AbortSignal.timeout(timeoutMs),
     headers: {
       Accept: "application/json",
       ...(options.headers || {}),
@@ -967,6 +969,15 @@ function recordSessionLog(session, level, message, details) {
     session.logs.shift();
   }
   broadcastSessionLog(session, entry);
+  const detailStr = details ? ` ${JSON.stringify(details)}` : "";
+  const prefix = `[session:${session.id.slice(0, 8)}]`;
+  if (level === "error") {
+    console.error(`${prefix} ${message}${detailStr}`);
+  } else if (level === "warn") {
+    console.warn(`${prefix} ${message}${detailStr}`);
+  } else {
+    console.log(`${prefix} ${message}${detailStr}`);
+  }
   return entry;
 }
 
@@ -2038,6 +2049,7 @@ class NativeRtcVideoRelay {
   }
 
   async _relayLoop() {
+    console.log(`[session:${this.session.id.slice(0, 8)}] native-rtc: calling requestRtcStream on ${emulatorGrpcWebUrl}`);
     const rtcIdBytes = await grpcWebUnary(
       emulatorGrpcWebUrl,
       "/android.emulation.control.Rtc/requestRtcStream",
@@ -2049,6 +2061,7 @@ class NativeRtcVideoRelay {
       guid: this.guid,
     });
 
+    console.log(`[session:${this.session.id.slice(0, 8)}] native-rtc: opening receiveJsepMessages stream, guid=${this.guid}`);
     await new Promise((resolve, reject) => {
       grpcWebServerStream(
         emulatorGrpcWebUrl,
@@ -2070,6 +2083,8 @@ class NativeRtcVideoRelay {
           } catch {
             return;
           }
+          const signalType = signal.start ? "start" : signal.sdp ? "sdp" : signal.candidate ? "candidate" : signal.bye ? "bye" : "unknown";
+          console.log(`[session:${this.session.id.slice(0, 8)}] native-rtc: received JSEP signal type=${signalType}`);
           this._handleJsepSignal(signal).catch((handleErr) => {
             recordSessionLog(this.session, "warn", "native-rtc: JSEP signal error", {
               error: handleErr.message,
@@ -2549,42 +2564,55 @@ function handleOptions(res) {
 }
 
 const server = http.createServer(async (req, res) => {
-  if (!req.url) {
-    sendJson(res, 400, { ok: false, error: "Missing URL" });
-    return;
-  }
+  const startMs = Date.now();
+  const method = req.method || "?";
+  const rawPath = req.url || "(none)";
+  console.log(`[http] ${method} ${rawPath}`);
 
-  if (req.method === "OPTIONS") {
-    handleOptions(res);
-    return;
-  }
+  res.on("finish", () => {
+    console.log(`[http] ${method} ${rawPath} -> ${res.statusCode} (${Date.now() - startMs}ms)`);
+  });
 
-  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-
-  if (req.method === "GET" && url.pathname === "/health") {
-    sendJson(res, 200, {
-      ok: true,
-      service: "bridge-webrtc",
-      signaling: "https-rest+sse",
-      captureMode,
-      captureFps,
-      sessions: sessions.size,
-      turnConfigured: hasConfiguredTurnSecret,
-      turnSecretSource,
-      turnServerUrl: buildTurnServerUrl(),
-      warnings: turnWarnings,
-    });
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/config") {
-    let upstreamScreen = null;
-    try {
-      const info = await fetchServiceJson(apkbridgeDeviceInfoPath);
-      upstreamScreen = info.screen || null;
-    } catch {
-      upstreamScreen = null;
+  try {
+    if (!req.url) {
+      sendJson(res, 400, { ok: false, error: "Missing URL" });
+      return;
     }
+
+    if (req.method === "OPTIONS") {
+      handleOptions(res);
+      return;
+    }
+
+    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+    if (req.method === "GET" && url.pathname === "/health") {
+      sendJson(res, 200, {
+        ok: true,
+        service: "bridge-webrtc",
+        signaling: "https-rest+sse",
+        captureMode,
+        captureFps,
+        sessions: sessions.size,
+        turnConfigured: hasConfiguredTurnSecret,
+        turnSecretSource,
+        turnServerUrl: buildTurnServerUrl(),
+        warnings: turnWarnings,
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config") {
+      console.log("[config] fetching device-info from apkbridge...");
+      let upstreamScreen = null;
+      try {
+        const info = await fetchServiceJson(apkbridgeDeviceInfoPath);
+        upstreamScreen = info.screen || null;
+        console.log(`[config] apkbridge device-info ok, screen=${JSON.stringify(upstreamScreen)}`);
+      } catch (err) {
+        console.warn(`[config] apkbridge device-info failed (non-fatal): ${err.message}`);
+        upstreamScreen = null;
+      }
 
     sendJson(res, 200, {
       ok: true,
@@ -2647,14 +2675,18 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      console.log("[session] creating new session from browser offer");
       session = createSession({ type: body.type, sdp: body.sdp });
+      console.log(`[session:${session.id.slice(0, 8)}] building answer (captureMode=${captureMode})`);
       const answer = await buildAnswer(session);
+      console.log(`[session:${session.id.slice(0, 8)}] answer ready, state=${session.state}`);
       sendJson(res, 201, {
         ok: true,
         ...sessionPayload(session),
         answer,
       });
     } catch (error) {
+      console.error(`[session] buildAnswer failed: ${error.message}`);
       if (session) {
         closeSession(session, "failed", error.message);
         sendJson(res, 500, { ok: false, error: error.message, ...sessionPayload(session) });
@@ -2695,6 +2727,7 @@ const server = http.createServer(async (req, res) => {
       req.on("close", () => {
         clearInterval(keepAlive);
         session.listeners.delete(res);
+        console.log(`[session:${session.id.slice(0, 8)}] SSE client disconnected`);
       });
       return;
     }
@@ -2735,9 +2768,42 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  sendJson(res, 404, { ok: false, error: "Not found" });
+    sendJson(res, 404, { ok: false, error: "Not found" });
+  } catch (err) {
+    console.error(`[http] unhandled error in ${method} ${rawPath}: ${err.stack || err.message}`);
+    if (!res.headersSent) {
+      sendJson(res, 500, { ok: false, error: "Internal server error" });
+    }
+  }
 });
 
 server.listen(port, "0.0.0.0", () => {
   console.log(`bridge-webrtc listening on ${port}`);
+  console.log(`  captureMode        : ${captureMode}`);
+  console.log(`  captureFps         : ${captureFps}`);
+  console.log(`  emulatorGrpcWebUrl : ${emulatorGrpcWebUrl}`);
+  console.log(`  apkbridgeBaseUrl   : ${apkbridgeBaseUrl}`);
+  console.log(`  TURN configured    : ${hasConfiguredTurnSecret}`);
+  if (hasConfiguredTurnSecret) {
+    console.log(`  TURN server url    : ${buildTurnServerUrl()}`);
+    console.log(`  TURN bridge host   : ${turnBridgeHost || "(same as TURN_HOST)"}`);
+    console.log(`  preferRelay        : ${preferRelayTransport}`);
+  } else {
+    console.log(`  TURN              : not configured (TURN_KEY is missing or placeholder)`);
+  }
+  if (turnWarnings.length > 0) {
+    for (const w of turnWarnings) {
+      console.warn(`  [warn] ${w}`);
+    }
+  }
+});
+
+process.on("uncaughtException", (err) => {
+  console.error(`[process] uncaughtException: ${err.stack || err.message}`);
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.stack || reason.message : String(reason);
+  console.error(`[process] unhandledRejection: ${msg}`);
 });

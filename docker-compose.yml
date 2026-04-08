@@ -26,16 +26,6 @@ services:
       - "5555"
     ports:
       - "15555:5555"
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "adb devices 2>/dev/null | awk 'NR>1 && $2==\"device\" {found=1} END {exit found ? 0 : 1}' && adb -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\\r' | grep -q '^1$'",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 18
-      start_period: 60s
     restart: unless-stopped
     dns:
       - 1.1.1.1
@@ -76,8 +66,7 @@ services:
     expose:
       - "5000"
     depends_on:
-      emulator:
-        condition: service_healthy
+      - emulator
     restart: unless-stopped
     dns:
       - 1.1.1.1

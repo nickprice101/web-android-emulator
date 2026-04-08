@@ -628,6 +628,13 @@ function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDia
   }
 
   if ((emuState === "disconnected" || emuState === "error") && !peerLikelyActive) {
+    if (startSummary && !startSummary.hasTurn && !startSummary.hasStun) {
+      return {
+        code: "missing-ice-servers",
+        summary:
+          "The emulator created a native WebRTC session without advertising any STUN or TURN servers, so remote browsers may have no reachable ICE path.",
+      };
+    }
     return {
       code: "disconnected",
       summary: "The native emulator session dropped before the browser rendered a usable frame.",

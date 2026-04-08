@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-TURN_SHARED_SECRET="${TURN_KEY:-${TURN_SECRET:-}}"
+TURN_SHARED_SECRET="${TURN_KEY:-}"
 
 if [ -n "${TURN_SHARED_SECRET:-}" ]; then
   : "${TURN_HOST:?TURN_HOST must be set when TURN_KEY is configured}"

@@ -709,6 +709,18 @@ function isTinyVideoFrame(videoStats) {
   );
 }
 
+function isNativeUpstreamSendingVideo(peerStats) {
+  if (!peerStats) {
+    return false;
+  }
+
+  return (
+    Number(peerStats.packetsReceived ?? 0) > 0 ||
+    Number(peerStats.bytesReceived ?? 0) > 0 ||
+    Number(peerStats.framesReceived ?? 0) > 0
+  );
+}
+
 function buildCustomWebrtcOverlay(webrtcDiagnostics) {
   const bridgeOverlay = buildCaptureOverlay(
     webrtcDiagnostics?.sessionInfo,
@@ -1697,6 +1709,7 @@ function App() {
   const ffmpegStderrSummary = webrtcDiagnostics?.ffmpegStderrSummary || "No ffmpeg stderr yet.";
   const nativeFailureReason = buildNativeFailureReason(emuState, nativeVideoStats, nativeHasVideoFrame, nativeDiagnostics);
   const nativeMissingTurnNotice = buildMissingTurnNotice(nativeDiagnostics.startIceServers);
+  const nativeUpstreamSending = isNativeUpstreamSendingVideo(nativeDiagnostics.peerStats);
   const nativeRuntimeEventSummary =
     nativeDiagnostics.runtimeEvents.length > 0
       ? nativeDiagnostics.runtimeEvents.map(formatRuntimeEvent).join("\n")
@@ -2948,6 +2961,12 @@ function App() {
                 <div>Mode: {nativeWebrtcOverlay.statusLine}</div>
                 <div>{nativeWebrtcOverlay.reasonLine}</div>
                 <div>{nativeWebrtcOverlay.verificationLine}</div>
+                <div>
+                  Native upstream sending video:{" "}
+                  {nativeUpstreamSending
+                    ? "yes (inbound RTP/video counters are increasing)"
+                    : "no (no inbound RTP/video counters yet)"}
+                </div>
                 <div>Diagnosis: {nativeFailureReason.summary}</div>
                 <div>
                   ICE servers: {formatIceServerSummary(nativeDiagnostics.startIceServers)}

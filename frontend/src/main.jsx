@@ -604,6 +604,16 @@ function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDia
   const selectedPair = peerStats?.selectedCandidatePair || null;
   const connectionState = peerStates?.connectionState || "";
   const iceConnectionState = peerStates?.iceConnectionState || "";
+  const peerLikelyActive =
+    connectionState === "connecting" ||
+    connectionState === "connected" ||
+    iceConnectionState === "checking" ||
+    iceConnectionState === "connected" ||
+    iceConnectionState === "completed" ||
+    packetsReceived > 0 ||
+    bytesReceived > 0 ||
+    framesReceived > 0 ||
+    framesDecoded > 0;
   const transportConnected =
     connectionState === "connected" ||
     iceConnectionState === "connected" ||
@@ -617,7 +627,7 @@ function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDia
     };
   }
 
-  if (emuState === "disconnected" || emuState === "error") {
+  if ((emuState === "disconnected" || emuState === "error") && !peerLikelyActive) {
     return {
       code: "disconnected",
       summary: "The native emulator session dropped before the browser rendered a usable frame.",

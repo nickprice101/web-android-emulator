@@ -7,6 +7,12 @@ const RAW_FRAME_URL = "/api/frame";
 const MIN_RENDERABLE_VIDEO_DIMENSION = 16;
 const NATIVE_WEBRTC_RECOVERY_DELAY_MS = 1500;
 const NATIVE_WEBRTC_MAX_RETRIES = 3;
+// Public STUN server used as a fallback when the emulator advertises no ICE
+// servers.  Set VITE_FALLBACK_STUN_URL at build time to override.
+const FALLBACK_STUN_URL =
+  typeof import.meta !== "undefined" && import.meta.env?.VITE_FALLBACK_STUN_URL
+    ? import.meta.env.VITE_FALLBACK_STUN_URL
+    : "stun:stun.l.google.com:19302";
 function clampRatio(value) {
   if (!Number.isFinite(value)) {
     return null;
@@ -705,13 +711,20 @@ function hasRenderableVideo(videoStats, receiverStats, hasVideo = false) {
   const framesReceived = Number(receiverStats?.framesReceived ?? 0);
   const framesDecoded = Number(receiverStats?.framesDecoded ?? 0);
 
+  // A placeholder track (e.g. the emulator's initial 2×2 keep-alive frame) may
+  // increment framesDecoded without delivering a real emulator surface.  Guard
+  // against that by requiring the video element to have settled on real
+  // dimensions before we treat decoded frames as proof of a valid stream.
+  const hasValidDimensions =
+    videoWidth >= MIN_RENDERABLE_VIDEO_DIMENSION &&
+    videoHeight >= MIN_RENDERABLE_VIDEO_DIMENSION;
+
   return (
     Boolean(hasVideo) ||
-    framesDecoded > 0 ||
+    (framesDecoded > 0 && hasValidDimensions) ||
     (framesReceived > 0 &&
       readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
-      videoWidth >= MIN_RENDERABLE_VIDEO_DIMENSION &&
-      videoHeight >= MIN_RENDERABLE_VIDEO_DIMENSION)
+      hasValidDimensions)
   );
 }
 
@@ -2057,20 +2070,46 @@ function App() {
       jsep._handleStart = (signal) => {
         const startSummary = summarizeIceServers(signal?.start?.iceServers || []);
         const shouldPreferRelay = startSummary.hasTurn;
-        const patchedSignal =
-          signal?.start && shouldPreferRelay && signal.start.iceTransportPolicy !== "relay"
+
+        // When the emulator advertises no ICE servers at all the browser has no
+        // way to gather reflexive candidates, so the peer connection stays stuck
+        // on loopback/private host candidates.  Inject a public STUN server so
+        // the browser at least gets srflx candidates when TURN is not configured.
+        const injectedIceServers =
+          signal?.start && !startSummary.hasTurn && !startSummary.hasStun
+            ? [{ urls: FALLBACK_STUN_URL }]
+            : null;
+
+        const baseSignal =
+          injectedIceServers
             ? {
                 ...signal,
                 start: {
                   ...signal.start,
-                  iceTransportPolicy: "relay",
+                  iceServers: [
+                    ...(signal.start?.iceServers || []),
+                    ...injectedIceServers,
+                  ],
                 },
               }
             : signal;
+
+        const patchedSignal =
+          baseSignal?.start && shouldPreferRelay && baseSignal.start.iceTransportPolicy !== "relay"
+            ? {
+                ...baseSignal,
+                start: {
+                  ...baseSignal.start,
+                  iceTransportPolicy: "relay",
+                },
+              }
+            : baseSignal;
+
         pushNativeEvent("Native emulator advertised RTC configuration", {
           iceServers: startSummary.count,
           hasTurn: startSummary.hasTurn,
           hasStun: startSummary.hasStun,
+          injectedStun: Boolean(injectedIceServers),
           iceTransportPolicy:
             patchedSignal?.start?.iceTransportPolicy || signal?.start?.iceTransportPolicy || "all",
         });
@@ -2078,7 +2117,10 @@ function App() {
           ...previous,
           startIceServers: startSummary,
         }));
-        if (patchedSignal !== signal) {
+        if (injectedIceServers) {
+          pushNativeEvent("Injected public STUN server because emulator advertised no ICE servers");
+        }
+        if (patchedSignal !== baseSignal) {
           pushNativeEvent("Forcing native browser ICE transport policy to relay because TURN is configured");
         }
         originalHandleStart(patchedSignal);
@@ -2614,6 +2656,10 @@ function App() {
       setNativeVideoStats(null);
       setNativeHasVideoFrame(false);
       setNativeWebrtcKey((value) => value + 1);
+    } else if (nextMode === "custom-webrtc") {
+      setWebrtcNotice("");
+      setEmuState("connecting");
+      setMessage("Connecting via custom WebRTC bridge...");
     } else {
       setWebrtcNotice("");
       setMessage("Switching to PNG preview mode...");
@@ -2667,6 +2713,7 @@ function App() {
           Stream
           <select value={streamMode} onChange={(event) => handleStreamModeChange(event.target.value)}>
             <option value="native-webrtc">WebRTC (native emulator)</option>
+            <option value="custom-webrtc">WebRTC (custom bridge)</option>
             <option value="png">PNG</option>
           </select>
         </label>
@@ -2711,25 +2758,37 @@ function App() {
               WebkitUserSelect: "none",
             }}
           >
-            <Emulator
-              key={streamMode === "native-webrtc" ? `native-webrtc-${nativeWebrtcKey}` : `png-${nativeWebrtcKey}`}
-              ref={emuRef}
-              uri={window.location.origin}
-              view={streamMode === "png" ? "png" : "webrtc"}
-              muted={true}
-              width={layout.width}
-              height={layout.height}
-              onStateChange={(state) => setEmuState(state)}
-              onError={(error) => {
-                const text = String(error);
-                setNativeDiagnostics((previous) => ({
-                  ...previous,
-                  lastError: text,
-                  runtimeEvents: appendBoundedEvent(previous.runtimeEvents, "Native emulator component error", { error: text }),
-                }));
-                setMessage(`Emulator error: ${text}`);
-              }}
-            />
+            {streamMode === "custom-webrtc" ? (
+              <CustomWebrtcPane
+                active={true}
+                width={layout.width}
+                height={layout.height}
+                onStateChange={(state) => setEmuState(state)}
+                onMessage={handleWebrtcMessage}
+                inputRef={webrtcInputRef}
+                onDiagnosticsChange={setWebrtcDiagnostics}
+              />
+            ) : (
+              <Emulator
+                key={streamMode === "native-webrtc" ? `native-webrtc-${nativeWebrtcKey}` : `png-${nativeWebrtcKey}`}
+                ref={emuRef}
+                uri={window.location.origin}
+                view={streamMode === "png" ? "png" : "webrtc"}
+                muted={true}
+                width={layout.width}
+                height={layout.height}
+                onStateChange={(state) => setEmuState(state)}
+                onError={(error) => {
+                  const text = String(error);
+                  setNativeDiagnostics((previous) => ({
+                    ...previous,
+                    lastError: text,
+                    runtimeEvents: appendBoundedEvent(previous.runtimeEvents, "Native emulator component error", { error: text }),
+                  }));
+                  setMessage(`Emulator error: ${text}`);
+                }}
+              />
+            )}
           </div>
         </div>
 

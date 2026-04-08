@@ -9,10 +9,11 @@ import wrtc from "@roamhq/wrtc";
 import { buildFfmpegArgs } from "./ffmpeg-config.mjs";
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, nonstandard = {} } = wrtc;
-const { RTCVideoSource } = nonstandard;
+const { RTCVideoSource, RTCVideoSink } = nonstandard;
 
 const port = Number.parseInt(process.env.PORT || "8090", 10);
 const captureMode = process.env.CAPTURE_MODE || "adb-screencap";
+const emulatorGrpcWebUrl = process.env.EMULATOR_GRPC_WEB_URL || "http://envoy:8080";
 const apkbridgeBaseUrl = process.env.APKBRIDGE_BASE_URL || "http://apkbridge:5000";
 const apkbridgeFramePath = process.env.APKBRIDGE_FRAME_PATH || "/frame";
 const apkbridgeScreenrecordPath = process.env.APKBRIDGE_SCREENRECORD_PATH || "/screenrecord";
@@ -769,6 +770,9 @@ function writeToStream(stream, chunk) {
 }
 
 function captureSourceDescription() {
+  if (captureMode === "native-rtc") {
+    return "emulator gRPC-Web RTC -> RTCVideoSink -> RTCVideoSource";
+  }
   if (captureMode === "adb-screenrecord") {
     return "adb screenrecord -> ffmpeg -> RTCVideoSource";
   }
@@ -779,6 +783,9 @@ function captureSourceDescription() {
 }
 
 function captureSourceDescriptionForMode(mode) {
+  if (mode === "native-rtc") {
+    return "emulator gRPC-Web RTC -> RTCVideoSink -> RTCVideoSource";
+  }
   if (mode === "adb-screenrecord") {
     return "adb screenrecord -> ffmpeg -> RTCVideoSource";
   }
@@ -1762,14 +1769,432 @@ class EmulatorVideoCapture {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Minimal gRPC-Web framing helpers (used by native-rtc capture mode)
+// ---------------------------------------------------------------------------
+
+function grpcWebEncodeFrame(messageBytes) {
+  const frame = Buffer.alloc(5 + messageBytes.length);
+  frame[0] = 0; // not compressed
+  frame.writeUInt32BE(messageBytes.length, 1);
+  messageBytes.copy(frame, 5);
+  return frame;
+}
+
+function grpcWebParseNextFrame(buffer) {
+  if (buffer.length < 5) {
+    return null;
+  }
+  const flags = buffer[0];
+  const length = buffer.readUInt32BE(1);
+  if (buffer.length < 5 + length) {
+    return null;
+  }
+  return {
+    consumed: 5 + length,
+    isTrailer: Boolean(flags & 0x80),
+    data: buffer.slice(5, 5 + length),
+  };
+}
+
+function grpcWebUnary(baseUrl, path, reqBytes) {
+  return new Promise((resolve, reject) => {
+    const frameBody = grpcWebEncodeFrame(reqBytes);
+    const parsedBase = new URL(baseUrl);
+    const req = http.request(
+      {
+        hostname: parsedBase.hostname,
+        port: Number(parsedBase.port) || 80,
+        path,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/grpc-web+proto",
+          "Content-Length": String(frameBody.length),
+          "X-Grpc-Web": "1",
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const buf = Buffer.concat(chunks);
+          const frame = grpcWebParseNextFrame(buf);
+          if (!frame || frame.isTrailer) {
+            reject(new Error(`gRPC-Web unary: no data frame (HTTP ${res.statusCode})`));
+            return;
+          }
+          resolve(frame.data);
+        });
+        res.on("error", reject);
+      }
+    );
+    req.on("error", reject);
+    req.write(frameBody);
+    req.end();
+  });
+}
+
+function grpcWebServerStream(baseUrl, path, reqBytes, onFrame, signal) {
+  const frameBody = grpcWebEncodeFrame(reqBytes);
+  const parsedBase = new URL(baseUrl);
+  const req = http.request(
+    {
+      hostname: parsedBase.hostname,
+      port: Number(parsedBase.port) || 80,
+      path,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/grpc-web+proto",
+        "Content-Length": String(frameBody.length),
+        "X-Grpc-Web": "1",
+      },
+    },
+    (res) => {
+      // incomplete bytes that don't yet form a complete frame
+      let partial = Buffer.alloc(0);
+
+      const processFrames = () => {
+        for (;;) {
+          const frame = grpcWebParseNextFrame(partial);
+          if (!frame) {
+            break;
+          }
+          partial = partial.slice(frame.consumed);
+          if (!frame.isTrailer) {
+            onFrame(frame.data);
+          }
+        }
+      };
+
+      res.on("data", (chunk) => {
+        // Accumulate with leftover partial bytes and scan for complete frames.
+        partial = partial.length > 0 ? Buffer.concat([partial, chunk]) : chunk;
+        processFrames();
+      });
+      res.on("end", () => onFrame(null));
+      res.on("error", (err) => onFrame(null, err));
+    }
+  );
+  if (signal) {
+    signal.addEventListener("abort", () => req.destroy());
+  }
+  req.on("error", () => onFrame(null));
+  req.write(frameBody);
+  req.end();
+  return req;
+}
+
+// ---------------------------------------------------------------------------
+// Minimal protobuf encode/decode (RtcId and JsepMsg message types only)
+// ---------------------------------------------------------------------------
+
+function pbVarint(value) {
+  const bytes = [];
+  let n = value >>> 0;
+  while (n > 0x7f) {
+    bytes.push((n & 0x7f) | 0x80);
+    n >>>= 7;
+  }
+  bytes.push(n & 0x7f);
+  return Buffer.from(bytes);
+}
+
+function pbLenDelim(fieldNumber, data) {
+  const tag = pbVarint(((fieldNumber << 3) | 2) >>> 0);
+  return Buffer.concat([tag, pbVarint(data.length), data]);
+}
+
+function pbEncodeRtcId(guid) {
+  return pbLenDelim(1, Buffer.from(guid, "utf8"));
+}
+
+function pbEncodeJsepMsg(guid, message) {
+  return Buffer.concat([
+    pbLenDelim(1, pbEncodeRtcId(guid)),
+    pbLenDelim(2, Buffer.from(message, "utf8")),
+  ]);
+}
+
+function pbDecodeVarint(buf, offset) {
+  let result = 0;
+  let shift = 0;
+  let pos = offset;
+  while (pos < buf.length) {
+    const byte = buf[pos++];
+    result |= (byte & 0x7f) << shift;
+    if (!(byte & 0x80)) {
+      break;
+    }
+    shift += 7;
+  }
+  return { value: result >>> 0, offset: pos };
+}
+
+function pbDecodeFields(buf) {
+  const fields = [];
+  let offset = 0;
+  while (offset < buf.length) {
+    const tagResult = pbDecodeVarint(buf, offset);
+    offset = tagResult.offset;
+    const fieldNumber = tagResult.value >>> 3;
+    const wireType = tagResult.value & 0x7;
+    if (wireType === 0) {
+      const varResult = pbDecodeVarint(buf, offset);
+      offset = varResult.offset;
+      fields.push({ field: fieldNumber, value: varResult.value });
+    } else if (wireType === 2) {
+      const lenResult = pbDecodeVarint(buf, offset);
+      offset = lenResult.offset;
+      fields.push({ field: fieldNumber, data: buf.slice(offset, offset + lenResult.value) });
+      offset += lenResult.value;
+    } else {
+      break;
+    }
+  }
+  return fields;
+}
+
+function pbDecodeRtcId(bytes) {
+  const fields = pbDecodeFields(bytes);
+  const guidField = fields.find((f) => f.field === 1 && f.data);
+  return { guid: guidField ? guidField.data.toString("utf8") : "" };
+}
+
+function pbDecodeJsepMsg(bytes) {
+  const fields = pbDecodeFields(bytes);
+  const idField = fields.find((f) => f.field === 1 && f.data);
+  const msgField = fields.find((f) => f.field === 2 && f.data);
+  return {
+    id: idField ? pbDecodeRtcId(idField.data) : { guid: "" },
+    message: msgField ? msgField.data.toString("utf8") : "",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// NativeRtcVideoRelay — relays the emulator's native WebRTC video track to
+// the browser by subscribing to JSEP signals via gRPC-Web, establishing an
+// RTCPeerConnection with the emulator, capturing frames with RTCVideoSink,
+// and pushing them into an RTCVideoSource that is added to the browser peer.
+// ---------------------------------------------------------------------------
+
+class NativeRtcVideoRelay {
+  constructor(session) {
+    this.session = session;
+    this.videoSource = null;
+    this.track = null;
+    this.emulatorPeer = null;
+    this.videoSink = null;
+    this.abortController = new AbortController();
+    this.guid = null;
+    this.running = false;
+  }
+
+  async start() {
+    if (!RTCVideoSource) {
+      throw new Error("This wrtc build does not expose RTCVideoSource");
+    }
+    if (!RTCVideoSink) {
+      throw new Error("This wrtc build does not expose RTCVideoSink");
+    }
+
+    this.videoSource = new RTCVideoSource({ isScreencast: true });
+    this.track = this.videoSource.createTrack();
+    this.running = true;
+
+    const media = this.session.media;
+    media.requestedSource = "native-rtc";
+    media.source = "native-rtc";
+    media.trackAttached = true;
+    media.activeReason = "initial-start";
+    media.width = defaultScreenWidth;
+    media.height = defaultScreenHeight;
+    media.ffmpeg = null;
+    media.screenrecord = {
+      verification: "not-requested",
+      connectedAt: null,
+      firstChunkAt: null,
+      lastChunkAt: null,
+      firstDecodedFrameAt: null,
+      bytesReceived: 0,
+      chunksReceived: 0,
+      firstChunkSize: 0,
+      lastChunkSize: 0,
+      largestChunkSize: 0,
+      decodeGraceUsed: false,
+    };
+
+    recordSessionLog(this.session, "info", "native-rtc: starting emulator gRPC-Web RTC relay", {
+      url: emulatorGrpcWebUrl,
+    });
+
+    this._relayLoop().catch((error) => {
+      if (this.running) {
+        recordSessionLog(this.session, "error", "native-rtc: relay loop error", { error: error.message });
+        closeSession(this.session, "media-failed", `native-rtc relay failed: ${error.message}`);
+      }
+    });
+
+    return this.track;
+  }
+
+  async _relayLoop() {
+    const rtcIdBytes = await grpcWebUnary(
+      emulatorGrpcWebUrl,
+      "/android.emulation.control.Rtc/requestRtcStream",
+      Buffer.alloc(0)
+    );
+    const rtcId = pbDecodeRtcId(rtcIdBytes);
+    this.guid = rtcId.guid;
+    recordSessionLog(this.session, "info", "native-rtc: obtained emulator JSEP stream ID", {
+      guid: this.guid,
+    });
+
+    await new Promise((resolve, reject) => {
+      grpcWebServerStream(
+        emulatorGrpcWebUrl,
+        "/android.emulation.control.Rtc/receiveJsepMessages",
+        pbEncodeRtcId(this.guid),
+        (msgBytes, err) => {
+          if (!this.running) {
+            resolve();
+            return;
+          }
+          if (err || !msgBytes) {
+            reject(err || new Error("JSEP stream closed unexpectedly"));
+            return;
+          }
+          let signal;
+          try {
+            const decoded = pbDecodeJsepMsg(msgBytes);
+            signal = JSON.parse(decoded.message || "{}");
+          } catch {
+            return;
+          }
+          this._handleJsepSignal(signal).catch((handleErr) => {
+            recordSessionLog(this.session, "warn", "native-rtc: JSEP signal error", {
+              error: handleErr.message,
+            });
+          });
+        },
+        this.abortController.signal
+      );
+    });
+  }
+
+  _sendJsep(message) {
+    if (!this.guid) {
+      return;
+    }
+    grpcWebUnary(
+      emulatorGrpcWebUrl,
+      "/android.emulation.control.Rtc/sendJsepMessage",
+      pbEncodeJsepMsg(this.guid, JSON.stringify(message))
+    ).catch((err) => {
+      recordSessionLog(this.session, "warn", "native-rtc: failed to send JSEP message", {
+        error: err.message,
+      });
+    });
+  }
+
+  async _handleJsepSignal(signal) {
+    if (signal.start) {
+      if (this.emulatorPeer) {
+        this.emulatorPeer.close();
+      }
+      const iceServers =
+        Array.isArray(signal.start.iceServers) && signal.start.iceServers.length > 0
+          ? signal.start.iceServers
+          : buildIceServers();
+      this.emulatorPeer = new RTCPeerConnection({
+        iceServers,
+        iceTransportPolicy: preferRelayTransport ? "relay" : "all",
+      });
+      this.emulatorPeer.onicecandidate = (event) => {
+        if (event.candidate) {
+          this._sendJsep({ candidate: event.candidate.toJSON() });
+        }
+      };
+      this.emulatorPeer.ontrack = (event) => {
+        if (event.track?.kind !== "video" || !this.running) {
+          return;
+        }
+        this._attachVideoSink(event.track);
+      };
+    } else if (signal.sdp && signal.sdp.type === "offer") {
+      if (!this.emulatorPeer) {
+        return;
+      }
+      await this.emulatorPeer.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+      const answer = await this.emulatorPeer.createAnswer();
+      await this.emulatorPeer.setLocalDescription(answer);
+      this._sendJsep({ sdp: { type: answer.type, sdp: answer.sdp } });
+    } else if (signal.candidate) {
+      this.emulatorPeer?.addIceCandidate(signal.candidate).catch(() => {});
+    } else if (signal.bye) {
+      this.stop();
+    }
+  }
+
+  _attachVideoSink(videoTrack) {
+    if (this.videoSink) {
+      this.videoSink.stop();
+    }
+    const sink = new RTCVideoSink(videoTrack);
+    this.videoSink = sink;
+    let frameCount = 0;
+    sink.onframe = ({ frame }) => {
+      if (!this.running || sink.stopped) {
+        return;
+      }
+      const { width, height, data } = frame;
+      const media = this.session.media;
+      if (frameCount === 0) {
+        media.width = width;
+        media.height = height;
+        media.firstFrameAt = nowIso();
+        recordSessionLog(this.session, "info", "native-rtc: first frame relayed to browser", {
+          width,
+          height,
+        });
+      }
+      frameCount++;
+      media.framesDelivered = frameCount;
+      media.lastFrameAt = nowIso();
+      this.videoSource.onFrame({ width, height, data });
+    };
+    recordSessionLog(this.session, "info", "native-rtc: RTCVideoSink attached to emulator video track");
+  }
+
+  stop() {
+    this.running = false;
+    this.abortController.abort();
+    if (this.videoSink) {
+      this.videoSink.stop();
+      this.videoSink = null;
+    }
+    if (this.emulatorPeer) {
+      this.emulatorPeer.close();
+      this.emulatorPeer = null;
+    }
+  }
+}
+
 async function attachVideoSource(session, peer) {
   if (captureMode === "stub") {
     recordSessionLog(session, "warn", "Bridge is running in stub mode. No media track will be attached.");
     return;
   }
 
-  const capture = new EmulatorVideoCapture(session);
-  const track = await capture.start();
+  let capture;
+  let track;
+  if (captureMode === "native-rtc") {
+    capture = new NativeRtcVideoRelay(session);
+    track = await capture.start();
+  } else {
+    capture = new EmulatorVideoCapture(session);
+    track = await capture.start();
+  }
+
   const stream = new MediaStream();
   stream.addTrack(track);
 
@@ -2191,9 +2616,11 @@ const server = http.createServer(async (req, res) => {
           : "TURN is not configured, so the bridge can only advertise local host candidates.",
         captureMode === "stub"
           ? "Media capture is disabled in stub mode."
-          : captureMode === "adb-screenrecord"
-            ? "Video is captured from the emulator through an apkbridge-backed adb screenrecord H.264 stream and piped into WebRTC. If screenrecord stalls before the first frame, the bridge surfaces that failure instead of switching to screencap polling."
-            : "Video is captured from the emulator through apkbridge screencaps and piped into WebRTC.",
+          : captureMode === "native-rtc"
+            ? "Video is captured directly from the emulator's native WebRTC stream via gRPC-Web JSEP signalling (RTCVideoSink → RTCVideoSource relay). No ADB screencap or screenrecord is used."
+            : captureMode === "adb-screenrecord"
+              ? "Video is captured from the emulator through an apkbridge-backed adb screenrecord H.264 stream and piped into WebRTC. If screenrecord stalls before the first frame, the bridge surfaces that failure instead of switching to screencap polling."
+              : "Video is captured from the emulator through apkbridge screencaps and piped into WebRTC.",
         ...turnWarnings,
       ],
       warnings: turnWarnings,

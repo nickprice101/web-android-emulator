@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Emulator } from "android-emulator-webrtc/emulator";
 
@@ -1927,7 +1927,7 @@ function App() {
     nativeRootCauseRef.current = null;
   }, [streamMode, nativeWebrtcKey]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (streamMode !== "native-webrtc") {
       return undefined;
     }
@@ -2151,7 +2151,7 @@ function App() {
       };
     };
 
-    const scan = window.setInterval(() => {
+    const scanOnce = () => {
       const emulator = emuRef.current;
       const jsep = emulator?.jsep || null;
       if (jsep) {
@@ -2178,7 +2178,13 @@ function App() {
             : previous.remoteCandidateSummary,
         }));
       }
-    }, 500);
+    };
+
+    // Patch the native JSEP driver before the emulator view's passive effects
+    // start streaming so the initial "start" signal cannot bypass our ICE
+    // server injection / relay preference logic.
+    scanOnce();
+    const scan = window.setInterval(scanOnce, 500);
 
     return () => {
       active = false;

@@ -45,11 +45,19 @@ if [ -n "${TURN_SHARED_SECRET:-}" ]; then
   turn_payload="$(printf '{"iceServers":[{"urls":["%s:%s:%s?transport=%s"],"username":"%s","credential":"%s"}]}' \
     "${TURN_SCHEME}" "${TURN_HOST}" "${TURN_PORT}" "${TURN_PROTOCOL}" "${username}" "${credential}")"
   # launch-emulator.sh passes TURN to `-turncfg`, and the emulator expects that
-  # value to be an executable command that prints JSON (not raw JSON itself).
-  # Use a shell-safe printf command so the generated credentials are returned.
-  turn_payload_escaped="$(printf '%s' "${turn_payload}" | sed "s/'/'\"'\"'/g")"
+  # value to be a command that prints JSON (not raw JSON itself). Passing a
+  # quoted printf expression is brittle because intermediate shells can strip
+  # quoting and yield invalid JSON tokens. Write a dedicated executable script
+  # and pass its path as a single command token.
+  turn_cfg_script="/tmp/android-unknown/turncfg.sh"
+  mkdir -p "$(dirname "${turn_cfg_script}")"
+  cat > "${turn_cfg_script}" <<EOF
+#!/bin/sh
+printf '%s\n' '${turn_payload}'
+EOF
+  chmod 700 "${turn_cfg_script}"
   export TURN
-  TURN="printf '%s' '${turn_payload_escaped}'"
+  TURN="${turn_cfg_script}"
 fi
 
 if [ ! -x /android/sdk/launch-emulator.sh ]; then

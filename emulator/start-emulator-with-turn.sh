@@ -42,9 +42,14 @@ if [ -n "${TURN_SHARED_SECRET:-}" ]; then
   username="${expiry}:${TURN_USERNAME_SUFFIX}"
   credential="$(printf '%s' "${username}" | openssl dgst -binary -sha1 -hmac "${TURN_SHARED_SECRET}" | openssl base64 -A)"
 
-  export TURN
-  TURN="$(printf '{"iceServers":[{"urls":["%s:%s:%s?transport=%s"],"username":"%s","credential":"%s"}]}' \
+  turn_payload="$(printf '{"iceServers":[{"urls":["%s:%s:%s?transport=%s"],"username":"%s","credential":"%s"}]}' \
     "${TURN_SCHEME}" "${TURN_HOST}" "${TURN_PORT}" "${TURN_PROTOCOL}" "${username}" "${credential}")"
+  # launch-emulator.sh passes TURN to `-turncfg`, and the emulator expects that
+  # value to be an executable command that prints JSON (not raw JSON itself).
+  # Use a shell-safe printf command so the generated credentials are returned.
+  turn_payload_escaped="$(printf '%s' "${turn_payload}" | sed "s/'/'\"'\"'/g")"
+  export TURN
+  TURN="printf '%s' '${turn_payload_escaped}'"
 fi
 
 if [ ! -x /android/sdk/launch-emulator.sh ]; then

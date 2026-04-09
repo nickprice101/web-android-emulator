@@ -36,6 +36,18 @@ Start the stack with:
 docker compose up --build
 ```
 
+To temporarily debug whether your network is blocking TURN-over-TLS on `443/tcp`,
+override the TURN scheme/port before starting the stack:
+
+```bash
+export TURN_SCHEME=turn
+export TURN_PORT=3478
+docker compose up --build
+```
+
+This switches both the emulator and the bridge to non-TLS TURN for diagnostics.
+Revert to `TURN_SCHEME=turns` and `TURN_PORT=443` after testing.
+
 Then browse to:
 
 ```

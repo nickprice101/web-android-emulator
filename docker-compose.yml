@@ -21,6 +21,8 @@ services:
       TURN_KEY: "PLACEHOLDER_TURN_KEY"
       TURN_TTL: "2592000"
       TURN_USERNAME_SUFFIX: "emuuser"
+    volumes:
+      - emu-grpc-token:/run/emu-token
     expose:
       - "8554"
       - "5555"
@@ -96,6 +98,9 @@ services:
       TURN_KEY: "PLACEHOLDER_TURN_KEY"
       TURN_TTL: "2592000"
       TURN_USERNAME_SUFFIX: "emuuser"
+      EMULATOR_TOKEN_PATH: "/run/emu-token/emu-grpc-token"
+    volumes:
+      - emu-grpc-token:/run/emu-token
     expose:
       - "8090"
     depends_on:
@@ -134,3 +139,6 @@ services:
 networks:
   google-emu:
     driver: bridge
+
+volumes:
+  emu-grpc-token:

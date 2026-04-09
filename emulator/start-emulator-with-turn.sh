@@ -52,4 +52,23 @@ if [ ! -x /android/sdk/launch-emulator.sh ]; then
   exit 1
 fi
 
+# Copy the emulator's gRPC JWT token to the shared volume so that the
+# bridge-webrtc service can authenticate its gRPC-Web requests.
+# The watcher runs in the background so that exec below can still replace
+# this shell process with launch-emulator.sh.
+TOKEN_DST_DIR="/run/emu-token"
+(
+  mkdir -p "${TOKEN_DST_DIR}"
+  while true; do
+    TOKEN_SRC=$(find /root/.android/avd/ /android/avd/ /root/.config/emulator/ -name "emu-grpc-token" 2>/dev/null | head -1)
+    if [ -n "${TOKEN_SRC}" ] && [ -f "${TOKEN_SRC}" ]; then
+      if ! cmp -s "${TOKEN_SRC}" "${TOKEN_DST_DIR}/emu-grpc-token" 2>/dev/null; then
+        cp "${TOKEN_SRC}" "${TOKEN_DST_DIR}/emu-grpc-token"
+        echo "[token-watcher] copied token from ${TOKEN_SRC}"
+      fi
+    fi
+    sleep 2
+  done
+) &
+
 exec /android/sdk/launch-emulator.sh "$@"

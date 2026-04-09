@@ -13,6 +13,9 @@ jobs:
       SSH_IP: ${{ secrets.SSH_IP }}
       SSH_USER: ${{ secrets.SSH_USER }}
       SSH_PATH: ${{ secrets.SSH_PATH }}
+      # The Google-hosted API 34 image path used in compose no longer resolves.
+      # Override at deploy time to a publicly available emulator image.
+      EMULATOR_IMAGE: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
 
     steps:
       - name: Checkout repository
@@ -166,6 +169,31 @@ jobs:
           echo "Remote docker-compose.yml placeholders cleared."
           REMOTE
 
+      - name: Validate emulator base image is resolvable
+        run: |
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            EMULATOR_IMAGE="${EMULATOR_IMAGE}" \
+            bash -l -s <<'REMOTE'
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if docker manifest inspect "${EMULATOR_IMAGE}" > /dev/null 2>&1; then
+              echo "Emulator image is available: ${EMULATOR_IMAGE}"
+              exit 0
+            fi
+
+            if [[ "${attempt}" -eq 3 ]]; then
+              echo "Emulator image is not resolvable after ${attempt} attempts: ${EMULATOR_IMAGE}" >&2
+              exit 1
+            fi
+
+            echo "Failed to resolve emulator image on attempt ${attempt}; retrying in 10s..." >&2
+            sleep 10
+          done
+          REMOTE
+
       - name: Build full docker compose stack
         run: |
           ssh -i "${SSH_KEY_FILE}" \
@@ -176,11 +204,25 @@ jobs:
             bash -l -s <<'REMOTE'
           set -euo pipefail
           cd "${COMPOSE_DIR}"
-          if docker compose version > /dev/null 2>&1; then
-            docker compose build --no-cache
-          else
-            docker-compose build --no-cache
-          fi
+          for attempt in 1 2 3; do
+            if docker compose version > /dev/null 2>&1; then
+              if EMULATOR_IMAGE="${EMULATOR_IMAGE}" docker compose build --no-cache; then
+                break
+              fi
+            else
+              if EMULATOR_IMAGE="${EMULATOR_IMAGE}" docker-compose build --no-cache; then
+                break
+              fi
+            fi
+
+            if [[ "${attempt}" -eq 3 ]]; then
+              echo "docker compose build failed after ${attempt} attempts." >&2
+              exit 1
+            fi
+
+            echo "docker compose build attempt ${attempt} failed; retrying in 15s..." >&2
+            sleep 15
+          done
           echo "    docker compose builds complete."
           REMOTE
 

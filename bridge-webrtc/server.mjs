@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHmac, randomUUID } from "node:crypto";
 import dns from "node:dns/promises";
+import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import tls from "node:tls";
@@ -58,6 +59,30 @@ const hasConfiguredTurnSecret = Boolean(
 const preferRelayTransport = hasConfiguredTurnSecret;
 
 const sessions = new Map();
+
+// ---------------------------------------------------------------------------
+// Emulator gRPC JWT token — read from a shared volume that the emulator
+// entrypoint script populates once the emulator has started.
+// ---------------------------------------------------------------------------
+const emulatorTokenPath = process.env.EMULATOR_TOKEN_PATH || "";
+let emulatorToken = null;
+
+function loadEmulatorToken() {
+  if (!emulatorTokenPath) {
+    return;
+  }
+  try {
+    const raw = fs.readFileSync(emulatorTokenPath, "utf8").trim();
+    if (raw) {
+      emulatorToken = raw;
+    }
+  } catch {
+    // Token file not yet available; will be retried by the interval below.
+  }
+}
+
+loadEmulatorToken();
+setInterval(loadEmulatorToken, 5000);
 
 function nowIso() {
   return new Date().toISOString();
@@ -1813,17 +1838,21 @@ function grpcWebUnary(baseUrl, path, reqBytes) {
   return new Promise((resolve, reject) => {
     const frameBody = grpcWebEncodeFrame(reqBytes);
     const parsedBase = new URL(baseUrl);
+    const headers = {
+      "Content-Type": "application/grpc-web+proto",
+      "Content-Length": String(frameBody.length),
+      "X-Grpc-Web": "1",
+    };
+    if (emulatorToken) {
+      headers["Authorization"] = `Bearer ${emulatorToken}`;
+    }
     const req = http.request(
       {
         hostname: parsedBase.hostname,
         port: Number(parsedBase.port) || 80,
         path,
         method: "POST",
-        headers: {
-          "Content-Type": "application/grpc-web+proto",
-          "Content-Length": String(frameBody.length),
-          "X-Grpc-Web": "1",
-        },
+        headers,
       },
       (res) => {
         const chunks = [];
@@ -1849,17 +1878,21 @@ function grpcWebUnary(baseUrl, path, reqBytes) {
 function grpcWebServerStream(baseUrl, path, reqBytes, onFrame, signal) {
   const frameBody = grpcWebEncodeFrame(reqBytes);
   const parsedBase = new URL(baseUrl);
+  const headers = {
+    "Content-Type": "application/grpc-web+proto",
+    "Content-Length": String(frameBody.length),
+    "X-Grpc-Web": "1",
+  };
+  if (emulatorToken) {
+    headers["Authorization"] = `Bearer ${emulatorToken}`;
+  }
   const req = http.request(
     {
       hostname: parsedBase.hostname,
       port: Number(parsedBase.port) || 80,
       path,
       method: "POST",
-      headers: {
-        "Content-Type": "application/grpc-web+proto",
-        "Content-Length": String(frameBody.length),
-        "X-Grpc-Web": "1",
-      },
+      headers,
     },
     (res) => {
       // incomplete bytes that don't yet form a complete frame
@@ -2617,6 +2650,14 @@ const server = http.createServer(async (req, res) => {
         turnServerUrl: buildTurnServerUrl(),
         warnings: turnWarnings,
       });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/emulator-token") {
+      // Re-read the token file on every request so callers always get the
+      // latest value without waiting for the 5-second refresh interval.
+      loadEmulatorToken();
+      sendJson(res, 200, { token: emulatorToken });
       return;
     }
 

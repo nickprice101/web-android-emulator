@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const repoRoot = resolve(new URL("..", import.meta.url).pathname);
+const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 function readRepoFile(relativePath) {
   return readFileSync(resolve(repoRoot, relativePath), "utf8");
@@ -28,8 +29,8 @@ assert.match(
 );
 assert.match(
   frontendMain,
-  /<option value="native-webrtc">WebRTC \(native emulator\)<\/option>/,
-  "frontend stream selector must expose native WebRTC option"
+  /const STREAM_MODE_OPTIONS = \[\{ value: "native-webrtc", label: "WebRTC \(native emulator\)" \}\];/,
+  "frontend stream selector options must expose the native WebRTC mode"
 );
 
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

@@ -3,10 +3,10 @@ import { createRoot } from "react-dom/client";
 import { Emulator } from "android-emulator-webrtc/emulator";
 
 const EMULATOR_ASPECT = 1080 / 1920;
-const RAW_FRAME_URL = "/api/frame";
 const MIN_RENDERABLE_VIDEO_DIMENSION = 16;
 const NATIVE_WEBRTC_RECOVERY_DELAY_MS = 1500;
 const NATIVE_WEBRTC_MAX_RETRIES = 3;
+const STREAM_MODE_OPTIONS = [{ value: "native-webrtc", label: "WebRTC (native emulator)" }];
 // Public STUN server used as a fallback when the emulator advertises no ICE
 // servers.  Set VITE_FALLBACK_STUN_URL at build time to override.
 const FALLBACK_STUN_URL =
@@ -1699,7 +1699,6 @@ function App() {
   const [webrtcNotice, setWebrtcNotice] = useState("");
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [deviceInfo, setDeviceInfo] = useState(null);
-  const [framePreviewTick, setFramePreviewTick] = useState(0);
   const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
   const [nativeVideoStats, setNativeVideoStats] = useState(null);
   const [nativeHasVideoFrame, setNativeHasVideoFrame] = useState(false);
@@ -1892,13 +1891,6 @@ function App() {
       cancelled = true;
       clearInterval(id);
     };
-  }, []);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setFramePreviewTick(Date.now());
-    }, 2000);
-    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -2712,9 +2704,11 @@ function App() {
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           Stream
           <select value={streamMode} onChange={(event) => handleStreamModeChange(event.target.value)}>
-            <option value="native-webrtc">WebRTC (native emulator)</option>
-            <option value="custom-webrtc">WebRTC (custom bridge)</option>
-            <option value="png">PNG</option>
+            {STREAM_MODE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </label>
         <input type="file" accept=".apk,application/vnd.android.package-archive" onChange={uploadApk} disabled={busy} />
@@ -2864,47 +2858,22 @@ function App() {
 
           <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Display diagnostics</div>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-              <div style={{ flex: "1 1 220px", minWidth: 220 }}>
-                <div style={{ fontSize: 12, color: "#d7dfed", marginBottom: 6 }}>
-                  Raw ADB frame endpoint: <a href={RAW_FRAME_URL} target="_blank" rel="noreferrer">{RAW_FRAME_URL}</a>
-                </div>
-                <div style={{ fontSize: 12, color: "#a8b3c7", lineHeight: 1.6 }}>
-                  <div>
-                    Emulator screen:{" "}
-                    {deviceInfo?.screen?.width && deviceInfo?.screen?.height
-                      ? `${deviceInfo.screen.width}x${deviceInfo.screen.height}`
-                      : "unavailable"}
-                  </div>
-                  <div>
-                    WebRTC frame:{" "}
-                    {streamMode === "custom-webrtc"
-                      ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}${captureOverlay.verificationLine ? ` | ${captureOverlay.verificationLine}` : ""}`
-                      : streamMode === "native-webrtc"
-                        ? `${nativeWebrtcOverlay.statusLine}${nativeWebrtcOverlay.reasonLine ? ` | ${nativeWebrtcOverlay.reasonLine}` : ""}${nativeWebrtcOverlay.verificationLine ? ` | ${nativeWebrtcOverlay.verificationLine}` : ""}`
-                        : "switch to WebRTC mode to compare"}
-                  </div>
-                  <div>
-                    Tip: if native WebRTC works while the custom bridge stays black, the problem is in the bridge path rather than the emulator stream.
-                  </div>
-                </div>
+            <div style={{ fontSize: 12, color: "#a8b3c7", lineHeight: 1.6 }}>
+              <div>
+                Emulator screen:{" "}
+                {deviceInfo?.screen?.width && deviceInfo?.screen?.height
+                  ? `${deviceInfo.screen.width}x${deviceInfo.screen.height}`
+                  : "unavailable"}
               </div>
-              <div style={{ width: 160, flexShrink: 0 }}>
-                <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Raw screencap preview</div>
-                <img
-                  src={`${RAW_FRAME_URL}?t=${framePreviewTick}`}
-                  alt="Raw emulator frame"
-                  style={{
-                    width: "100%",
-                    aspectRatio: `${deviceInfo?.screen?.width || 1080} / ${deviceInfo?.screen?.height || 1920}`,
-                    objectFit: "contain",
-                    display: "block",
-                    background: "#000",
-                    border: "1px solid #2b313d",
-                    borderRadius: 10,
-                  }}
-                />
+              <div>
+                WebRTC frame:{" "}
+                {streamMode === "custom-webrtc"
+                  ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}${captureOverlay.verificationLine ? ` | ${captureOverlay.verificationLine}` : ""}`
+                  : streamMode === "native-webrtc"
+                    ? `${nativeWebrtcOverlay.statusLine}${nativeWebrtcOverlay.reasonLine ? ` | ${nativeWebrtcOverlay.reasonLine}` : ""}${nativeWebrtcOverlay.verificationLine ? ` | ${nativeWebrtcOverlay.verificationLine}` : ""}`
+                    : "switch to WebRTC mode to compare"}
               </div>
+              <div>Native WebRTC stays front and center here while we debug the emulator's built-in RTC path.</div>
             </div>
           </div>
 

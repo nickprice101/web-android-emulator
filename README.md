@@ -52,6 +52,12 @@ To run the emulator applications under a repeatable test framework, use the repo
 bash scripts/testbed.sh
 ```
 
+On Windows PowerShell, run:
+
+```powershell
+.\scripts\testbed.ps1
+```
+
 What the testbed runs:
 
 1. `npm --prefix frontend ci`

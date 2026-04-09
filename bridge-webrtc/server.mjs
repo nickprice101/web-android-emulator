@@ -7,6 +7,7 @@ import tls from "node:tls";
 import { URL } from "node:url";
 import wrtc from "@roamhq/wrtc";
 import { buildFfmpegArgs } from "./ffmpeg-config.mjs";
+import { isRenderableNativeRtcFrame } from "./native-rtc-frame-guard.mjs";
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, nonstandard = {} } = wrtc;
 const { RTCVideoSource, RTCVideoSink } = nonstandard;
@@ -2157,24 +2158,41 @@ class NativeRtcVideoRelay {
     const sink = new RTCVideoSink(videoTrack);
     this.videoSink = sink;
     let frameCount = 0;
+    let placeholderFrameCount = 0;
     sink.onframe = ({ frame }) => {
       if (!this.running || sink.stopped) {
         return;
       }
       const { width, height, data } = frame;
       const media = this.session.media;
-      if (frameCount === 0) {
-        media.width = width;
-        media.height = height;
-        media.firstFrameAt = nowIso();
-        recordSessionLog(this.session, "info", "native-rtc: first frame relayed to browser", {
-          width,
-          height,
-        });
+      if (!isRenderableNativeRtcFrame(frame)) {
+        placeholderFrameCount += 1;
+        if (placeholderFrameCount === 1) {
+          recordSessionLog(this.session, "warn", "native-rtc: ignoring placeholder startup frame", {
+            width,
+            height,
+          });
+        }
+        return;
       }
       frameCount++;
       media.framesDelivered = frameCount;
       media.lastFrameAt = nowIso();
+      if (frameCount === 1) {
+        media.width = width;
+        media.height = height;
+        media.firstFrameAt = media.lastFrameAt;
+        recordSessionLog(this.session, "info", "native-rtc: first frame relayed to browser", {
+          width,
+          height,
+        });
+        setSessionState(
+          this.session,
+          "media-ready",
+          "First emulator frame relayed from the native WebRTC stream.",
+          { log: false }
+        );
+      }
       this.videoSource.onFrame({ width, height, data });
     };
     recordSessionLog(this.session, "info", "native-rtc: RTCVideoSink attached to emulator video track");

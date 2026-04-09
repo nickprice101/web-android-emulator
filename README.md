@@ -3,6 +3,8 @@ Designed for app development without the need for Android Studio or similar to b
 
 Based on a self-hosted dockerised solution using the depreciated (Jan 2026) Google emulator docker image with a bespoke frontend pasted on top.
 
+Default emulator base image is now Android 14 / API 34 (`34-google-x64-no-metrics:34.1.19`) because the older Android 11 API 30 image has been observed to trigger framework-level native crashes in modern Google apps (for example `com.google.android.gm` crashing in `android.os.CancellationSignal.createTransport`).
+
 NOTE: The emulator's native WebRTC stream is the default low-latency path. PNG remains available as a slower fallback for comparison and recovery.
 
 The emulator container generates short-lived coturn REST credentials at startup from the shared `TURN_KEY` secret. The browser receives an ephemeral TURN username/password pair, not the long-lived shared secret.
@@ -34,6 +36,12 @@ Start the stack with:
 
 ```
 docker compose up --build
+```
+
+If you must pin a different emulator container image, build with:
+
+```bash
+EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19 docker compose build emulator
 ```
 
 To temporarily debug whether your network is blocking TURN-over-TLS on `443/tcp`,

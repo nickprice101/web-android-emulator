@@ -1926,9 +1926,11 @@ function App() {
 
     fetchToken();
     const id = setInterval(() => {
-      if (!emulatorTokenFetchedRef.current) {
-        fetchToken();
+      if (emulatorTokenFetchedRef.current) {
+        clearInterval(id);
+        return;
       }
+      fetchToken();
     }, 2000);
     return () => {
       cancelled = true;

@@ -2382,7 +2382,7 @@ function App() {
 
     if (nativeRetryCount >= NATIVE_WEBRTC_MAX_RETRIES) {
       setMessage(
-        `Native WebRTC failed to recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries. Use PNG mode for recovery while debugging the emulator's direct stream.`
+        `Native WebRTC failed to recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries.`
       );
       setEmuState("error");
       return;

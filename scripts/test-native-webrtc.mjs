@@ -33,4 +33,16 @@ assert.match(
   "frontend stream selector options must expose the native WebRTC mode"
 );
 
+const composeConfig = readRepoFile("docker-compose.yml");
+assert.match(
+  composeConfig,
+  /EMULATOR_PARAMS:\s*".*-gpu swiftshader_indirect.*"/m,
+  "docker-compose emulator params must force swiftshader for stable native WebRTC video production in headless deployments"
+);
+assert.match(
+  composeConfig,
+  /EMULATOR_PARAMS:\s*".*-camera-back none.*-camera-front none.*"/m,
+  "docker-compose emulator params must disable virtual cameras to avoid unstable media extractor startup paths"
+);
+
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

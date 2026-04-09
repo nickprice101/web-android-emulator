@@ -2,6 +2,31 @@
 set -eu
 
 TURN_SHARED_SECRET="${TURN_KEY:-}"
+EMULATOR_PARAMS_VALUE="${EMULATOR_PARAMS:-}"
+
+append_param_if_missing() {
+  flag="$1"
+  case " ${EMULATOR_PARAMS_VALUE} " in
+    *" ${flag} "*) ;;
+    *)
+      if [ -n "${EMULATOR_PARAMS_VALUE}" ]; then
+        EMULATOR_PARAMS_VALUE="${EMULATOR_PARAMS_VALUE} ${flag}"
+      else
+        EMULATOR_PARAMS_VALUE="${flag}"
+      fi
+      ;;
+  esac
+}
+
+# Keep emulator rendering stable for native WebRTC production in headless
+# container deployments. These flags are additive and can still be overridden
+# by supplying explicit values in EMULATOR_PARAMS.
+append_param_if_missing "-gpu swiftshader_indirect"
+append_param_if_missing "-no-boot-anim"
+append_param_if_missing "-camera-back none"
+append_param_if_missing "-camera-front none"
+append_param_if_missing "-no-snapshot-save"
+export EMULATOR_PARAMS="${EMULATOR_PARAMS_VALUE}"
 
 if [ -n "${TURN_SHARED_SECRET:-}" ]; then
   : "${TURN_HOST:?TURN_HOST must be set when TURN_KEY is configured}"

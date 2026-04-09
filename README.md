@@ -36,6 +36,42 @@ Start the stack with:
 docker compose up --build
 ```
 
+To temporarily debug whether your network is blocking TURN-over-TLS on `443/tcp`,
+override the TURN scheme/port before starting the stack:
+
+```bash
+export TURN_SCHEME=turn
+export TURN_PORT=3478
+docker compose up --build
+```
+
+This switches both the emulator and the bridge to non-TLS TURN for diagnostics.
+Revert to `TURN_SCHEME=turns` and `TURN_PORT=443` after testing.
+
+This repository now defaults the bridge service to an internal TURN route:
+
+```bash
+TURN_BRIDGE_HOST=192.168.1.152
+TURN_BRIDGE_SCHEME=turn
+TURN_BRIDGE_PORT=3478
+```
+
+If you need to change that default, override with your own LAN address:
+
+```bash
+export TURN_BRIDGE_HOST=192.168.1.152
+export TURN_BRIDGE_SCHEME=turn
+export TURN_BRIDGE_PORT=3478
+docker compose up --build
+```
+
+`TURN_BRIDGE_*` only changes how the `bridge-webrtc` service reaches TURN. The
+browser and emulator still advertise/use `TURN_HOST` (for example
+`turn.corsicanescape.com`).
+
+To disable the internal bridge override and use the public TURN hostname for
+the bridge too, clear `TURN_BRIDGE_HOST` in your environment before startup.
+
 Then browse to:
 
 ```

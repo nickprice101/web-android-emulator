@@ -1,4 +1,5 @@
-FROM us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:30.1.2
+ARG EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19
+FROM ${EMULATOR_IMAGE}
 
 COPY start-emulator-with-turn.sh /usr/local/bin/start-emulator-with-turn.sh
 

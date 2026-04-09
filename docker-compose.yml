@@ -5,6 +5,8 @@ services:
     container_name: google-emu-emulator
     build:
       context: ./emulator
+      args:
+        EMULATOR_IMAGE: "${EMULATOR_IMAGE:-us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19}"
     image: google-emu-emulator:latest
     privileged: true
     devices:

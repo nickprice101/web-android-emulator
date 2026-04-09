@@ -201,6 +201,7 @@ jobs:
             -o BatchMode=yes \
             "${SSH_USER}@${SSH_IP}" \
             COMPOSE_DIR="${SSH_PATH}" \
+            EMULATOR_IMAGE="${EMULATOR_IMAGE}" \
             bash -l -s <<'REMOTE'
           set -euo pipefail
           cd "${COMPOSE_DIR}"

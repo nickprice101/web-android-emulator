@@ -1721,6 +1721,7 @@ function App() {
   const nativePeerCleanupRef = useRef(() => {});
   const nativeJsepPatchedRef = useRef(null);
   const nativeRootCauseRef = useRef(null);
+  const nativeFallbackIceServersRef = useRef([]);
   const captureOverlay =
     streamMode === "custom-webrtc"
       ? buildCustomWebrtcOverlay(webrtcDiagnostics)
@@ -1899,6 +1900,7 @@ function App() {
       nativePeerCleanupRef.current = () => {};
       nativeJsepPatchedRef.current = null;
       nativeRootCauseRef.current = null;
+      nativeFallbackIceServersRef.current = [];
       setNativeDiagnostics({
         runtimeEvents: [],
         startIceServers: null,
@@ -2046,6 +2048,43 @@ function App() {
       };
     };
 
+    let fallbackIceFetchPromise = null;
+    const fetchFallbackIceServers = async () => {
+      if (fallbackIceFetchPromise) {
+        return fallbackIceFetchPromise;
+      }
+      fallbackIceFetchPromise = (async () => {
+        try {
+          const config = await parseJsonResponse(await fetch("/bridge/api/config"), "/bridge/api/config");
+          if (!active) {
+            return [];
+          }
+          const bridgeIceServers = Array.isArray(config?.rtcConfiguration?.iceServers)
+            ? config.rtcConfiguration.iceServers
+            : [];
+          nativeFallbackIceServersRef.current = bridgeIceServers;
+          const summary = summarizeIceServers(bridgeIceServers);
+          pushNativeEvent("Loaded bridge ICE fallback configuration", {
+            iceServers: summary.count,
+            hasTurn: summary.hasTurn,
+            hasStun: summary.hasStun,
+          });
+          return bridgeIceServers;
+        } catch (error) {
+          if (active) {
+            nativeFallbackIceServersRef.current = [];
+            pushNativeEvent("Unable to load bridge ICE fallback configuration", {
+              error: error?.message || String(error),
+            });
+          }
+          return [];
+        } finally {
+          fallbackIceFetchPromise = null;
+        }
+      })();
+      return fallbackIceFetchPromise;
+    };
+
     const patchJsep = (jsep) => {
       if (!jsep || nativeJsepPatchedRef.current === jsep) {
         return;
@@ -2059,63 +2098,90 @@ function App() {
         return;
       }
 
-      jsep._handleStart = (signal) => {
-        const startSummary = summarizeIceServers(signal?.start?.iceServers || []);
-        const shouldPreferRelay = startSummary.hasTurn;
+      jsep._handleStart = async (signal) => {
+        try {
+          const startSummary = summarizeIceServers(signal?.start?.iceServers || []);
+          const startMissingIce = signal?.start && !startSummary.hasTurn && !startSummary.hasStun;
+          let fallbackIceServers = Array.isArray(nativeFallbackIceServersRef.current)
+            ? nativeFallbackIceServersRef.current
+            : [];
+
+          if (startMissingIce && fallbackIceServers.length === 0) {
+            fallbackIceServers = await fetchFallbackIceServers();
+          }
+          const fallbackSummary = summarizeIceServers(fallbackIceServers);
+          const shouldPreferRelay = startSummary.hasTurn || (startMissingIce && fallbackSummary.hasTurn);
 
         // When the emulator advertises no ICE servers at all the browser has no
         // way to gather reflexive candidates, so the peer connection stays stuck
-        // on loopback/private host candidates.  Inject a public STUN server so
-        // the browser at least gets srflx candidates when TURN is not configured.
-        const injectedIceServers =
-          signal?.start && !startSummary.hasTurn && !startSummary.hasStun
-            ? [{ urls: FALLBACK_STUN_URL }]
-            : null;
+        // on loopback/private host candidates. Prefer bridge-provided fallback
+        // ICE servers (which can include TURN credentials); otherwise inject a
+        // public STUN server so the browser can at least get srflx candidates.
+          const injectedIceServers =
+            startMissingIce
+              ? fallbackSummary.hasTurn || fallbackSummary.hasStun
+                ? fallbackIceServers
+                : [{ urls: FALLBACK_STUN_URL }]
+              : null;
 
-        const baseSignal =
-          injectedIceServers
-            ? {
-                ...signal,
-                start: {
-                  ...signal.start,
-                  iceServers: [
-                    ...(signal.start?.iceServers || []),
-                    ...injectedIceServers,
-                  ],
-                },
-              }
-            : signal;
+          const baseSignal =
+            injectedIceServers
+              ? {
+                  ...signal,
+                  start: {
+                    ...signal.start,
+                    iceServers: [
+                      ...(signal.start?.iceServers || []),
+                      ...injectedIceServers,
+                    ],
+                  },
+                }
+              : signal;
 
-        const patchedSignal =
-          baseSignal?.start && shouldPreferRelay && baseSignal.start.iceTransportPolicy !== "relay"
-            ? {
-                ...baseSignal,
-                start: {
-                  ...baseSignal.start,
-                  iceTransportPolicy: "relay",
-                },
-              }
-            : baseSignal;
+          const patchedSignal =
+            baseSignal?.start && shouldPreferRelay && baseSignal.start.iceTransportPolicy !== "relay"
+              ? {
+                  ...baseSignal,
+                  start: {
+                    ...baseSignal.start,
+                    iceTransportPolicy: "relay",
+                  },
+                }
+              : baseSignal;
 
-        pushNativeEvent("Native emulator advertised RTC configuration", {
-          iceServers: startSummary.count,
-          hasTurn: startSummary.hasTurn,
-          hasStun: startSummary.hasStun,
-          injectedStun: Boolean(injectedIceServers),
-          iceTransportPolicy:
-            patchedSignal?.start?.iceTransportPolicy || signal?.start?.iceTransportPolicy || "all",
-        });
-        setNativeDiagnostics((previous) => ({
-          ...previous,
-          startIceServers: startSummary,
-        }));
-        if (injectedIceServers) {
-          pushNativeEvent("Injected public STUN server because emulator advertised no ICE servers");
+          pushNativeEvent("Native emulator advertised RTC configuration", {
+            iceServers: startSummary.count,
+            hasTurn: startSummary.hasTurn,
+            hasStun: startSummary.hasStun,
+            injectedIce: Boolean(injectedIceServers),
+            iceTransportPolicy:
+              patchedSignal?.start?.iceTransportPolicy || signal?.start?.iceTransportPolicy || "all",
+          });
+          setNativeDiagnostics((previous) => ({
+            ...previous,
+            startIceServers: startSummary,
+          }));
+          if (injectedIceServers) {
+            if (fallbackSummary.hasTurn || fallbackSummary.hasStun) {
+              pushNativeEvent("Injected bridge ICE servers because emulator advertised no ICE servers", {
+                iceServers: fallbackSummary.count,
+                hasTurn: fallbackSummary.hasTurn,
+                hasStun: fallbackSummary.hasStun,
+              });
+            } else {
+              pushNativeEvent("Injected public STUN server because emulator advertised no ICE servers");
+            }
+          }
+          if (patchedSignal !== baseSignal) {
+            pushNativeEvent("Forcing native browser ICE transport policy to relay because TURN is configured");
+          }
+          originalHandleStart(patchedSignal);
+        } catch (error) {
+          pushNativeEvent("Native start signal patch failed", {
+            error: error?.message || String(error),
+          });
+          originalHandleStart(signal);
         }
-        if (patchedSignal !== baseSignal) {
-          pushNativeEvent("Forcing native browser ICE transport policy to relay because TURN is configured");
-        }
-        originalHandleStart(patchedSignal);
       };
 
       jsep._handleSignal = (signal) => {
@@ -2183,6 +2249,7 @@ function App() {
     // Patch the native JSEP driver before the emulator view's passive effects
     // start streaming so the initial "start" signal cannot bypass our ICE
     // server injection / relay preference logic.
+    fetchFallbackIceServers();
     scanOnce();
     const scan = window.setInterval(scanOnce, 500);
 

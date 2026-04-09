@@ -2098,7 +2098,7 @@ function App() {
         return;
       }
 
-      jsep._handleStart = async (signal) => {
+      jsep._handleStart = (signal) => {
         try {
           const startSummary = summarizeIceServers(signal?.start?.iceServers || []);
           const startMissingIce = signal?.start && !startSummary.hasTurn && !startSummary.hasStun;
@@ -2107,20 +2107,28 @@ function App() {
             : [];
 
           if (startMissingIce && fallbackIceServers.length === 0) {
-            fallbackIceServers = await fetchFallbackIceServers();
+            // Keep start handling synchronous. The upstream JSEP driver expects
+            // _handleStart() to construct the peer connection immediately before
+            // processing SDP/candidates that can arrive in the same signal tick.
+            // Fetch fallback ICE in the background for future retries.
+            fetchFallbackIceServers();
           }
           const fallbackSummary = summarizeIceServers(fallbackIceServers);
-          const shouldPreferRelay = startSummary.hasTurn || (startMissingIce && fallbackSummary.hasTurn);
+          const shouldPreferRelay = startSummary.hasTurn;
 
         // When the emulator advertises no ICE servers at all the browser has no
         // way to gather reflexive candidates, so the peer connection stays stuck
         // on loopback/private host candidates. Prefer bridge-provided fallback
         // ICE servers (which can include TURN credentials); otherwise inject a
         // public STUN server so the browser can at least get srflx candidates.
+          const fallbackWithStun =
+            fallbackSummary.hasTurn && !fallbackSummary.hasStun
+              ? [...fallbackIceServers, { urls: FALLBACK_STUN_URL }]
+              : fallbackIceServers;
           const injectedIceServers =
             startMissingIce
               ? fallbackSummary.hasTurn || fallbackSummary.hasStun
-                ? fallbackIceServers
+                ? fallbackWithStun
                 : [{ urls: FALLBACK_STUN_URL }]
               : null;
 
@@ -2164,9 +2172,9 @@ function App() {
           if (injectedIceServers) {
             if (fallbackSummary.hasTurn || fallbackSummary.hasStun) {
               pushNativeEvent("Injected bridge ICE servers because emulator advertised no ICE servers", {
-                iceServers: fallbackSummary.count,
+                iceServers: summarizeIceServers(fallbackWithStun).count,
                 hasTurn: fallbackSummary.hasTurn,
-                hasStun: fallbackSummary.hasStun,
+                hasStun: summarizeIceServers(fallbackWithStun).hasStun,
               });
             } else {
               pushNativeEvent("Injected public STUN server because emulator advertised no ICE servers");

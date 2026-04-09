@@ -32,6 +32,31 @@ assert.match(
   /const STREAM_MODE_OPTIONS = \[\{ value: "native-webrtc", label: "WebRTC \(native emulator\)" \}\];/,
   "frontend stream selector options must expose the native WebRTC mode"
 );
+assert.match(
+  frontendMain,
+  /jsep\._handleStart = \(signal\) => \{/,
+  "native JSEP start patch must stay synchronous so SDP/candidate handling cannot race ahead of peer construction"
+);
+assert.doesNotMatch(
+  frontendMain,
+  /jsep\._handleStart = async \(signal\) => \{/,
+  "native JSEP start patch must not be async because async start can drop first-offer signaling"
+);
+assert.match(
+  frontendMain,
+  /startMissingIce[\s\S]*\[\{ urls: FALLBACK_STUN_URL \}\]/m,
+  "native JSEP patch must inject a fallback STUN server when emulator start signal lacks ICE servers"
+);
+assert.match(
+  frontendMain,
+  /const shouldPreferRelay = startSummary\.hasTurn;/,
+  "relay-only policy should only be forced when the emulator itself advertised TURN"
+);
+assert.match(
+  frontendMain,
+  /fallbackSummary\.hasTurn && !fallbackSummary\.hasStun[\s\S]*FALLBACK_STUN_URL/m,
+  "bridge TURN fallback should also inject STUN to avoid single-path TURN failures"
+);
 
 const composeConfig = readRepoFile("docker-compose.yml");
 assert.match(

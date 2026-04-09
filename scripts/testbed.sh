@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+stage() {
+  echo
+  echo "[testbed] ===== $1 ====="
+}
+
+stage "stage 1: dependency/bootstrap checks"
 echo "[testbed] preparing Node dependencies"
 npm --prefix frontend ci
 npm --prefix bridge-webrtc ci
@@ -15,15 +21,19 @@ source .venv-testbed/bin/activate
 pip install --upgrade pip >/dev/null
 pip install -r apkbridge/requirements.txt >/dev/null
 
+stage "stage 2: apkbridge validation"
 echo "[testbed] running apkbridge unit tests"
 python -m unittest discover -s apkbridge/tests -v
 
+stage "stage 3: bridge relay and media validation"
 echo "[testbed] running bridge-webrtc unit tests"
 node --test --test-force-exit bridge-webrtc/test/*.test.mjs
 
+stage "stage 4: native emulator WebRTC signaling guards"
 echo "[testbed] running native WebRTC configuration checks"
 node scripts/test-native-webrtc.mjs
 
+stage "stage 5: frontend production build"
 echo "[testbed] running frontend build"
 npm --prefix frontend run build
 

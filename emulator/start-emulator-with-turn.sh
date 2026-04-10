@@ -6,6 +6,11 @@ EMULATOR_PARAMS_VALUE="${EMULATOR_PARAMS:-}"
 TURN_KEY_TRIMMED="$(printf '%s' "${TURN_SHARED_SECRET}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 TURN_PREFLIGHT_ON_START="${TURN_PREFLIGHT_ON_START:-1}"
 TURN_PREFLIGHT_TIMEOUT="${TURN_PREFLIGHT_TIMEOUT:-6}"
+TURN_CFG_RUNTIME_LOG="/tmp/android-unknown/turncfg.runtime.log"
+
+log() {
+  printf '%s %s\n' "[start-emulator-with-turn]" "$*" >&2
+}
 
 log() {
   printf '%s %s\n' "[start-emulator-with-turn]" "$*" >&2
@@ -117,7 +122,11 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   cat > "${turn_cfg_script}" <<EOF
 #!/bin/sh
 if [ "\${TURNCFG_DEBUG:-1}" = "1" ]; then
-  echo "[turncfg] emitting JSON from ${turn_cfg_script}" >&2
+  {
+    echo "[turncfg] invoked: \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "[turncfg] script=${turn_cfg_script}"
+    echo "[turncfg] payload_file=/tmp/android-unknown/turncfg.generated.json"
+  } >> "${TURN_CFG_RUNTIME_LOG}"
 fi
 printf '%s\n' '${turn_payload}'
 EOF
@@ -165,6 +174,12 @@ PY
   log "turncfg preview: ${turn_cfg_output}"
   export TURN
   TURN="${turn_cfg_script}"
+  # The emulator runs -turncfg in a child process. Mirror that child's
+  # diagnostics back into container logs so failures are visible via docker logs.
+  touch "${TURN_CFG_RUNTIME_LOG}"
+  (
+    tail -n +1 -F "${TURN_CFG_RUNTIME_LOG}" 2>/dev/null | sed 's/^/[turncfg-runtime] /' >&2
+  ) &
 else
   log "TURN_KEY not set (or placeholder); skipping -turncfg setup"
 fi

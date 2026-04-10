@@ -43,13 +43,11 @@ if [ -n "${TURN_SHARED_SECRET:-}" ]; then
   credential="$(printf '%s' "${username}" | openssl dgst -binary -sha1 -hmac "${TURN_SHARED_SECRET}" | openssl base64 -A)"
 
   turn_url="${TURN_SCHEME}:${TURN_HOST}:${TURN_PORT}?transport=${TURN_PROTOCOL}"
-  # -turncfg expects a valid RTCConfiguration JSON object on stdout. The
-  # example response in the emulator docs includes extra service metadata such
-  # as lifetimeDuration and blockStatus, but those are not RTCConfiguration
-  # fields. Keep this payload limited to standard WebRTC keys so the emulator's
-  # parser does not need to tolerate provider-specific extensions.
-  turn_payload="$(printf '{"iceServers":[{"urls":"%s","username":"%s","credential":"%s"}],"iceTransportPolicy":"all"}' \
-    "${turn_url}" "${username}" "${credential}")"
+  # The emulator's -turncfg path has proven sensitive to payload shape across
+  # image versions. Keep the fuller Google-style response that has already
+  # worked in production instead of reducing it to a minimal RTCConfiguration.
+  turn_payload="$(printf '{"lifetimeDuration":"%ss","iceServers":[{"urls":["%s"],"username":"%s","credential":"%s","maxRateKbps":"8000"}],"blockStatus":"NOT_BLOCKED","iceTransportPolicy":"all"}' \
+    "${TURN_TTL}" "${turn_url}" "${username}" "${credential}")"
   # launch-emulator.sh passes TURN to `-turncfg`, and the emulator expects that
   # value to be a command that prints JSON (not raw JSON itself). Passing a
   # quoted printf expression is brittle because intermediate shells can strip

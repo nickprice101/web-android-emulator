@@ -6,6 +6,11 @@ EMULATOR_PARAMS_VALUE="${EMULATOR_PARAMS:-}"
 TURN_KEY_TRIMMED="$(printf '%s' "${TURN_SHARED_SECRET}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 TURN_PREFLIGHT_ON_START="${TURN_PREFLIGHT_ON_START:-1}"
 TURN_PREFLIGHT_TIMEOUT="${TURN_PREFLIGHT_TIMEOUT:-6}"
+TURN_CFG_RUNTIME_LOG="/tmp/android-unknown/turncfg.runtime.log"
+
+log() {
+  printf '%s %s\n' "[start-emulator-with-turn]" "$*" >&2
+}
 
 append_param_if_missing() {
   flag="$1"
@@ -93,6 +98,7 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   credential="$(printf '%s' "${username}" | openssl dgst -binary -sha1 -hmac "${TURN_SHARED_SECRET}" | openssl base64 -A)"
 
   turn_url="${TURN_SCHEME}:${TURN_HOST}:${TURN_PORT}?transport=${TURN_PROTOCOL}"
+  log "TURN key detected; preparing -turncfg payload for ${turn_url}"
   if [ "${TURN_PREFLIGHT_ON_START}" = "1" ]; then
     run_turn_preflight "${TURN_HOST}" "${TURN_PORT}" "${TURN_SCHEME}" "${TURN_PREFLIGHT_TIMEOUT}" || true
   fi
@@ -100,7 +106,7 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   # "iceServers" array. Keep the payload minimal for widest emulator version
   # compatibility and avoid extra provider-specific fields that some images
   # can reject as an invalid turn configuration.
-  turn_payload="$(printf '{"iceServers":[{"urls":["%s"],"username":"%s","credential":"%s"}]}' \
+  turn_payload="$(printf '{"iceServers":[{"urls":"%s","username":"%s","credential":"%s"}]}' \
     "${turn_url}" "${username}" "${credential}")"
   # launch-emulator.sh passes TURN to `-turncfg`, and the emulator expects that
   # value to be a command that prints JSON (not raw JSON itself). Passing a
@@ -111,11 +117,75 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   mkdir -p "$(dirname "${turn_cfg_script}")"
   cat > "${turn_cfg_script}" <<EOF
 #!/bin/sh
+if [ "\${TURNCFG_DEBUG:-1}" = "1" ]; then
+  turncfg_now="\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [ -w /proc/1/fd/1 ]; then
+    printf '%s\n' "[turncfg] invoked at \${turncfg_now}; script=${turn_cfg_script}" > /proc/1/fd/1 || true
+  fi
+  if [ -w /proc/1/fd/2 ]; then
+    printf '%s\n' "[turncfg] payload file /tmp/android-unknown/turncfg.generated.json" > /proc/1/fd/2 || true
+  fi
+  {
+    echo "[turncfg] invoked: \${turncfg_now}"
+    echo "[turncfg] script=${turn_cfg_script}"
+    echo "[turncfg] payload_file=/tmp/android-unknown/turncfg.generated.json"
+  } >> "${TURN_CFG_RUNTIME_LOG}"
+fi
+printf '%s\n' '${turn_payload}' > /tmp/android-unknown/turncfg.runtime.out.json
 printf '%s\n' '${turn_payload}'
 EOF
   chmod 700 "${turn_cfg_script}"
+  printf '%s\n' "${turn_payload}" > /tmp/android-unknown/turncfg.generated.json
+  log "Wrote TURN config generator to ${turn_cfg_script}"
+  log "Saved generated TURN payload to /tmp/android-unknown/turncfg.generated.json"
+  if ! turn_cfg_output="$("${turn_cfg_script}" 2>/tmp/turncfg.stderr)"; then
+    log "ERROR: ${turn_cfg_script} failed to execute"
+    [ -s /tmp/turncfg.stderr ] && sed 's/^/[start-emulator-with-turn] /' /tmp/turncfg.stderr || true
+    exit 1
+  fi
+  if [ -z "${turn_cfg_output}" ]; then
+    log "ERROR: ${turn_cfg_script} returned empty output"
+    [ -s /tmp/turncfg.stderr ] && sed 's/^/[start-emulator-with-turn] /' /tmp/turncfg.stderr || true
+    exit 1
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    if ! printf '%s' "${turn_cfg_output}" | jq -e '.iceServers | type == "array" and length > 0' >/dev/null 2>&1; then
+      log "ERROR: turncfg output is not a valid iceServers payload: ${turn_cfg_output}"
+      [ -s /tmp/turncfg.stderr ] && sed 's/^/[start-emulator-with-turn] /' /tmp/turncfg.stderr || true
+      exit 1
+    fi
+  elif command -v python3 >/dev/null 2>&1; then
+    if ! TURN_CFG_OUTPUT="${turn_cfg_output}" python3 - <<'PY'
+import json
+import os
+import sys
+
+try:
+    payload = json.loads(os.environ["TURN_CFG_OUTPUT"])
+except Exception:
+    sys.exit(1)
+
+ice_servers = payload.get("iceServers")
+if not isinstance(ice_servers, list) or not ice_servers:
+    sys.exit(1)
+PY
+    then
+      log "ERROR: turncfg output is not a valid iceServers payload: ${turn_cfg_output}"
+      [ -s /tmp/turncfg.stderr ] && sed 's/^/[start-emulator-with-turn] /' /tmp/turncfg.stderr || true
+      exit 1
+    fi
+  fi
+  log "turncfg preview: ${turn_cfg_output}"
   export TURN
   TURN="${turn_cfg_script}"
+  # The emulator runs -turncfg in a child process. Mirror that child's
+  # diagnostics back into container logs so failures are visible via docker logs.
+  touch "${TURN_CFG_RUNTIME_LOG}"
+  (
+    tail -n +1 -F "${TURN_CFG_RUNTIME_LOG}" 2>/dev/null | sed 's/^/[turncfg-runtime] /' >&2
+  ) &
+else
+  log "TURN_KEY not set (or placeholder); skipping -turncfg setup"
 fi
 
 if [ ! -x /android/sdk/launch-emulator.sh ]; then

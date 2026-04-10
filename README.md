@@ -171,49 +171,48 @@ Put a valid certificate for turn.yourdomain.com in certs/.
 
 /opt/coturn/docker-compose.yml
 ```
-version: "3.8"
-
 services:
   coturn:
-    image: coturn/coturn:4.6.3
-    container_name: coturn
-    network_mode: host
-    volumes:
-      - /opt/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
-      - /opt/coturn/certs:/certs:ro
-    command: ["-c", "/etc/coturn/turnserver.conf"]
+    image: ghcr.io/coturn/coturn:4.9.0-r0-debian
+    platform: linux/arm/v7
+    container_name: coturn-turn
     restart: unless-stopped
+    network_mode: host
+    init: true
+    privileged: true
+
+    volumes:
+      - /etc/turn-certs/fullchain.pem:/etc/turn-certs/fullchain.pem:ro
+      - /etc/turn-certs/privkey.pem:/etc/turn-certs/privkey.pem:ro
+
+    entrypoint:
+      - turnserver
+
+    command:
+      - -n
+      - --listening-port=3478
+      - --tls-listening-port=443
+      - --listening-ip=0.0.0.0
+      - --relay-ip=<LOCAL_IP>
+      - --external-ip=<WAN_IP>/<LOCAL_IP>
+      - --allow-loopback-peers
+      - --realm=turn.yourdomain.com
+      - --server-name=turn.yourdomain.com
+      - --use-auth-secret
+      - --static-auth-secret=<YOUR_TURN_SECRET>
+      - --fingerprint
+      - --cert=/etc/turn-certs/fullchain.pem
+      - --pkey=/etc/turn-certs/privkey.pem
+      - --cli-password=password
+      - --no-udp
+      - --no-dtls
+      - --min-port=49160
+      - --max-port=49200
+      - --verbose
+      - --log-file=stdout
 ```
 
 Coturn is the standard self-hosted TURN option, and its Docker guidance commonly uses host networking because TURN needs relay ports.
-
-/opt/coturn/turnserver.conf
-```
-listening-port=3478
-tls-listening-port=443
-
-realm=turn.yourdomain.com
-server-name=turn.yourdomain.com
-
-use-auth-secret
-static-auth-secret=REPLACE_WITH_A_LONG_RANDOM_SECRET
-fingerprint
-
-cert=/certs/fullchain.pem
-pkey=/certs/privkey.pem
-
-external-ip=YOUR_PUBLIC_IP
-
-# Firewall-friendly bias
-no-udp
-no-dtls
-
-min-port=49160
-max-port=49200
-
-simple-log
-no-cli
-```
 
 If your emulator stack runs on a Docker bridge network and the WebRTC bridge falls back to host candidates like `172.22.x.x`, coturn may reject browser permissions to those peers with `403 Forbidden IP`. In that case, either:
 
@@ -234,12 +233,6 @@ Router port forwarding is only one half of the path. If the Pi runs its own fire
 
 * `443/tcp`
 * `49160-49200/tcp`
-
-Replace:
-
-REPLACE_WITH_A_LONG_RANDOM_SECRET
-
-YOUR_PUBLIC_IP
 
 Then start it:
 

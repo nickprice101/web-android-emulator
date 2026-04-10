@@ -2,13 +2,17 @@ name: TURN Testbed CI
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
 
 jobs:
   turn-testbed:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      TURN_HOST: ${{ secrets.TURN_HOST }}
+      TURN_HOST: ${{ vars.TURN_HOST || secrets.TURN_HOST }}
       TURN_KEY: ${{ secrets.TURN_KEY }}
       TURN_PORT: ${{ vars.TURN_PORT || '443' }}
       TURN_SCHEME: ${{ vars.TURN_SCHEME || 'turns' }}

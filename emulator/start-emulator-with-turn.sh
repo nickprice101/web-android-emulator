@@ -145,10 +145,11 @@ if [ "\${TURNCFG_DEBUG:-0}" = "1" ]; then
     echo "[turncfg] payload_file=/tmp/android-unknown/turncfg.generated.json"
   } >> "${TURN_CFG_RUNTIME_LOG}"
 fi
-printf '%s\n' '${turn_payload}' > /tmp/android-unknown/turncfg.runtime.out.json
 printf '%s\n' '${turn_payload}'
 EOF
-  chmod 700 "${turn_cfg_script}"
+  # The emulator process may run as a non-root user. Keep the turncfg helper
+  # executable for all users so -turncfg can invoke it reliably.
+  chmod 755 "${turn_cfg_script}"
   printf '%s\n' "${turn_payload}" > /tmp/android-unknown/turncfg.generated.json
   log "Wrote TURN config generator to ${turn_cfg_script}"
   log "Saved generated TURN payload to /tmp/android-unknown/turncfg.generated.json"

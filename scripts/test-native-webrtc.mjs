@@ -96,5 +96,10 @@ assert.match(
   /turncfg jq preview command: TURNCFG_DEBUG=0/,
   "emulator TURN wrapper must log a jq-style preview command for turncfg output diagnostics"
 );
+assert.match(
+  emulatorTurnWrapper,
+  /chmod 755 "\$\{turn_cfg_script\}"/,
+  "emulator TURN wrapper must keep the generated turncfg script executable by non-root emulator users"
+);
 
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

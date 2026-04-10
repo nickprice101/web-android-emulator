@@ -12,6 +12,10 @@ log() {
   printf '%s %s\n' "[start-emulator-with-turn]" "$*" >&2
 }
 
+log() {
+  printf '%s %s\n' "[start-emulator-with-turn]" "$*" >&2
+}
+
 append_param_if_missing() {
   flag="$1"
   case " ${EMULATOR_PARAMS_VALUE} " in

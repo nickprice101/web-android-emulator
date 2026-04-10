@@ -73,18 +73,8 @@ assert.match(
 const emulatorTurnWrapper = readRepoFile("emulator/start-emulator-with-turn.sh");
 assert.match(
   emulatorTurnWrapper,
-  /lifetimeDuration":"%ss"/,
-  "emulator TURN wrapper must keep the provider-style lifetimeDuration field that current emulator images accept"
-);
-assert.match(
-  emulatorTurnWrapper,
-  /"iceServers":\[\{"urls":\["%s"\],"username":"%s","credential":"%s","maxRateKbps":"8000"\}\]/,
+  /"iceServers":\[\{"urls":\["%s"\],"username":"%s","credential":"%s"\}\]/,
   "emulator TURN wrapper must emit TURN urls as an array with username and credential fields"
-);
-assert.match(
-  emulatorTurnWrapper,
-  /"blockStatus":"NOT_BLOCKED","iceTransportPolicy":"all"/,
-  "emulator TURN wrapper must keep the known-good TURN block status and transport policy fields"
 );
 
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

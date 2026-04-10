@@ -37,4 +37,12 @@ stage "stage 5: frontend production build"
 echo "[testbed] running frontend build"
 npm --prefix frontend run build
 
+stage "stage 6: optional TURN reachability/auth harness"
+if [[ -n "${TURN_HOST:-}" && -n "${TURN_KEY:-}" ]]; then
+  echo "[testbed] running TURN connectivity harness"
+  node bridge-webrtc/test/turn-connectivity-harness.mjs
+else
+  echo "[testbed] skipping TURN harness (set TURN_HOST and TURN_KEY to run it)"
+fi
+
 echo "[testbed] all checks passed"

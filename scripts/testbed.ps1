@@ -74,4 +74,12 @@ Write-Host "[testbed] running frontend build"
 npm --prefix frontend run build
 Assert-LastExitCode "npm --prefix frontend run build"
 
+if ($env:TURN_HOST -and $env:TURN_KEY) {
+  Write-Host "[testbed] running TURN connectivity harness"
+  node bridge-webrtc/test/turn-connectivity-harness.mjs
+  Assert-LastExitCode "node bridge-webrtc/test/turn-connectivity-harness.mjs"
+} else {
+  Write-Host "[testbed] skipping TURN harness (set TURN_HOST and TURN_KEY to run it)"
+}
+
 Write-Host "[testbed] all checks passed"

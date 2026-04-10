@@ -3,6 +3,9 @@ set -eu
 
 TURN_SHARED_SECRET="${TURN_KEY:-}"
 EMULATOR_PARAMS_VALUE="${EMULATOR_PARAMS:-}"
+TURN_KEY_TRIMMED="$(printf '%s' "${TURN_SHARED_SECRET}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+TURN_PREFLIGHT_ON_START="${TURN_PREFLIGHT_ON_START:-1}"
+TURN_PREFLIGHT_TIMEOUT="${TURN_PREFLIGHT_TIMEOUT:-6}"
 
 append_param_if_missing() {
   flag="$1"
@@ -28,7 +31,54 @@ append_param_if_missing "-camera-front none"
 append_param_if_missing "-no-snapshot-save"
 export EMULATOR_PARAMS="${EMULATOR_PARAMS_VALUE}"
 
-if [ -n "${TURN_SHARED_SECRET:-}" ]; then
+is_placeholder_turn_secret() {
+  case "$1" in
+    PLACEHOLDER*|placeholder*|REPLACE_ME*|replace_me*|CHANGEME|changeme)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+run_turn_preflight() {
+  host="$1"
+  port="$2"
+  scheme="$3"
+  timeout_s="$4"
+
+  echo "[turn-preflight] host=${host} port=${port} scheme=${scheme}"
+
+  if command -v getent >/dev/null 2>&1; then
+    resolved="$(getent hosts "${host}" 2>/dev/null | awk 'NR==1 {print $1}')"
+    if [ -n "${resolved:-}" ]; then
+      echo "[turn-preflight] dns: ok (${resolved})"
+    else
+      echo "[turn-preflight] dns: failed (getent returned no records)"
+    fi
+  else
+    echo "[turn-preflight] dns: skipped (getent not installed)"
+  fi
+
+  if [ "${scheme}" = "turns" ]; then
+    if timeout "${timeout_s}" openssl s_client -connect "${host}:${port}" -servername "${host}" -brief </dev/null >/tmp/turn-preflight.log 2>&1; then
+      echo "[turn-preflight] tls: ok"
+    else
+      echo "[turn-preflight] tls: failed"
+      sed 's/^/[turn-preflight] /' /tmp/turn-preflight.log || true
+    fi
+  else
+    if command -v nc >/dev/null 2>&1 && timeout "${timeout_s}" nc -z -v "${host}" "${port}" >/tmp/turn-preflight.log 2>&1; then
+      echo "[turn-preflight] tcp: ok"
+    else
+      echo "[turn-preflight] tcp: failed (install netcat or use TURN_SCHEME=turns for TLS probe)"
+      [ -f /tmp/turn-preflight.log ] && sed 's/^/[turn-preflight] /' /tmp/turn-preflight.log || true
+    fi
+  fi
+}
+
+if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIMMED}"; then
   : "${TURN_HOST:?TURN_HOST must be set when TURN_KEY is configured}"
 
   TURN_PORT="${TURN_PORT:-443}"
@@ -43,11 +93,15 @@ if [ -n "${TURN_SHARED_SECRET:-}" ]; then
   credential="$(printf '%s' "${username}" | openssl dgst -binary -sha1 -hmac "${TURN_SHARED_SECRET}" | openssl base64 -A)"
 
   turn_url="${TURN_SCHEME}:${TURN_HOST}:${TURN_PORT}?transport=${TURN_PROTOCOL}"
-  # The emulator's -turncfg path has proven sensitive to payload shape across
-  # image versions. Keep the fuller Google-style response that has already
-  # worked in production instead of reducing it to a minimal RTCConfiguration.
-  turn_payload="$(printf '{"lifetimeDuration":"%ss","iceServers":[{"urls":["%s"],"username":"%s","credential":"%s","maxRateKbps":"8000"}],"blockStatus":"NOT_BLOCKED","iceTransportPolicy":"all"}' \
-    "${TURN_TTL}" "${turn_url}" "${username}" "${credential}")"
+  if [ "${TURN_PREFLIGHT_ON_START}" = "1" ]; then
+    run_turn_preflight "${TURN_HOST}" "${TURN_PORT}" "${TURN_SCHEME}" "${TURN_PREFLIGHT_TIMEOUT}" || true
+  fi
+  # -turncfg only guarantees support for JSON payloads that include an
+  # "iceServers" array. Keep the payload minimal for widest emulator version
+  # compatibility and avoid extra provider-specific fields that some images
+  # can reject as an invalid turn configuration.
+  turn_payload="$(printf '{"iceServers":[{"urls":["%s"],"username":"%s","credential":"%s"}]}' \
+    "${turn_url}" "${username}" "${credential}")"
   # launch-emulator.sh passes TURN to `-turncfg`, and the emulator expects that
   # value to be a command that prints JSON (not raw JSON itself). Passing a
   # quoted printf expression is brittle because intermediate shells can strip

@@ -110,6 +110,19 @@ What the testbed runs:
 4. `python -m unittest discover -s apkbridge/tests -v`
 5. `node --test bridge-webrtc/test/*.test.mjs`
 6. `npm --prefix frontend run build`
+7. Optional TURN harness (`node bridge-webrtc/test/turn-connectivity-harness.mjs`) when `TURN_HOST` and `TURN_KEY` are set.
+
+To explicitly verify TURN reachability and REST-auth credential acceptance
+using the same username/password shape that the emulator wrapper emits:
+
+```bash
+TURN_HOST=turn.example.com \
+TURN_KEY='your-static-auth-secret' \
+TURN_PORT=443 \
+TURN_SCHEME=turns \
+TURN_PROTOCOL=tcp \
+node bridge-webrtc/test/turn-connectivity-harness.mjs
+```
 
 This is suitable for local smoke testing and CI pre-merge validation.
 

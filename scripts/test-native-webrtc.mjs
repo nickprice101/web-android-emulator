@@ -73,8 +73,8 @@ assert.match(
 const emulatorTurnWrapper = readRepoFile("emulator/start-emulator-with-turn.sh");
 assert.match(
   emulatorTurnWrapper,
-  /TURNCFG_URLS_FORMAT="\$\{TURNCFG_URLS_FORMAT:-string\}"/,
-  "emulator TURN wrapper must support selecting TURN cfg urls format via TURNCFG_URLS_FORMAT"
+  /TURNCFG_URLS_FORMAT="\$\{TURNCFG_URLS_FORMAT:-array\}"/,
+  "emulator TURN wrapper must default TURN cfg urls to array form while keeping TURNCFG_URLS_FORMAT override support"
 );
 assert.match(
   emulatorTurnWrapper,

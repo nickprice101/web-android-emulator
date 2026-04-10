@@ -231,9 +231,13 @@ PY
   export TURN
   # Keep the emulator-invoked turncfg command deterministic and fast: legacy
   # emulator builds enforce a 1000ms timeout for -turncfg command execution.
-  # Default TURNCFG_DEBUG to 0 so the generated command only prints JSON.
+  # Some emulator builds can fail to collect stdout from shell-script helpers
+  # even when they succeed under preflight checks. Use /bin/cat on a static
+  # payload file for the runtime -turncfg command to avoid interpreter/env
+  # differences between startup and emulator child processes.
   export TURNCFG_DEBUG="${TURNCFG_DEBUG:-0}"
-  TURN="${turn_cfg_script}"
+  TURN="/bin/cat /tmp/android-unknown/turncfg.generated.json"
+  log "turncfg runtime command: ${TURN}"
   # The emulator runs -turncfg in a child process. Mirror that child's
   # diagnostics back into container logs so failures are visible via docker logs.
   touch "${TURN_CFG_RUNTIME_LOG}"

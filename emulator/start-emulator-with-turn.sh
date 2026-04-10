@@ -6,7 +6,8 @@ EMULATOR_PARAMS_VALUE="${EMULATOR_PARAMS:-}"
 TURN_KEY_TRIMMED="$(printf '%s' "${TURN_SHARED_SECRET}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 TURN_PREFLIGHT_ON_START="${TURN_PREFLIGHT_ON_START:-1}"
 TURN_PREFLIGHT_TIMEOUT="${TURN_PREFLIGHT_TIMEOUT:-6}"
-TURN_CFG_RUNTIME_LOG="/tmp/android-unknown/turncfg.runtime.log"
+TURN_CFG_DIR="${TURN_CFG_DIR:-/android/sdk/turncfg}"
+TURN_CFG_RUNTIME_LOG="${TURN_CFG_DIR}/turncfg.runtime.log"
 TURNCFG_LOG_HEXDUMP_LINES="${TURNCFG_LOG_HEXDUMP_LINES:-20}"
 
 log() {
@@ -132,8 +133,10 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   # quoted printf expression is brittle because intermediate shells can strip
   # quoting and yield invalid JSON tokens. Write a dedicated executable script
   # and pass its path as a single command token.
-  turn_cfg_script="/tmp/android-unknown/turncfg.sh"
-  mkdir -p "$(dirname "${turn_cfg_script}")"
+  turn_cfg_script="${TURN_CFG_DIR}/turncfg.sh"
+  turn_cfg_payload="${TURN_CFG_DIR}/turncfg.generated.json"
+  mkdir -p "${TURN_CFG_DIR}"
+  chmod 755 "${TURN_CFG_DIR}"
 cat > "${turn_cfg_script}" <<EOF
 #!/bin/sh
 if [ "\${TURNCFG_DEBUG:-0}" = "1" ]; then
@@ -142,7 +145,7 @@ if [ "\${TURNCFG_DEBUG:-0}" = "1" ]; then
     echo "[turncfg] invoked: \${turncfg_now}"
     echo "[turncfg] script=${turn_cfg_script}"
     echo "[turncfg] urls_format=${TURNCFG_URLS_FORMAT}"
-    echo "[turncfg] payload_file=/tmp/android-unknown/turncfg.generated.json"
+    echo "[turncfg] payload_file=${turn_cfg_payload}"
   } >> "${TURN_CFG_RUNTIME_LOG}"
 fi
 printf '%s\n' '${turn_payload}'
@@ -150,9 +153,10 @@ EOF
   # The emulator process may run as a non-root user. Keep the turncfg helper
   # executable for all users so -turncfg can invoke it reliably.
   chmod 755 "${turn_cfg_script}"
-  printf '%s\n' "${turn_payload}" > /tmp/android-unknown/turncfg.generated.json
+  printf '%s\n' "${turn_payload}" > "${turn_cfg_payload}"
+  chmod 644 "${turn_cfg_payload}"
   log "Wrote TURN config generator to ${turn_cfg_script}"
-  log "Saved generated TURN payload to /tmp/android-unknown/turncfg.generated.json"
+  log "Saved generated TURN payload to ${turn_cfg_payload}"
   TURNCFG_DEBUG=0 "${turn_cfg_script}" >/tmp/turncfg.debug0.out 2>/tmp/turncfg.debug0.stderr || true
   if [ ! -s /tmp/turncfg.debug0.out ]; then
     log "ERROR: TURNCFG_DEBUG=0 ${turn_cfg_script} produced empty output"
@@ -231,9 +235,13 @@ PY
   export TURN
   # Keep the emulator-invoked turncfg command deterministic and fast: legacy
   # emulator builds enforce a 1000ms timeout for -turncfg command execution.
-  # Default TURNCFG_DEBUG to 0 so the generated command only prints JSON.
+  # Some emulator builds can fail to collect stdout from shell-script helpers
+  # even when they succeed under preflight checks. Use /bin/cat on a static
+  # payload file for the runtime -turncfg command to avoid interpreter/env
+  # differences between startup and emulator child processes.
   export TURNCFG_DEBUG="${TURNCFG_DEBUG:-0}"
-  TURN="${turn_cfg_script}"
+  TURN="/bin/cat ${turn_cfg_payload}"
+  log "turncfg runtime command: ${TURN}"
   # The emulator runs -turncfg in a child process. Mirror that child's
   # diagnostics back into container logs so failures are visible via docker logs.
   touch "${TURN_CFG_RUNTIME_LOG}"

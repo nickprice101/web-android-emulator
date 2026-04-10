@@ -118,12 +118,20 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   cat > "${turn_cfg_script}" <<EOF
 #!/bin/sh
 if [ "\${TURNCFG_DEBUG:-1}" = "1" ]; then
+  turncfg_now="\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [ -w /proc/1/fd/1 ]; then
+    printf '%s\n' "[turncfg] invoked at \${turncfg_now}; script=${turn_cfg_script}" > /proc/1/fd/1 || true
+  fi
+  if [ -w /proc/1/fd/2 ]; then
+    printf '%s\n' "[turncfg] payload file /tmp/android-unknown/turncfg.generated.json" > /proc/1/fd/2 || true
+  fi
   {
-    echo "[turncfg] invoked: \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "[turncfg] invoked: \${turncfg_now}"
     echo "[turncfg] script=${turn_cfg_script}"
     echo "[turncfg] payload_file=/tmp/android-unknown/turncfg.generated.json"
   } >> "${TURN_CFG_RUNTIME_LOG}"
 fi
+printf '%s\n' '${turn_payload}' > /tmp/android-unknown/turncfg.runtime.out.json
 printf '%s\n' '${turn_payload}'
 EOF
   chmod 700 "${turn_cfg_script}"

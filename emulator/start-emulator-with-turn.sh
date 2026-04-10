@@ -7,6 +7,7 @@ TURN_KEY_TRIMMED="$(printf '%s' "${TURN_SHARED_SECRET}" | sed 's/^[[:space:]]*//
 TURN_PREFLIGHT_ON_START="${TURN_PREFLIGHT_ON_START:-1}"
 TURN_PREFLIGHT_TIMEOUT="${TURN_PREFLIGHT_TIMEOUT:-6}"
 TURN_CFG_RUNTIME_LOG="/tmp/android-unknown/turncfg.runtime.log"
+TURNCFG_LOG_HEXDUMP_LINES="${TURNCFG_LOG_HEXDUMP_LINES:-20}"
 
 log() {
   printf '%s %s\n' "[start-emulator-with-turn]" "$*" >&2
@@ -91,6 +92,7 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   TURN_SCHEME="${TURN_SCHEME:-turns}"
   TURN_TTL="${TURN_TTL:-2592000}"
   TURN_USERNAME_SUFFIX="${TURN_USERNAME_SUFFIX:-emuuser}"
+  TURNCFG_URLS_FORMAT="${TURNCFG_URLS_FORMAT:-string}"
 
   now="$(date +%s)"
   expiry="$((now + TURN_TTL))"
@@ -102,12 +104,26 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   if [ "${TURN_PREFLIGHT_ON_START}" = "1" ]; then
     run_turn_preflight "${TURN_HOST}" "${TURN_PORT}" "${TURN_SCHEME}" "${TURN_PREFLIGHT_TIMEOUT}" || true
   fi
+  case "${TURNCFG_URLS_FORMAT}" in
+    string|array) ;;
+    *)
+      log "Unsupported TURNCFG_URLS_FORMAT='${TURNCFG_URLS_FORMAT}', defaulting to 'string'"
+      TURNCFG_URLS_FORMAT="string"
+      ;;
+  esac
+
   # -turncfg only guarantees support for JSON payloads that include an
   # "iceServers" array. Keep the payload minimal for widest emulator version
   # compatibility and avoid extra provider-specific fields that some images
   # can reject as an invalid turn configuration.
-  turn_payload="$(printf '{"iceServers":[{"urls":"%s","username":"%s","credential":"%s"}]}' \
-    "${turn_url}" "${username}" "${credential}")"
+  if [ "${TURNCFG_URLS_FORMAT}" = "array" ]; then
+    turn_payload="$(printf '{"iceServers":[{"urls":["%s"],"username":"%s","credential":"%s"}]}' \
+      "${turn_url}" "${username}" "${credential}")"
+  else
+    turn_payload="$(printf '{"iceServers":[{"urls":"%s","username":"%s","credential":"%s"}]}' \
+      "${turn_url}" "${username}" "${credential}")"
+  fi
+  log "turncfg urls format mode: ${TURNCFG_URLS_FORMAT}"
   # launch-emulator.sh passes TURN to `-turncfg`, and the emulator expects that
   # value to be a command that prints JSON (not raw JSON itself). Passing a
   # quoted printf expression is brittle because intermediate shells can strip
@@ -128,6 +144,7 @@ if [ "\${TURNCFG_DEBUG:-1}" = "1" ]; then
   {
     echo "[turncfg] invoked: \${turncfg_now}"
     echo "[turncfg] script=${turn_cfg_script}"
+    echo "[turncfg] urls_format=${TURNCFG_URLS_FORMAT}"
     echo "[turncfg] payload_file=/tmp/android-unknown/turncfg.generated.json"
   } >> "${TURN_CFG_RUNTIME_LOG}"
 fi
@@ -138,10 +155,46 @@ EOF
   printf '%s\n' "${turn_payload}" > /tmp/android-unknown/turncfg.generated.json
   log "Wrote TURN config generator to ${turn_cfg_script}"
   log "Saved generated TURN payload to /tmp/android-unknown/turncfg.generated.json"
+  TURNCFG_DEBUG=0 "${turn_cfg_script}" >/tmp/turncfg.debug0.out 2>/tmp/turncfg.debug0.stderr || true
+  if [ ! -s /tmp/turncfg.debug0.out ]; then
+    log "ERROR: TURNCFG_DEBUG=0 ${turn_cfg_script} produced empty output"
+    [ -s /tmp/turncfg.debug0.stderr ] && sed 's/^/[start-emulator-with-turn] turncfg-debug0-stderr /' /tmp/turncfg.debug0.stderr >&2 || true
+    exit 1
+  fi
+  if command -v hexdump >/dev/null 2>&1; then
+    log "turncfg hexdump preview command: TURNCFG_DEBUG=0 ${turn_cfg_script} | hexdump -C | head -n ${TURNCFG_LOG_HEXDUMP_LINES}"
+    hexdump -C /tmp/turncfg.debug0.out | head -n "${TURNCFG_LOG_HEXDUMP_LINES}" | sed 's/^/[start-emulator-with-turn] turncfg-hexdump /' >&2 || true
+    [ -s /tmp/turncfg.debug0.stderr ] && sed 's/^/[start-emulator-with-turn] turncfg-hexdump-stderr /' /tmp/turncfg.debug0.stderr >&2 || true
+  elif command -v od >/dev/null 2>&1; then
+    log "turncfg hexdump fallback command: TURNCFG_DEBUG=0 ${turn_cfg_script} | od -An -tx1 -v | head -n ${TURNCFG_LOG_HEXDUMP_LINES}"
+    od -An -tx1 -v /tmp/turncfg.debug0.out | head -n "${TURNCFG_LOG_HEXDUMP_LINES}" | sed 's/^/[start-emulator-with-turn] turncfg-hexdump /' >&2 || true
+    [ -s /tmp/turncfg.debug0.stderr ] && sed 's/^/[start-emulator-with-turn] turncfg-hexdump-stderr /' /tmp/turncfg.debug0.stderr >&2 || true
+  else
+    log "turncfg hexdump preview skipped (hexdump/od not installed)"
+  fi
   if ! turn_cfg_output="$("${turn_cfg_script}" 2>/tmp/turncfg.stderr)"; then
     log "ERROR: ${turn_cfg_script} failed to execute"
     [ -s /tmp/turncfg.stderr ] && sed 's/^/[start-emulator-with-turn] /' /tmp/turncfg.stderr || true
     exit 1
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    log "turncfg jq preview command: TURNCFG_DEBUG=0 ${turn_cfg_script} | jq -c ."
+    if ! jq -c . /tmp/turncfg.debug0.out 2>/tmp/turncfg.jq.parse.stderr | sed 's/^/[start-emulator-with-turn] turncfg-jq /' >&2; then
+      log "ERROR: turncfg jq preview failed to parse TURNCFG_DEBUG=0 output"
+      [ -s /tmp/turncfg.jq.parse.stderr ] && sed 's/^/[start-emulator-with-turn] turncfg-jq-parse /' /tmp/turncfg.jq.parse.stderr >&2 || true
+      exit 1
+    fi
+    [ -s /tmp/turncfg.debug0.stderr ] && sed 's/^/[start-emulator-with-turn] turncfg-jq-stderr /' /tmp/turncfg.debug0.stderr >&2 || true
+  elif command -v python3 >/dev/null 2>&1; then
+    log "turncfg json preview command: TURNCFG_DEBUG=0 ${turn_cfg_script} | python3 -m json.tool"
+    if ! python3 -m json.tool /tmp/turncfg.debug0.out 2>/tmp/turncfg.jq.parse.stderr | sed 's/^/[start-emulator-with-turn] turncfg-json /' >&2; then
+      log "ERROR: turncfg json preview failed to parse TURNCFG_DEBUG=0 output"
+      [ -s /tmp/turncfg.jq.parse.stderr ] && sed 's/^/[start-emulator-with-turn] turncfg-json-parse /' /tmp/turncfg.jq.parse.stderr >&2 || true
+      exit 1
+    fi
+    [ -s /tmp/turncfg.debug0.stderr ] && sed 's/^/[start-emulator-with-turn] turncfg-json-stderr /' /tmp/turncfg.debug0.stderr >&2 || true
+  else
+    log "turncfg jq/json preview skipped (jq/python3 not installed)"
   fi
   if [ -z "${turn_cfg_output}" ]; then
     log "ERROR: ${turn_cfg_script} returned empty output"
@@ -175,7 +228,8 @@ PY
       exit 1
     fi
   fi
-  log "turncfg preview: ${turn_cfg_output}"
+  log "turncfg preview (${TURNCFG_URLS_FORMAT}): ${turn_cfg_output}"
+  [ -s /tmp/turncfg.stderr ] && log "turncfg stderr preview: $(cat /tmp/turncfg.stderr)"
   export TURN
   TURN="${turn_cfg_script}"
   # The emulator runs -turncfg in a child process. Mirror that child's

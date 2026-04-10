@@ -73,8 +73,28 @@ assert.match(
 const emulatorTurnWrapper = readRepoFile("emulator/start-emulator-with-turn.sh");
 assert.match(
   emulatorTurnWrapper,
+  /TURNCFG_URLS_FORMAT="\$\{TURNCFG_URLS_FORMAT:-string\}"/,
+  "emulator TURN wrapper must support selecting TURN cfg urls format via TURNCFG_URLS_FORMAT"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /"iceServers":\[\{"urls":\["%s"\],"username":"%s","credential":"%s"\}\]/,
+  "emulator TURN wrapper must support urls as an array for emulator builds that reject string form"
+);
+assert.match(
+  emulatorTurnWrapper,
   /"iceServers":\[\{"urls":"%s","username":"%s","credential":"%s"\}\]/,
-  "emulator TURN wrapper must emit TURN urls as a string with username and credential fields for emulator compatibility"
+  "emulator TURN wrapper must retain urls string mode for backward compatibility"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /turncfg hexdump preview command:/,
+  "emulator TURN wrapper must log a hexdump-style preview command for turncfg output diagnostics"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /turncfg jq preview command: TURNCFG_DEBUG=0/,
+  "emulator TURN wrapper must log a jq-style preview command for turncfg output diagnostics"
 );
 
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

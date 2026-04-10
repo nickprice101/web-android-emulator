@@ -1,0 +1,148 @@
+name: TURN Testbed CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  turn-testbed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TURN_HOST: ${{ vars.TURN_HOST || secrets.TURN_HOST }}
+      TURN_KEY: ${{ secrets.TURN_KEY }}
+      TURN_PORT: ${{ vars.TURN_PORT || '443' }}
+      TURN_SCHEME: ${{ vars.TURN_SCHEME || 'turns' }}
+      TURN_PROTOCOL: ${{ vars.TURN_PROTOCOL || 'tcp' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate TURN inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${TURN_HOST:-}" ]]; then
+            echo "Error: set repository secret TURN_HOST" >&2
+            exit 1
+          fi
+          if [[ -z "${TURN_KEY:-}" ]]; then
+            echo "Error: set repository secret TURN_KEY" >&2
+            exit 1
+          fi
+          if [[ "${TURN_KEY}" =~ PLACEHOLDER|CHANGEME|example|dummy ]]; then
+            echo "Error: TURN_KEY appears to be a placeholder" >&2
+            exit 1
+          fi
+
+      - name: TURN network preflight (DNS/TCP/TLS)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import socket
+          import ssl
+
+          host = os.environ["TURN_HOST"].strip()
+          port = int(os.environ.get("TURN_PORT", "443"))
+          scheme = os.environ.get("TURN_SCHEME", "turns").strip().lower()
+
+          if not host:
+            raise SystemExit("TURN_HOST is empty")
+
+          print(f"[preflight] resolving {host}")
+          infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+          addrs = sorted({info[4][0] for info in infos})
+          print(f"[preflight] DNS ok: {', '.join(addrs)}")
+
+          print(f"[preflight] TCP connect to {host}:{port}")
+          with socket.create_connection((host, port), timeout=8):
+            pass
+          print("[preflight] TCP ok")
+
+          if scheme == "turns":
+            print(f"[preflight] TLS handshake to {host}:{port}")
+            ctx = ssl.create_default_context()
+            with socket.create_connection((host, port), timeout=8) as raw:
+              with ctx.wrap_socket(raw, server_hostname=host) as tls_sock:
+                cert = tls_sock.getpeercert()
+            print(f"[preflight] TLS ok; peer subject={cert.get('subject')}")
+          else:
+            print(f"[preflight] TLS skipped because TURN_SCHEME={scheme}")
+          PY
+
+      - name: Run full testbed (includes TURN harness)
+        id: testbed
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/testbed.sh
+
+      - name: TURN failure diagnostics (clarify relay-allocation vs reachability)
+        if: steps.testbed.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+
+          run_harness_case() {
+            local label="$1"
+            local scheme="$2"
+            local port="$3"
+            local logfile="artifacts/turn-harness-${label}.log"
+
+            echo "=== TURN harness case: ${label} (${scheme}:${port}) ==="
+            TURN_SCHEME="${scheme}" TURN_PORT="${port}" node bridge-webrtc/test/turn-connectivity-harness.mjs \
+              >"${logfile}" 2>&1 || true
+            cat "${logfile}"
+            echo
+          }
+
+          run_harness_case "primary" "${TURN_SCHEME}" "${TURN_PORT}"
+
+          if [[ "${TURN_SCHEME}" == "turns" ]]; then
+            echo "::notice::Primary turns test failed inside testbed. Running plain TURN diagnostic case (turn:3478) to isolate TLS-path vs relay-allocation issues."
+            run_harness_case "diag-turn-3478" "turn" "3478"
+          fi
+
+          {
+            echo "## TURN diagnostic interpretation"
+            echo
+            echo "- If DNS/TCP/TLS are OK but relay candidates are still zero, this usually indicates TURN auth mismatch or blocked relay connectivity (for this repo: 49160-49200/tcp)."
+            echo "- If plain TURN (turn:3478) passes but turns:443 fails, focus on TLS/SNI/certificate path."
+            echo "- If both fail with socket setup/host lookup errors, focus on runner egress/routing and TURN host resolution in the WebRTC client."
+            echo
+            echo "Primary log: \`artifacts/turn-harness-primary.log\`"
+            if [[ "${TURN_SCHEME}" == "turns" ]]; then
+              echo "Diagnostic log: \`artifacts/turn-harness-diag-turn-3478.log\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload TURN diagnostic logs
+        if: steps.testbed.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: turn-diagnostic-logs
+          path: artifacts/*.log
+
+      - name: Fail workflow if testbed failed
+        if: steps.testbed.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "testbed.sh failed. See TURN failure diagnostics and logs above." >&2
+          exit 1

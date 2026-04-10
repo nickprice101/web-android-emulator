@@ -92,7 +92,10 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   TURN_SCHEME="${TURN_SCHEME:-turns}"
   TURN_TTL="${TURN_TTL:-2592000}"
   TURN_USERNAME_SUFFIX="${TURN_USERNAME_SUFFIX:-emuuser}"
-  TURNCFG_URLS_FORMAT="${TURNCFG_URLS_FORMAT:-string}"
+  # Newer emulator builds can reject the single-string urls form and report
+  # "TurnCFG: Produces no result" even when JSON syntax is valid. Default to
+  # array form for compatibility, while still allowing override.
+  TURNCFG_URLS_FORMAT="${TURNCFG_URLS_FORMAT:-array}"
 
   now="$(date +%s)"
   expiry="$((now + TURN_TTL))"
@@ -107,8 +110,8 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   case "${TURNCFG_URLS_FORMAT}" in
     string|array) ;;
     *)
-      log "Unsupported TURNCFG_URLS_FORMAT='${TURNCFG_URLS_FORMAT}', defaulting to 'string'"
-      TURNCFG_URLS_FORMAT="string"
+      log "Unsupported TURNCFG_URLS_FORMAT='${TURNCFG_URLS_FORMAT}', defaulting to 'array'"
+      TURNCFG_URLS_FORMAT="array"
       ;;
   esac
 

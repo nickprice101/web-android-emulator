@@ -73,8 +73,8 @@ assert.match(
 const emulatorTurnWrapper = readRepoFile("emulator/start-emulator-with-turn.sh");
 assert.match(
   emulatorTurnWrapper,
-  /"iceServers":\[\{"urls":\["%s"\],"username":"%s","credential":"%s"\}\]/,
-  "emulator TURN wrapper must emit TURN urls as an array with username and credential fields"
+  /"iceServers":\[\{"urls":"%s","username":"%s","credential":"%s"\}\]/,
+  "emulator TURN wrapper must emit TURN urls as a string with username and credential fields for emulator compatibility"
 );
 
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

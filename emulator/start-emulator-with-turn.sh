@@ -8,7 +8,7 @@ TURN_PREFLIGHT_ON_START="${TURN_PREFLIGHT_ON_START:-1}"
 TURN_PREFLIGHT_TIMEOUT="${TURN_PREFLIGHT_TIMEOUT:-6}"
 
 log() {
-  printf '%s %s\n' "[start-emulator-with-turn]" "$*"
+  printf '%s %s\n' "[start-emulator-with-turn]" "$*" >&2
 }
 
 append_param_if_missing() {
@@ -105,7 +105,7 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   # "iceServers" array. Keep the payload minimal for widest emulator version
   # compatibility and avoid extra provider-specific fields that some images
   # can reject as an invalid turn configuration.
-  turn_payload="$(printf '{"iceServers":[{"urls":["%s"],"username":"%s","credential":"%s"}]}' \
+  turn_payload="$(printf '{"iceServers":[{"urls":"%s","username":"%s","credential":"%s"}]}' \
     "${turn_url}" "${username}" "${credential}")"
   # launch-emulator.sh passes TURN to `-turncfg`, and the emulator expects that
   # value to be a command that prints JSON (not raw JSON itself). Passing a
@@ -116,10 +116,15 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   mkdir -p "$(dirname "${turn_cfg_script}")"
   cat > "${turn_cfg_script}" <<EOF
 #!/bin/sh
+if [ "\${TURNCFG_DEBUG:-1}" = "1" ]; then
+  echo "[turncfg] emitting JSON from ${turn_cfg_script}" >&2
+fi
 printf '%s\n' '${turn_payload}'
 EOF
   chmod 700 "${turn_cfg_script}"
+  printf '%s\n' "${turn_payload}" > /tmp/android-unknown/turncfg.generated.json
   log "Wrote TURN config generator to ${turn_cfg_script}"
+  log "Saved generated TURN payload to /tmp/android-unknown/turncfg.generated.json"
   if ! turn_cfg_output="$("${turn_cfg_script}" 2>/tmp/turncfg.stderr)"; then
     log "ERROR: ${turn_cfg_script} failed to execute"
     [ -s /tmp/turncfg.stderr ] && sed 's/^/[start-emulator-with-turn] /' /tmp/turncfg.stderr || true

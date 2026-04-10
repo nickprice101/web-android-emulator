@@ -134,16 +134,10 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   # and pass its path as a single command token.
   turn_cfg_script="/tmp/android-unknown/turncfg.sh"
   mkdir -p "$(dirname "${turn_cfg_script}")"
-  cat > "${turn_cfg_script}" <<EOF
+cat > "${turn_cfg_script}" <<EOF
 #!/bin/sh
-if [ "\${TURNCFG_DEBUG:-1}" = "1" ]; then
+if [ "\${TURNCFG_DEBUG:-0}" = "1" ]; then
   turncfg_now="\$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  if [ -w /proc/1/fd/1 ]; then
-    printf '%s\n' "[turncfg] invoked at \${turncfg_now}; script=${turn_cfg_script}" > /proc/1/fd/1 || true
-  fi
-  if [ -w /proc/1/fd/2 ]; then
-    printf '%s\n' "[turncfg] payload file /tmp/android-unknown/turncfg.generated.json" > /proc/1/fd/2 || true
-  fi
   {
     echo "[turncfg] invoked: \${turncfg_now}"
     echo "[turncfg] script=${turn_cfg_script}"
@@ -234,6 +228,10 @@ PY
   log "turncfg preview (${TURNCFG_URLS_FORMAT}): ${turn_cfg_output}"
   [ -s /tmp/turncfg.stderr ] && log "turncfg stderr preview: $(cat /tmp/turncfg.stderr)"
   export TURN
+  # Keep the emulator-invoked turncfg command deterministic and fast: legacy
+  # emulator builds enforce a 1000ms timeout for -turncfg command execution.
+  # Default TURNCFG_DEBUG to 0 so the generated command only prints JSON.
+  export TURNCFG_DEBUG="${TURNCFG_DEBUG:-0}"
   TURN="${turn_cfg_script}"
   # The emulator runs -turncfg in a child process. Mirror that child's
   # diagnostics back into container logs so failures are visible via docker logs.

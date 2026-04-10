@@ -169,6 +169,29 @@ jobs:
           echo "Remote docker-compose.yml placeholders cleared."
           REMOTE
 
+      - name: Verify emulator startup wrapper revision on remote
+        run: |
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            REMOTE_ROOT="${SSH_PATH}" \
+            bash -l -s <<'REMOTE'
+          set -euo pipefail
+          WRAPPER_PATH="${REMOTE_ROOT}/emulator/start-emulator-with-turn.sh"
+          if [[ ! -f "${WRAPPER_PATH}" ]]; then
+            echo "Missing emulator wrapper on remote: ${WRAPPER_PATH}" >&2
+            exit 1
+          fi
+          echo "Remote wrapper sha256:"
+          sha256sum "${WRAPPER_PATH}"
+          echo "Remote wrapper diagnostic markers:"
+          grep -n "turncfg.runtime.log\|turncfg.generated.json\|\\[turncfg-runtime\\]" "${WRAPPER_PATH}" || {
+            echo "Expected TURN diagnostic markers were not found in remote wrapper." >&2
+            exit 1
+          }
+          REMOTE
+
       - name: Validate emulator base image is resolvable
         run: |
           ssh -i "${SSH_KEY_FILE}" \

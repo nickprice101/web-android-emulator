@@ -31,6 +31,24 @@ function info(message, obj) {
   console.log(`[turn-harness] ${message}`);
 }
 
+function hasCandidateError(candidateErrors, pattern) {
+  return candidateErrors.some((entry) => pattern.test(String(entry?.errorText || '')));
+}
+
+function summarizeRelayFailure({ turnScheme, turnHost, turnPort, candidateErrors }) {
+  const serializedErrors = JSON.stringify(candidateErrors);
+
+  if (
+    turnScheme === 'turns' &&
+    hasCandidateError(candidateErrors, /Failed to create TURN client socket/i) &&
+    hasCandidateError(candidateErrors, /TURN host lookup received error/i)
+  ) {
+    return `No relay candidates were gathered. TLS preflight to ${turnHost}:${turnPort} succeeded, but the WebRTC client never completed a TURN allocation over turns:. This usually points to a client-side turns:/libwebrtc limitation or an early TURN-over-TLS socket setup failure rather than coturn auth. Candidate errors: ${serializedErrors}`;
+  }
+
+  return `No relay candidates were gathered. TURN auth/connectivity likely failed. Candidate errors: ${serializedErrors}`;
+}
+
 function connectTcp(host, port) {
   return new Promise((resolve, reject) => {
     const socket = net.connect({ host, port, timeout: timeoutMs });
@@ -157,7 +175,14 @@ if (relayResult.timedOut) {
   fail(`ICE gathering timed out after ${timeoutMs}ms`);
 }
 if (relayResult.relayCandidates.length === 0) {
-  fail(`No relay candidates were gathered. TURN auth/connectivity likely failed. Candidate errors: ${JSON.stringify(relayResult.candidateErrors)}`);
+  fail(
+    summarizeRelayFailure({
+      turnScheme,
+      turnHost,
+      turnPort,
+      candidateErrors: relayResult.candidateErrors,
+    })
+  );
 }
 
 info(`Relay candidates gathered: ${relayResult.relayCandidates.length}`);

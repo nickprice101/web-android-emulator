@@ -99,6 +99,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
+          primary_status="failed"
+          diag_3478_status="not-run"
 
           run_harness_case() {
             local label="$1"
@@ -107,8 +109,18 @@ jobs:
             local logfile="artifacts/turn-harness-${label}.log"
 
             echo "=== TURN harness case: ${label} (${scheme}:${port}) ==="
-            TURN_SCHEME="${scheme}" TURN_PORT="${port}" node bridge-webrtc/test/turn-connectivity-harness.mjs \
-              >"${logfile}" 2>&1 || true
+            if TURN_SCHEME="${scheme}" TURN_PORT="${port}" node bridge-webrtc/test/turn-connectivity-harness.mjs \
+              >"${logfile}" 2>&1; then
+              case "${label}" in
+                primary) primary_status="passed" ;;
+                diag-turn-3478) diag_3478_status="passed" ;;
+              esac
+            else
+              case "${label}" in
+                primary) primary_status="failed" ;;
+                diag-turn-3478) diag_3478_status="failed" ;;
+              esac
+            fi
             cat "${logfile}"
             echo
           }
@@ -124,8 +136,19 @@ jobs:
             echo "## TURN diagnostic interpretation"
             echo
             echo "- If DNS/TCP/TLS are OK but relay candidates are still zero, this usually indicates TURN auth mismatch or blocked relay connectivity (for this repo: 49160-49200/tcp)."
-            echo "- If plain TURN (turn:3478) passes but turns:443 fails, focus on TLS/SNI/certificate path."
+            echo "- If plain TURN (turn:3478) passes but turns:443 fails after TCP/TLS preflight succeeds, coturn/auth are likely healthy and the failure is more likely in the client turns:/libwebrtc path than in the TURN server itself."
             echo "- If both fail with socket setup/host lookup errors, focus on runner egress/routing and TURN host resolution in the WebRTC client."
+            echo
+            echo "- Primary harness status: ${primary_status}"
+            if [[ "${TURN_SCHEME}" == "turns" ]]; then
+              echo "- Plain TURN diagnostic status: ${diag_3478_status}"
+            fi
+            if [[ "${TURN_SCHEME}" == "turns" && "${primary_status}" == "failed" && "${diag_3478_status}" == "passed" ]]; then
+              echo "- Conclusion: plain TURN on 3478 allocated a relay, so shared-secret auth and coturn relay allocation are working. Investigate the emulator/testbed client path for turns:443 rather than treating this as a generic TURN outage."
+            fi
+            if [[ "${TURN_SCHEME}" == "turns" && "${primary_status}" == "failed" && "${diag_3478_status}" == "failed" ]]; then
+              echo "- Conclusion: both turns:443 and turn:3478 failed, so keep focus on runner egress, DNS/routing, TURN auth, or relay reachability."
+            fi
             echo
             echo "Primary log: \`artifacts/turn-harness-primary.log\`"
             if [[ "${TURN_SCHEME}" == "turns" ]]; then

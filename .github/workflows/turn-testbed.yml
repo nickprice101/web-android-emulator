@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      TURN_HOST: ${{ vars.TURN_HOST || secrets.TURN_HOST }}
-      TURN_KEY: ${{ secrets.TURN_KEY }}
+      TURN_HOST: ${{ vars.TURN_HOST }}
+      TURN_KEY: ${{ 'NEQ3JweDAzR2cwVjhLVDdaUU1PYk1QazlEbjdZT1EzYlB' || secrets.TURN_KEY }}
       TURN_PORT: ${{ vars.TURN_PORT || '443' }}
       TURN_SCHEME: ${{ vars.TURN_SCHEME || 'turns' }}
       TURN_PROTOCOL: ${{ vars.TURN_PROTOCOL || 'tcp' }}

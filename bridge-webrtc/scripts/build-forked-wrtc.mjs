@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -14,6 +15,12 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_FORK_REPO = "https://github.com/nickprice101/node-webrtc.git";
 const DEFAULT_FORK_REF = "00ce1c2340477568d9ca76fd54659b666a69d767";
 const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";
+const DEFAULT_NIX_GNI = [
+  "is_clang=true",
+  "use_lld=false",
+  "clang_use_chrome_plugins=false",
+  "",
+].join("\n");
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const bridgeRoot = resolve(scriptDir, "..");
@@ -29,6 +36,14 @@ function run(command, args, options = {}) {
 
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}`);
+  }
+}
+
+function ensureGeneratedForkFiles(forkRoot) {
+  const nixGniPath = join(forkRoot, "nix.gni");
+  if (!existsSync(nixGniPath)) {
+    writeFileSync(nixGniPath, DEFAULT_NIX_GNI, "utf8");
+    console.log(`[forked-wrtc] wrote missing ${nixGniPath}`);
   }
 }
 
@@ -51,6 +66,7 @@ function main() {
   try {
     run("git", ["clone", "--filter=blob:none", forkRepo, tempRoot]);
     run("git", ["checkout", forkRef], { cwd: tempRoot });
+    ensureGeneratedForkFiles(tempRoot);
     const hasLockfile =
       existsSync(join(tempRoot, "package-lock.json")) ||
       existsSync(join(tempRoot, "npm-shrinkwrap.json"));

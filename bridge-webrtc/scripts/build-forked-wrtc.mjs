@@ -44,6 +44,36 @@ function run(command, args, options = {}) {
   }
 }
 
+function replaceInFile(filePath, replacements) {
+  const originalContent = readFileSync(filePath, "utf8");
+  let updatedContent = originalContent;
+
+  for (const [searchValue, replaceValue] of replacements) {
+    if (!updatedContent.includes(searchValue)) {
+      throw new Error(`expected to find patch target in ${filePath}`);
+    }
+    updatedContent = updatedContent.replace(searchValue, replaceValue);
+  }
+
+  if (updatedContent !== originalContent) {
+    writeFileSync(filePath, updatedContent, "utf8");
+  }
+}
+
+function resolveWebRtcRevision(forkRoot) {
+  const envRevision = process.env.WEBRTC_REVISION?.trim();
+  if (envRevision) {
+    return envRevision;
+  }
+
+  const cmakeListsPath = join(forkRoot, "CMakeLists.txt");
+  const cmakeListsContent = readFileSync(cmakeListsPath, "utf8");
+  const revisionMatch = cmakeListsContent.match(
+    /set\(DEFAULT_WEBRTC_REVISION\s+([^\s)]+)\)/,
+  );
+  return revisionMatch?.[1] ?? null;
+}
+
 function ensureGeneratedForkFiles(forkRoot) {
   const nixGniPath = join(forkRoot, "nix.gni");
   if (!existsSync(nixGniPath)) {
@@ -156,6 +186,144 @@ function patchUnsupportedLinuxCompilerFlags(forkRoot) {
   }
 }
 
+function patchBranchHeads5735Compatibility(forkRoot) {
+  if (resolveWebRtcRevision(forkRoot) !== "branch-heads/5735") {
+    return;
+  }
+
+  replaceInFile(
+    join(forkRoot, "src", "interfaces", "rtc_peer_connection", "peer_connection_factory.hh"),
+    [
+      [
+        "#include <webrtc/api/environment/environment.h>\n",
+        "",
+      ],
+      [
+        "\n  const webrtc::Environment &env() const { return _env; }\n",
+        "\n",
+      ],
+      [
+        "  webrtc::Environment _env;\n",
+        "",
+      ],
+    ],
+  );
+
+  replaceInFile(
+    join(forkRoot, "src", "interfaces", "rtc_peer_connection", "peer_connection_factory.cc"),
+    [
+      [
+        "#include <webrtc/api/environment/environment_factory.h>\n",
+        "",
+      ],
+      [
+        "PeerConnectionFactory::PeerConnectionFactory(const Napi::CallbackInfo &info)\n    : Napi::ObjectWrap<PeerConnectionFactory>(info),\n      _env(webrtc::CreateEnvironment()) {",
+        "PeerConnectionFactory::PeerConnectionFactory(const Napi::CallbackInfo &info)\n    : Napi::ObjectWrap<PeerConnectionFactory>(info) {",
+      ],
+      [
+        "  _networkManager = std::unique_ptr<rtc::NetworkManager>(\n      new rtc::BasicNetworkManager(_env, _workerThread->socketserver()));",
+        "  _networkManager = std::unique_ptr<rtc::NetworkManager>(\n      new rtc::BasicNetworkManager(_workerThread->socketserver()));",
+      ],
+    ],
+  );
+
+  replaceInFile(
+    join(forkRoot, "src", "interfaces", "rtc_peer_connection.cc"),
+    [
+      [
+        "  auto portAllocator =\n      std::unique_ptr<webrtc::PortAllocator>(new webrtc::BasicPortAllocator(\n          _factory->env(), _factory->getNetworkManager(),\n          _factory->getSocketFactory()));",
+        "  auto portAllocator =\n      std::unique_ptr<webrtc::PortAllocator>(new webrtc::BasicPortAllocator(\n          _factory->getNetworkManager(), _factory->getSocketFactory()));",
+      ],
+    ],
+  );
+
+  replaceInFile(
+    join(forkRoot, "src", "webrtc", "packet_socket_factory_with_tls_cert_verifier.hh"),
+    [
+      [
+        "    : public webrtc::PacketSocketFactory {",
+        "    : public rtc::PacketSocketFactory {",
+      ],
+      [
+        "      std::unique_ptr<webrtc::PacketSocketFactory> inner);",
+        "      std::unique_ptr<rtc::PacketSocketFactory> inner);",
+      ],
+      [
+        "  std::unique_ptr<webrtc::AsyncPacketSocket> CreateUdpSocket(\n      const webrtc::Environment& env,\n      const webrtc::SocketAddress& address,\n      uint16_t min_port,\n      uint16_t max_port) override;\n  std::unique_ptr<webrtc::AsyncListenSocket> CreateServerTcpSocket(\n      const webrtc::Environment& env,\n      const webrtc::SocketAddress& local_address,\n      uint16_t min_port,\n      uint16_t max_port,\n      int opts) override;\n  std::unique_ptr<webrtc::AsyncPacketSocket> CreateClientTcpSocket(\n      const webrtc::Environment& env,\n      const webrtc::SocketAddress& local_address,\n      const webrtc::SocketAddress& remote_address,\n      const webrtc::PacketSocketTcpOptions& tcp_options) override;\n  std::unique_ptr<webrtc::AsyncDnsResolverInterface> CreateAsyncDnsResolver()\n      override;\n  std::unique_ptr<webrtc::AsyncPacketSocket> CreateClientUdpSocket(\n      const webrtc::Environment& env,\n      const webrtc::SocketAddress& local_address,\n      const webrtc::SocketAddress& remote_address,\n      uint16_t min_port,\n      uint16_t max_port,\n      const webrtc::PacketSocketTcpOptions& options) override;",
+        "  rtc::AsyncPacketSocket* CreateUdpSocket(\n      const rtc::SocketAddress& address,\n      uint16_t min_port,\n      uint16_t max_port) override;\n  rtc::AsyncListenSocket* CreateServerTcpSocket(\n      const rtc::SocketAddress& local_address,\n      uint16_t min_port,\n      uint16_t max_port,\n      int opts) override;\n  rtc::AsyncPacketSocket* CreateClientTcpSocket(\n      const rtc::SocketAddress& local_address,\n      const rtc::SocketAddress& remote_address,\n      const rtc::ProxyInfo& proxy_info,\n      const std::string& user_agent,\n      const rtc::PacketSocketTcpOptions& tcp_options) override;\n  std::unique_ptr<webrtc::AsyncDnsResolverInterface> CreateAsyncDnsResolver()\n      override;",
+      ],
+      [
+        "  webrtc::PacketSocketTcpOptions WithTlsVerifier(\n      const webrtc::PacketSocketTcpOptions& options) const;\n\n  std::unique_ptr<webrtc::PacketSocketFactory> inner_;\n  std::unique_ptr<webrtc::SSLCertificateVerifier> tls_cert_verifier_;",
+        "  rtc::PacketSocketTcpOptions WithTlsVerifier(\n      const rtc::PacketSocketTcpOptions& options) const;\n\n  std::unique_ptr<rtc::PacketSocketFactory> inner_;\n  std::unique_ptr<rtc::SSLCertificateVerifier> tls_cert_verifier_;",
+      ],
+    ],
+  );
+
+  replaceInFile(
+    join(forkRoot, "src", "webrtc", "packet_socket_factory_with_tls_cert_verifier.cc"),
+    [
+      [
+        "    std::unique_ptr<webrtc::PacketSocketFactory> inner)",
+        "    std::unique_ptr<rtc::PacketSocketFactory> inner)",
+      ],
+      [
+        "std::unique_ptr<webrtc::AsyncPacketSocket>\nPacketSocketFactoryWithTlsCertVerifier::CreateUdpSocket(\n    const webrtc::Environment& env,\n    const webrtc::SocketAddress& address,\n    uint16_t min_port,\n    uint16_t max_port) {\n  return inner_->CreateUdpSocket(env, address, min_port, max_port);\n}\n\nstd::unique_ptr<webrtc::AsyncListenSocket>\nPacketSocketFactoryWithTlsCertVerifier::CreateServerTcpSocket(\n    const webrtc::Environment& env,\n    const webrtc::SocketAddress& local_address,\n    uint16_t min_port,\n    uint16_t max_port,\n    int opts) {\n  return inner_->CreateServerTcpSocket(env, local_address, min_port, max_port,\n                                       opts);\n}\n\nstd::unique_ptr<webrtc::AsyncPacketSocket>\nPacketSocketFactoryWithTlsCertVerifier::CreateClientTcpSocket(\n    const webrtc::Environment& env,\n    const webrtc::SocketAddress& local_address,\n    const webrtc::SocketAddress& remote_address,\n    const webrtc::PacketSocketTcpOptions& tcp_options) {\n  return inner_->CreateClientTcpSocket(env, local_address, remote_address,\n                                       WithTlsVerifier(tcp_options));\n}",
+        "rtc::AsyncPacketSocket*\nPacketSocketFactoryWithTlsCertVerifier::CreateUdpSocket(\n    const rtc::SocketAddress& address,\n    uint16_t min_port,\n    uint16_t max_port) {\n  return inner_->CreateUdpSocket(address, min_port, max_port);\n}\n\nrtc::AsyncListenSocket*\nPacketSocketFactoryWithTlsCertVerifier::CreateServerTcpSocket(\n    const rtc::SocketAddress& local_address,\n    uint16_t min_port,\n    uint16_t max_port,\n    int opts) {\n  return inner_->CreateServerTcpSocket(local_address, min_port, max_port,\n                                       opts);\n}\n\nrtc::AsyncPacketSocket*\nPacketSocketFactoryWithTlsCertVerifier::CreateClientTcpSocket(\n    const rtc::SocketAddress& local_address,\n    const rtc::SocketAddress& remote_address,\n    const rtc::ProxyInfo& proxy_info,\n    const std::string& user_agent,\n    const rtc::PacketSocketTcpOptions& tcp_options) {\n  return inner_->CreateClientTcpSocket(local_address, remote_address,\n                                       proxy_info, user_agent,\n                                       WithTlsVerifier(tcp_options));\n}",
+      ],
+      [
+        "\nstd::unique_ptr<webrtc::AsyncPacketSocket>\nPacketSocketFactoryWithTlsCertVerifier::CreateClientUdpSocket(\n    const webrtc::Environment& env,\n    const webrtc::SocketAddress& local_address,\n    const webrtc::SocketAddress& remote_address,\n    uint16_t min_port,\n    uint16_t max_port,\n    const webrtc::PacketSocketTcpOptions& options) {\n  return inner_->CreateClientUdpSocket(env, local_address, remote_address,\n                                       min_port, max_port,\n                                       WithTlsVerifier(options));\n}\n",
+        "\n",
+      ],
+      [
+        "webrtc::PacketSocketTcpOptions\nPacketSocketFactoryWithTlsCertVerifier::WithTlsVerifier(\n    const webrtc::PacketSocketTcpOptions& options) const {",
+        "rtc::PacketSocketTcpOptions\nPacketSocketFactoryWithTlsCertVerifier::WithTlsVerifier(\n    const rtc::PacketSocketTcpOptions& options) const {",
+      ],
+      [
+        "(options.opts & webrtc::PacketSocketFactory::OPT_TLS) != 0;",
+        "(options.opts & rtc::PacketSocketFactory::OPT_TLS) != 0;",
+      ],
+    ],
+  );
+
+  replaceInFile(
+    join(forkRoot, "src", "webrtc", "windows_platform_certificate_verifier.hh"),
+    [
+      [
+        "std::unique_ptr<webrtc::SSLCertificateVerifier>",
+        "std::unique_ptr<rtc::SSLCertificateVerifier>",
+      ],
+    ],
+  );
+
+  replaceInFile(
+    join(forkRoot, "src", "webrtc", "windows_platform_certificate_verifier.cc"),
+    [
+      [
+        "    const webrtc::SSLCertificate& certificate) {",
+        "    const rtc::SSLCertificate& certificate) {",
+      ],
+      [
+        "    : public webrtc::SSLCertificateVerifier {",
+        "    : public rtc::SSLCertificateVerifier {",
+      ],
+      [
+        "  bool VerifyChain(const webrtc::SSLCertChain& chain) override {",
+        "  bool VerifyChain(const rtc::SSLCertChain& chain) override {",
+      ],
+      [
+        "std::unique_ptr<webrtc::SSLCertificateVerifier>\nCreateWindowsPlatformCertificateVerifier() {",
+        "std::unique_ptr<rtc::SSLCertificateVerifier>\nCreateWindowsPlatformCertificateVerifier() {",
+      ],
+      [
+        "std::unique_ptr<webrtc::SSLCertificateVerifier>\nCreateWindowsPlatformCertificateVerifier() {",
+        "std::unique_ptr<rtc::SSLCertificateVerifier>\nCreateWindowsPlatformCertificateVerifier() {",
+      ],
+    ],
+  );
+
+  console.log("[forked-wrtc] patched fork sources for WebRTC M114 compatibility");
+}
+
 function main() {
   const forkRepo = process.env.WRTC_FORK_REPO || DEFAULT_FORK_REPO;
   const forkRef = process.env.WRTC_FORK_REF || DEFAULT_FORK_REF;
@@ -177,6 +345,7 @@ function main() {
     run("git", ["checkout", forkRef], { cwd: tempRoot });
     ensureGeneratedForkFiles(tempRoot);
     normalizeShellScriptLineEndings(tempRoot);
+    patchBranchHeads5735Compatibility(tempRoot);
     patchUnsupportedLinuxCompilerFlags(tempRoot);
     const buildEnv = prepareLinuxCompilerWrappers(tempRoot);
     const hasLockfile =

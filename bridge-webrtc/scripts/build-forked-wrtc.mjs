@@ -138,6 +138,24 @@ function prepareLinuxCompilerWrappers(forkRoot) {
   };
 }
 
+function patchUnsupportedLinuxCompilerFlags(forkRoot) {
+  if (process.platform !== "linux") {
+    return;
+  }
+
+  const cmakeListsPath = join(forkRoot, "CMakeLists.txt");
+  const content = readFileSync(cmakeListsPath, "utf8");
+  const patched = content.replace(
+    /^\s*-fsafe-buffer-usage-suggestions\s*$/m,
+    "",
+  );
+
+  if (patched !== content) {
+    writeFileSync(cmakeListsPath, patched, "utf8");
+    console.log("[forked-wrtc] removed unsupported -fsafe-buffer-usage-suggestions flag for Linux build");
+  }
+}
+
 function main() {
   const forkRepo = process.env.WRTC_FORK_REPO || DEFAULT_FORK_REPO;
   const forkRef = process.env.WRTC_FORK_REF || DEFAULT_FORK_REF;
@@ -159,6 +177,7 @@ function main() {
     run("git", ["checkout", forkRef], { cwd: tempRoot });
     ensureGeneratedForkFiles(tempRoot);
     normalizeShellScriptLineEndings(tempRoot);
+    patchUnsupportedLinuxCompilerFlags(tempRoot);
     const buildEnv = prepareLinuxCompilerWrappers(tempRoot);
     const hasLockfile =
       existsSync(join(tempRoot, "package-lock.json")) ||

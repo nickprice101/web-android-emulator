@@ -208,3 +208,191 @@ jobs:
         run: |
           echo "testbed.sh failed. See TURN failure diagnostics and logs above." >&2
           exit 1
+
+  deployed-turns-browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      E2E_BASE_URL: http://127.0.0.1:18080
+      SSH_B64: ${{ secrets.SSH_B64 }}
+      SSH_IP: ${{ secrets.SSH_IP }}
+      SSH_PATH: ${{ secrets.SSH_PATH }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check deployed browser E2E prerequisites
+        id: browser_e2e_gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for key in SSH_B64 SSH_IP SSH_PATH SSH_USER; do
+            if [[ -z "${!key:-}" ]]; then
+              missing+=("${key}")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping deployed turns browser E2E because required secrets are missing: ${missing[*]}"
+            {
+              echo "## Deployed Browser E2E"
+              echo
+              echo "Skipped because required secrets are missing: \`${missing[*]}\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend dependencies
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Set up SSH key and known_hosts
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
+        env:
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_KEY_FILE="$(mktemp)"
+          printf '%s' "${SSH_B64}" | base64 --decode > "${SSH_KEY_FILE}"
+          chmod 600 "${SSH_KEY_FILE}"
+          echo "SSH_KEY_FILE=${SSH_KEY_FILE}" >> "$GITHUB_ENV"
+
+          KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
+          mkdir -p "${HOME}/.ssh"
+          chmod 700 "${HOME}/.ssh"
+          if [[ -n "${SSH_KNOWN_HOSTS}" ]]; then
+            printf '%s\n' "${SSH_KNOWN_HOSTS}" >> "${KNOWN_HOSTS_FILE}"
+            echo "SSH_STRICT=yes" >> "$GITHUB_ENV"
+          else
+            echo "WARNING: SSH_KNOWN_HOSTS secret is not set; host key verification is disabled." >&2
+            echo "SSH_STRICT=no" >> "$GITHUB_ENV"
+          fi
+
+      - name: Verify deployed emulator stack on remote host
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            SSH_PATH="${SSH_PATH}" \
+            bash -l -s <<'REMOTE'
+          set -euo pipefail
+          cd "${SSH_PATH}"
+          if docker compose version > /dev/null 2>&1; then
+            docker compose ps
+          else
+            docker-compose ps
+          fi
+          curl -fsS http://127.0.0.1:18080/ > /dev/null
+
+          for container in google-emu-emulator google-emu-bridge-webrtc; do
+            env_dump="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${container}")"
+            printf '%s\n' "${env_dump}" | grep '^TURN_SCHEME=turns$' > /dev/null
+            printf '%s\n' "${env_dump}" | grep '^TURN_PORT=443$' > /dev/null
+          done
+          REMOTE
+
+      - name: Start SSH port forward to deployed frontend
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o ExitOnForwardFailure=yes \
+            -o BatchMode=yes \
+            -f -N \
+            -L 18080:127.0.0.1:18080 \
+            "${SSH_USER}@${SSH_IP}"
+
+      - name: Wait for forwarded frontend
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if curl -fsS "${E2E_BASE_URL}/" > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Forwarded frontend did not become reachable at ${E2E_BASE_URL}" >&2
+          exit 1
+
+      - name: Run deployed TURN video browser test
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
+        working-directory: frontend
+        env:
+          E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
+        run: npm run test:e2e:deployed-turns
+
+      - name: Collect remote diagnostics
+        if: failure() && steps.browser_e2e_gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            SSH_PATH="${SSH_PATH}" \
+            bash -l -s <<'REMOTE' > artifacts/remote-compose-ps.txt
+          set -euo pipefail
+          cd "${SSH_PATH}"
+          if docker compose version > /dev/null 2>&1; then
+            docker compose ps
+          else
+            docker-compose ps
+          fi
+          REMOTE
+
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            SSH_PATH="${SSH_PATH}" \
+            bash -l -s <<'REMOTE' > artifacts/remote-compose-logs.txt
+          set -euo pipefail
+          cd "${SSH_PATH}"
+          if docker compose version > /dev/null 2>&1; then
+            docker compose logs --tail=200 emulator bridge-webrtc envoy frontend apkbridge
+          else
+            docker-compose logs --tail=200 emulator bridge-webrtc envoy frontend apkbridge
+          fi
+          REMOTE
+
+      - name: Upload browser test artifacts
+        if: always() && steps.browser_e2e_gate.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployed-turns-video-e2e-artifacts
+          path: |
+            frontend/test-results/**
+            artifacts/*.txt
+
+      - name: Clean up SSH key
+        if: always() && steps.browser_e2e_gate.outputs.enabled == 'true'
+        shell: bash
+        run: shred -u "${SSH_KEY_FILE}" 2>/dev/null || rm -f "${SSH_KEY_FILE}"

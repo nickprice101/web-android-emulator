@@ -1546,6 +1546,7 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         onBlur={() => setFocusActive(false)}
       >
         <video
+          data-testid="custom-webrtc-video"
           ref={videoRef}
           autoPlay
           playsInline
@@ -1760,6 +1761,36 @@ function App() {
     `diagnosis: ${nativeFailureReason.summary}`,
     nativeDiagnostics.lastError ? `last error: ${nativeDiagnostics.lastError}` : "last error: none",
   ].join("\n");
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    window.__EMU_E2E__ = {
+      apiState,
+      emulatorState: emuState,
+      lastMessage: message,
+      nativeHasVideoFrame,
+      nativeUpstreamSending,
+      nativeVideoStats,
+      selectedCandidatePair: nativeDiagnostics?.peerStats?.selectedCandidatePair || null,
+      streamMode,
+    };
+
+    return () => {
+      delete window.__EMU_E2E__;
+    };
+  }, [
+    apiState,
+    emuState,
+    message,
+    nativeDiagnostics,
+    nativeHasVideoFrame,
+    nativeUpstreamSending,
+    nativeVideoStats,
+    streamMode,
+  ]);
 
   const handleWebrtcMessage = useCallback((nextMessage) => {
     setMessage(nextMessage);
@@ -2956,17 +2987,23 @@ function App() {
           <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
             <div style={{ flex: 1, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
               <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Emulator state</div>
-              <div style={{ color: stateColor(emuState), fontWeight: 600 }}>{emuState}</div>
+              <div data-testid="emulator-state-value" style={{ color: stateColor(emuState), fontWeight: 600 }}>
+                {emuState}
+              </div>
             </div>
             <div style={{ flex: 1, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
               <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Bridge API</div>
-              <div style={{ color: stateColor(apiState), fontWeight: 600 }}>{apiState}</div>
+              <div data-testid="bridge-api-state-value" style={{ color: stateColor(apiState), fontWeight: 600 }}>
+                {apiState}
+              </div>
             </div>
           </div>
 
           <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Last message</div>
-            <div style={{ whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: 12 }}>{message}</div>
+            <div data-testid="last-message" style={{ whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: 12 }}>
+              {message}
+            </div>
           </div>
 
           {webrtcNotice && (
@@ -3129,7 +3166,10 @@ function App() {
           )}
 
           {streamMode === "native-webrtc" && (
-            <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+            <div
+              data-testid="native-webrtc-diagnostics"
+              style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}
+            >
               <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Native WebRTC diagnostics</div>
               <div style={{ fontSize: 12, lineHeight: 1.7, color: "#d7dfed", marginBottom: 10 }}>
                 <div>Transport: {nativeWebrtcOverlay.backendLabel}</div>

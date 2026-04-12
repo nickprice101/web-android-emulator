@@ -2,10 +2,6 @@ name: TURN Testbed CI
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-  pull_request:
 
 jobs:
   turn-testbed:

@@ -56,15 +56,12 @@ docker compose up --build
 This switches both the emulator and the bridge to non-TLS TURN for diagnostics.
 Revert to `TURN_SCHEME=turns` and `TURN_PORT=443` after testing.
 
-This repository now defaults the bridge service to an internal TURN route:
+This repository now defaults the bridge service to the same public TURN route
+as the browser and emulator, which is the safest default for Intel/Linux
+deployments such as Unraid.
 
-```bash
-TURN_BRIDGE_HOST=192.168.1.152
-TURN_BRIDGE_SCHEME=turn
-TURN_BRIDGE_PORT=3478
-```
-
-If you need to change that default, override with your own LAN address:
+If you need an internal bridge-only TURN route to bypass hairpin NAT or debug a
+client-specific `turns:` issue, set `TURN_BRIDGE_*` explicitly:
 
 ```bash
 export TURN_BRIDGE_HOST=192.168.1.152
@@ -77,9 +74,6 @@ docker compose up --build
 browser and emulator still advertise/use `TURN_HOST` (for example
 `turn.corsicanescape.com`).
 
-To disable the internal bridge override and use the public TURN hostname for
-the bridge too, clear `TURN_BRIDGE_HOST` in your environment before startup.
-
 Then browse to:
 
 ```
@@ -87,6 +81,10 @@ http://YOUR_HOST:18080
 ```
 
 Native WebRTC should be the primary experience. PNG mode remains available as a fallback if you need to compare behavior or recover while debugging.
+
+The `bridge-webrtc` Docker image continues to install the published
+`@roamhq/wrtc` package, so Intel/Linux deployments use the standard upstream
+`linux-x64` binary path rather than a local Windows-only native fork.
 
 ## Test framework testbed
 

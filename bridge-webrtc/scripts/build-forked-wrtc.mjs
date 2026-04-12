@@ -2,9 +2,12 @@ import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
+  readFileSync,
+  readdirSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
@@ -47,6 +50,39 @@ function ensureGeneratedForkFiles(forkRoot) {
   }
 }
 
+function normalizeShellScriptLineEndings(rootDir) {
+  let normalizedCount = 0;
+
+  function walk(currentDir) {
+    for (const entry of readdirSync(currentDir)) {
+      const entryPath = join(currentDir, entry);
+      const stats = statSync(entryPath);
+      if (stats.isDirectory()) {
+        walk(entryPath);
+        continue;
+      }
+
+      if (!entryPath.endsWith(".sh")) {
+        continue;
+      }
+
+      const content = readFileSync(entryPath, "utf8");
+      if (!content.includes("\r")) {
+        continue;
+      }
+
+      writeFileSync(entryPath, content.replace(/\r\n/g, "\n"), "utf8");
+      normalizedCount += 1;
+    }
+  }
+
+  walk(rootDir);
+
+  if (normalizedCount > 0) {
+    console.log(`[forked-wrtc] normalized line endings for ${normalizedCount} shell script(s)`);
+  }
+}
+
 function main() {
   const forkRepo = process.env.WRTC_FORK_REPO || DEFAULT_FORK_REPO;
   const forkRef = process.env.WRTC_FORK_REF || DEFAULT_FORK_REF;
@@ -67,6 +103,7 @@ function main() {
     run("git", ["clone", "--filter=blob:none", forkRepo, tempRoot]);
     run("git", ["checkout", forkRef], { cwd: tempRoot });
     ensureGeneratedForkFiles(tempRoot);
+    normalizeShellScriptLineEndings(tempRoot);
     const hasLockfile =
       existsSync(join(tempRoot, "package-lock.json")) ||
       existsSync(join(tempRoot, "npm-shrinkwrap.json"));

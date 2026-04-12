@@ -51,7 +51,16 @@ function main() {
   try {
     run("git", ["clone", "--filter=blob:none", forkRepo, tempRoot]);
     run("git", ["checkout", forkRef], { cwd: tempRoot });
-    run(NPM_COMMAND, ["ci"], { cwd: tempRoot, env: process.env });
+    const hasLockfile =
+      existsSync(join(tempRoot, "package-lock.json")) ||
+      existsSync(join(tempRoot, "npm-shrinkwrap.json"));
+    const installArgs = hasLockfile ? ["ci"] : ["install"];
+    console.log(
+      `[forked-wrtc] using npm ${installArgs[0]}${
+        hasLockfile ? " (lockfile detected)" : " (no lockfile present)"
+      }`,
+    );
+    run(NPM_COMMAND, installArgs, { cwd: tempRoot, env: process.env });
     run(NPM_COMMAND, ["run", "build"], { cwd: tempRoot, env: process.env });
 
     const compiledBinary = join(

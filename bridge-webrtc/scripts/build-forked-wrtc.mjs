@@ -238,6 +238,118 @@ function patchBranchHeads5735Compatibility(forkRoot) {
   );
 
   replaceInFile(
+    join(forkRoot, "src", "interfaces", "rtc_ice_transport.hh"),
+    [
+      [
+        "  void OnStateChanged(webrtc::IceTransportInternal *);\n  void OnGatheringStateChanged(webrtc::IceTransportInternal *);",
+        "  void OnStateChanged(cricket::IceTransportInternal *);\n  void OnGatheringStateChanged(cricket::IceTransportInternal *);",
+      ],
+      [
+        "  webrtc::IceGatheringState _gathering_state =\n      webrtc::IceGatheringState::kIceGatheringNew;",
+        "  cricket::IceGatheringState _gathering_state =\n      cricket::kIceGatheringNew;",
+      ],
+      [
+        "  webrtc::IceRole _role = webrtc::IceRole::ICEROLE_UNKNOWN;",
+        "  cricket::IceRole _role = cricket::ICEROLE_UNKNOWN;",
+      ],
+    ],
+  );
+
+  replaceInFile(
+    join(forkRoot, "src", "interfaces", "rtc_ice_transport.cc"),
+    [
+      [
+        "          this, [this](webrtc::IceTransportInternal *transport) {",
+        "          this, [this](cricket::IceTransportInternal *transport) {",
+      ],
+      [
+        "          this, [this](webrtc::IceTransportInternal *transport) {",
+        "          this, [this](cricket::IceTransportInternal *transport) {",
+      ],
+      [
+        "    _gathering_state = webrtc::IceGatheringState::kIceGatheringComplete;",
+        "    _gathering_state = cricket::kIceGatheringComplete;",
+      ],
+      [
+        "  _gathering_state = webrtc::IceGatheringState::kIceGatheringComplete;",
+        "  _gathering_state = cricket::kIceGatheringComplete;",
+      ],
+      [
+        "void RTCIceTransport::OnStateChanged(webrtc::IceTransportInternal *) {",
+        "void RTCIceTransport::OnStateChanged(cricket::IceTransportInternal *) {",
+      ],
+      [
+        "    webrtc::IceTransportInternal *) {",
+        "    cricket::IceTransportInternal *) {",
+      ],
+      [
+        "  case webrtc::IceGatheringState::kIceGatheringNew:",
+        "  case cricket::kIceGatheringNew:",
+      ],
+      [
+        "  case webrtc::IceGatheringState::kIceGatheringGathering:",
+        "  case cricket::kIceGatheringGathering:",
+      ],
+      [
+        "  case webrtc::IceGatheringState::kIceGatheringComplete:",
+        "  case cricket::kIceGatheringComplete:",
+      ],
+    ],
+  );
+
+  replaceInFile(
+    join(forkRoot, "src", "enums", "webrtc", "ice_role.hh"),
+    [
+      [
+        "#define ICE_ROLE webrtc::IceRole",
+        "#define ICE_ROLE cricket::IceRole",
+      ],
+    ],
+  );
+
+  replaceInFile(
+    join(forkRoot, "src", "binding.cc"),
+    [
+      [
+        "static webrtc::LoggingSeverity parseLogSeverity(const char* value) {",
+        "static rtc::LoggingSeverity parseLogSeverity(const char* value) {",
+      ],
+      [
+        "return webrtc::LoggingSeverity::LS_INFO;",
+        "return rtc::LS_INFO;",
+      ],
+      [
+        "return webrtc::LoggingSeverity::LS_INFO;",
+        "return rtc::LS_INFO;",
+      ],
+      [
+        "return webrtc::LoggingSeverity::LS_VERBOSE;",
+        "return rtc::LS_VERBOSE;",
+      ],
+      [
+        "return webrtc::LoggingSeverity::LS_WARNING;",
+        "return rtc::LS_WARNING;",
+      ],
+      [
+        "return webrtc::LoggingSeverity::LS_ERROR;",
+        "return rtc::LS_ERROR;",
+      ],
+      [
+        "return webrtc::LoggingSeverity::LS_NONE;",
+        "return rtc::LS_NONE;",
+      ],
+      [
+        "webrtc::LogMessage::SetLogToStderr(true);",
+        "rtc::LogMessage::SetLogToStderr(true);",
+      ],
+      [
+        "webrtc::LogMessage::LogToDebug(severity);",
+        "rtc::LogMessage::LogToDebug(severity);",
+      ],
+    ],
+  );
+
+  replaceInFile(
     join(forkRoot, "src", "webrtc", "packet_socket_factory_with_tls_cert_verifier.hh"),
     [
       [

@@ -31,6 +31,17 @@ Assert-LastExitCode "npm --prefix frontend ci"
 npm --prefix bridge-webrtc ci
 Assert-LastExitCode "npm --prefix bridge-webrtc ci"
 
+$bridgeWrtcBuildFork = ""
+if ($null -ne $env:BRIDGE_WRTC_BUILD_FORK) {
+  $bridgeWrtcBuildFork = $env:BRIDGE_WRTC_BUILD_FORK.ToLowerInvariant()
+}
+$buildFork = @("1", "true", "yes") -contains $bridgeWrtcBuildFork
+if ($buildFork) {
+  Write-Host "[testbed] building forked @roamhq/wrtc binary"
+  npm --prefix bridge-webrtc run build:wrtc-fork
+  Assert-LastExitCode "npm --prefix bridge-webrtc run build:wrtc-fork"
+}
+
 Write-Host "[testbed] preparing Python virtual environment"
 $venvReady = $false
 try {

@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULT_FORK_REPO = "https://github.com/nickprice101/node-webrtc.git";
 const DEFAULT_FORK_REF = "00ce1c2340477568d9ca76fd54659b666a69d767";
+const M114_BASELINE_FORK_REVISION = "dcb4173";
 const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";
 const DEFAULT_NIX_GNI = [
   "is_clang=true",
@@ -72,6 +73,25 @@ function resolveWebRtcRevision(forkRoot) {
     /set\(DEFAULT_WEBRTC_REVISION\s+([^\s)]+)\)/,
   );
   return revisionMatch?.[1] ?? null;
+}
+
+function restoreFilesFromRevision(forkRoot, revision, relativePaths) {
+  for (const relativePath of relativePaths) {
+    const result = spawnSync("git", ["show", `${revision}:${relativePath}`], {
+      cwd: forkRoot,
+      encoding: "utf8",
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    if (result.status !== 0) {
+      throw new Error(
+        `failed to read ${relativePath} from ${revision}: ${result.stderr || "unknown error"}`,
+      );
+    }
+
+    writeFileSync(join(forkRoot, ...relativePath.split("/")), result.stdout, "utf8");
+  }
 }
 
 function ensureGeneratedForkFiles(forkRoot) {
@@ -191,6 +211,16 @@ function patchBranchHeads5735Compatibility(forkRoot) {
     return;
   }
 
+  restoreFilesFromRevision(forkRoot, M114_BASELINE_FORK_REVISION, [
+    "src/binding.cc",
+    "src/dictionaries/webrtc/data_channel_init.cc",
+    "src/dictionaries/webrtc/ice_candidate_interface.cc",
+    "src/dictionaries/webrtc/ice_candidate_interface.hh",
+    "src/enums/webrtc/ice_role.hh",
+    "src/interfaces/rtc_ice_transport.cc",
+    "src/interfaces/rtc_ice_transport.hh",
+  ]);
+
   replaceInFile(
     join(forkRoot, "src", "interfaces", "rtc_peer_connection", "peer_connection_factory.hh"),
     [
@@ -233,118 +263,6 @@ function patchBranchHeads5735Compatibility(forkRoot) {
       [
         "  auto portAllocator =\n      std::unique_ptr<webrtc::PortAllocator>(new webrtc::BasicPortAllocator(\n          _factory->env(), _factory->getNetworkManager(),\n          _factory->getSocketFactory()));",
         "  auto portAllocator =\n      std::unique_ptr<webrtc::PortAllocator>(new webrtc::BasicPortAllocator(\n          _factory->getNetworkManager(), _factory->getSocketFactory()));",
-      ],
-    ],
-  );
-
-  replaceInFile(
-    join(forkRoot, "src", "interfaces", "rtc_ice_transport.hh"),
-    [
-      [
-        "  void OnStateChanged(webrtc::IceTransportInternal *);\n  void OnGatheringStateChanged(webrtc::IceTransportInternal *);",
-        "  void OnStateChanged(cricket::IceTransportInternal *);\n  void OnGatheringStateChanged(cricket::IceTransportInternal *);",
-      ],
-      [
-        "  webrtc::IceGatheringState _gathering_state =\n      webrtc::IceGatheringState::kIceGatheringNew;",
-        "  cricket::IceGatheringState _gathering_state =\n      cricket::kIceGatheringNew;",
-      ],
-      [
-        "  webrtc::IceRole _role = webrtc::IceRole::ICEROLE_UNKNOWN;",
-        "  cricket::IceRole _role = cricket::ICEROLE_UNKNOWN;",
-      ],
-    ],
-  );
-
-  replaceInFile(
-    join(forkRoot, "src", "interfaces", "rtc_ice_transport.cc"),
-    [
-      [
-        "          this, [this](webrtc::IceTransportInternal *transport) {",
-        "          this, [this](cricket::IceTransportInternal *transport) {",
-      ],
-      [
-        "          this, [this](webrtc::IceTransportInternal *transport) {",
-        "          this, [this](cricket::IceTransportInternal *transport) {",
-      ],
-      [
-        "    _gathering_state = webrtc::IceGatheringState::kIceGatheringComplete;",
-        "    _gathering_state = cricket::kIceGatheringComplete;",
-      ],
-      [
-        "  _gathering_state = webrtc::IceGatheringState::kIceGatheringComplete;",
-        "  _gathering_state = cricket::kIceGatheringComplete;",
-      ],
-      [
-        "void RTCIceTransport::OnStateChanged(webrtc::IceTransportInternal *) {",
-        "void RTCIceTransport::OnStateChanged(cricket::IceTransportInternal *) {",
-      ],
-      [
-        "    webrtc::IceTransportInternal *) {",
-        "    cricket::IceTransportInternal *) {",
-      ],
-      [
-        "  case webrtc::IceGatheringState::kIceGatheringNew:",
-        "  case cricket::kIceGatheringNew:",
-      ],
-      [
-        "  case webrtc::IceGatheringState::kIceGatheringGathering:",
-        "  case cricket::kIceGatheringGathering:",
-      ],
-      [
-        "  case webrtc::IceGatheringState::kIceGatheringComplete:",
-        "  case cricket::kIceGatheringComplete:",
-      ],
-    ],
-  );
-
-  replaceInFile(
-    join(forkRoot, "src", "enums", "webrtc", "ice_role.hh"),
-    [
-      [
-        "#define ICE_ROLE webrtc::IceRole",
-        "#define ICE_ROLE cricket::IceRole",
-      ],
-    ],
-  );
-
-  replaceInFile(
-    join(forkRoot, "src", "binding.cc"),
-    [
-      [
-        "static webrtc::LoggingSeverity parseLogSeverity(const char* value) {",
-        "static rtc::LoggingSeverity parseLogSeverity(const char* value) {",
-      ],
-      [
-        "return webrtc::LoggingSeverity::LS_INFO;",
-        "return rtc::LS_INFO;",
-      ],
-      [
-        "return webrtc::LoggingSeverity::LS_INFO;",
-        "return rtc::LS_INFO;",
-      ],
-      [
-        "return webrtc::LoggingSeverity::LS_VERBOSE;",
-        "return rtc::LS_VERBOSE;",
-      ],
-      [
-        "return webrtc::LoggingSeverity::LS_WARNING;",
-        "return rtc::LS_WARNING;",
-      ],
-      [
-        "return webrtc::LoggingSeverity::LS_ERROR;",
-        "return rtc::LS_ERROR;",
-      ],
-      [
-        "return webrtc::LoggingSeverity::LS_NONE;",
-        "return rtc::LS_NONE;",
-      ],
-      [
-        "webrtc::LogMessage::SetLogToStderr(true);",
-        "rtc::LogMessage::SetLogToStderr(true);",
-      ],
-      [
-        "webrtc::LogMessage::LogToDebug(severity);",
-        "rtc::LogMessage::LogToDebug(severity);",
       ],
     ],
   );
@@ -433,7 +351,9 @@ function patchBranchHeads5735Compatibility(forkRoot) {
     ],
   );
 
-  console.log("[forked-wrtc] patched fork sources for WebRTC M114 compatibility");
+  console.log(
+    `[forked-wrtc] restored known-good M114 sources from ${M114_BASELINE_FORK_REVISION} and patched remaining compatibility gaps`,
+  );
 }
 
 function main() {

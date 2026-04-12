@@ -120,9 +120,9 @@ jobs:
           build_only = os.environ.get("BUILD_ONLY", "").strip().lower() == "true"
           if build_only:
               adb_key = """-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
-DUMMY_BUILD_ONLY_DEPLOY_WORKFLOW
------END PRIVATE KEY-----"""
+              MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
+              DUMMY_BUILD_ONLY_DEPLOY_WORKFLOW
+              -----END PRIVATE KEY-----"""
               turn_key = "dummy-turn-key-build-only"
           else:
               adb_key = os.environ.get("ADB_KEY", "").strip()

@@ -14,6 +14,11 @@ echo "[testbed] preparing Node dependencies"
 npm --prefix frontend ci
 npm --prefix bridge-webrtc ci
 
+if [[ "${BRIDGE_WRTC_BUILD_FORK:-0}" == "1" ]]; then
+  echo "[testbed] building forked @roamhq/wrtc binary for ${OSTYPE:-unknown}"
+  npm --prefix bridge-webrtc run build:wrtc-fork
+fi
+
 echo "[testbed] preparing Python virtual environment"
 python3 -m venv .venv-testbed
 # shellcheck disable=SC1091

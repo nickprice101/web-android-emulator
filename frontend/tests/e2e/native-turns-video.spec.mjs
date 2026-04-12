@@ -115,28 +115,14 @@ test("native emulator stream renders real video frames over deployed turns path"
     browserDiagnostics?.selectedCandidatePair?.remoteCandidateType === "relay" ||
     /Selected pair:\s+.*relay/i.test(nativeDiagnosticsText);
 
-  expect(mediaOutcome?.outcome, `Expected usable video, got ${JSON.stringify(mediaOutcome)}`).toBe("ready");
-  expect(emulatorState.toLowerCase()).toContain("connected");
-  expect(bridgeApiState.toLowerCase()).toContain("ready");
-  expect(videoStats.readyState).toBeGreaterThanOrEqual(HAVE_CURRENT_DATA);
-  expect(videoStats.videoWidth).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
-  expect(videoStats.videoHeight).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
-  expect(
-    (videoStats.totalVideoFrames ?? 0) > 0 || videoStats.currentTime > 0,
-    `Expected decoded frames or playback progress, got ${JSON.stringify(videoStats)}`
-  ).toBeTruthy();
-  expect(nativeDiagnosticsText).toContain("Transport: native emulator WebRTC");
-  expect(
-    selectedPairUsesRelay,
-    `Expected selected ICE candidate pair to use TURN relay, got ${JSON.stringify(browserDiagnostics)}`
-  ).toBeTruthy();
-
   const diagnosticsPayload = {
     emulatorState,
     bridgeApiState,
     lastMessage,
     nativeDiagnosticsText,
     browserDiagnostics,
+    mediaOutcome,
+    selectedPairUsesRelay,
     videoStats,
     testedAt: new Date().toISOString(),
     baseUrl: testInfo.project.use.baseURL,
@@ -152,4 +138,20 @@ test("native emulator stream renders real video frames over deployed turns path"
     path: testInfo.outputPath("native-turns-video.png"),
     fullPage: true,
   });
+
+  expect(mediaOutcome?.outcome, `Expected usable video, got ${JSON.stringify(mediaOutcome)}`).toBe("ready");
+  expect(emulatorState.toLowerCase()).toContain("connected");
+  expect(bridgeApiState.toLowerCase()).toContain("ready");
+  expect(videoStats.readyState).toBeGreaterThanOrEqual(HAVE_CURRENT_DATA);
+  expect(videoStats.videoWidth).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
+  expect(videoStats.videoHeight).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
+  expect(
+    (videoStats.totalVideoFrames ?? 0) > 0 || videoStats.currentTime > 0,
+    `Expected decoded frames or playback progress, got ${JSON.stringify(videoStats)}`
+  ).toBeTruthy();
+  expect(nativeDiagnosticsText).toContain("Transport: native emulator WebRTC");
+  expect(
+    selectedPairUsesRelay,
+    `Expected selected ICE candidate pair to use TURN relay, got ${JSON.stringify(browserDiagnostics)}`
+  ).toBeTruthy();
 });

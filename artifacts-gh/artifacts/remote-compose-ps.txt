@@ -1,0 +1,6 @@
+NAME                       IMAGE                             COMMAND                  SERVICE         CREATED        STATUS                  PORTS
+google-emu-apkbridge       google-emu-apkbridge:latest       "/opt/apkbridge/entr…"   apkbridge       44 hours ago   Up 44 hours             5000/tcp
+google-emu-bridge-webrtc   google-emu-bridge-webrtc:latest   "docker-entrypoint.s…"   bridge-webrtc   44 hours ago   Up 44 hours             8090/tcp
+google-emu-emulator        google-emu-emulator:latest        "/usr/local/bin/star…"   emulator        44 hours ago   Up 44 hours (healthy)   5554/tcp, 8554/tcp, 0.0.0.0:15555->5555/tcp, [::]:15555->5555/tcp
+google-emu-envoy           envoyproxy/envoy:v1.31-latest     "/docker-entrypoint.…"   envoy           7 days ago     Up 5 days               10000/tcp, 0.0.0.0:18080->8080/tcp, [::]:18080->8080/tcp
+google-emu-frontend        google-emu-frontend:latest        "/docker-entrypoint.…"   frontend        44 hours ago   Up 44 hours             80/tcp

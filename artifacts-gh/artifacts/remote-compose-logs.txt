@@ -1,0 +1,677 @@
+google-emu-frontend  | /docker-entrypoint.sh: /docker-entrypoint.d/ is not empty, will attempt to perform configuration
+google-emu-frontend  | /docker-entrypoint.sh: Looking for shell scripts in /docker-entrypoint.d/
+google-emu-frontend  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
+google-emu-frontend  | 10-listen-on-ipv6-by-default.sh: info: Getting the checksum of /etc/nginx/conf.d/default.conf
+google-emu-frontend  | 10-listen-on-ipv6-by-default.sh: info: Enabled listen on IPv6 in /etc/nginx/conf.d/default.conf
+google-emu-frontend  | /docker-entrypoint.sh: Sourcing /docker-entrypoint.d/15-local-resolvers.envsh
+google-emu-frontend  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/20-envsubst-on-templates.sh
+google-emu-frontend  | /docker-entrypoint.sh: Launching /docker-entrypoint.d/30-tune-worker-processes.sh
+google-emu-frontend  | /docker-entrypoint.sh: Configuration complete; ready for start up
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: using the "epoll" event method
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: nginx/1.29.7
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: built by gcc 15.2.0 (Alpine 15.2.0) 
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: OS: Linux 6.12.54-Unraid
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: getrlimit(RLIMIT_NOFILE): 40960:40960
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker processes
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 30
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 31
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 32
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 33
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 34
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 35
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 36
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 37
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 38
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 39
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 40
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 41
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 42
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 43
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 44
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 45
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 46
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 47
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 48
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 49
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 50
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 51
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 52
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 53
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 54
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 55
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 56
+google-emu-frontend  | 2026/04/10 13:37:41 [notice] 1#1: start worker process 57
+google-emu-frontend  | 172.22.0.6 - - [10/Apr/2026:13:58:26 +0000] "GET / HTTP/1.1" 200 734 "https://starbuckindustries.cloudflareaccess.com/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0" "185.45.52.196"
+google-emu-frontend  | 172.22.0.6 - - [10/Apr/2026:13:58:27 +0000] "GET /assets/index-DF8Z7Tmp.js HTTP/1.1" 200 512108 "https://emu.corsicanescape.com/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0" "185.45.52.196"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:29:51 +0000] "GET / HTTP/1.1" 200 734 "-" "curl/8.16.0" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:29:52 +0000] "GET / HTTP/1.1" 200 734 "-" "curl/8.5.0" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:29:56 +0000] "GET / HTTP/1.1" 200 734 "-" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.7727.15 Safari/537.36" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:29:56 +0000] "GET /assets/index-DF8Z7Tmp.js HTTP/1.1" 200 512108 "http://127.0.0.1:18080/" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.7727.15 Safari/537.36" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:30:04 +0000] "GET / HTTP/1.1" 200 734 "-" "curl/8.16.0" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:30:06 +0000] "GET / HTTP/1.1" 200 734 "-" "curl/8.5.0" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:30:08 +0000] "GET / HTTP/1.1" 200 734 "-" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.7727.15 Safari/537.36" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:30:08 +0000] "GET /assets/index-DF8Z7Tmp.js HTTP/1.1" 200 512108 "http://127.0.0.1:18080/" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.7727.15 Safari/537.36" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:36:41 +0000] "GET / HTTP/1.1" 200 734 "-" "curl/8.16.0" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:36:43 +0000] "GET / HTTP/1.1" 200 734 "-" "curl/8.5.0" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:36:45 +0000] "GET / HTTP/1.1" 200 734 "-" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.7727.15 Safari/537.36" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:36:45 +0000] "GET /assets/index-DF8Z7Tmp.js HTTP/1.1" 200 512108 "http://127.0.0.1:18080/" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.7727.15 Safari/537.36" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:44:49 +0000] "GET / HTTP/1.1" 200 734 "-" "curl/8.16.0" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:44:51 +0000] "GET / HTTP/1.1" 200 734 "-" "curl/8.5.0" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:44:54 +0000] "GET / HTTP/1.1" 200 734 "-" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.7727.15 Safari/537.36" "-"
+google-emu-frontend  | 172.22.0.6 - - [12/Apr/2026:09:44:54 +0000] "GET /assets/index-DF8Z7Tmp.js HTTP/1.1" 200 512108 "http://127.0.0.1:18080/" "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/147.0.7727.15 Safari/537.36" "-"
+google-emu-apkbridge  | Keys written. Connecting to emulator:5555...
+google-emu-apkbridge  | [1/60] emulator not ready at emulator:5555; retrying in 2s...
+google-emu-apkbridge  | [2/60] emulator not ready at emulator:5555; retrying in 2s...
+google-emu-apkbridge  | [3/60] emulator not ready at emulator:5555; retrying in 2s...
+google-emu-apkbridge  | ADB transport ready for emulator:5555 on attempt 4/60
+google-emu-apkbridge  | Connected. Disabling background noise...
+google-emu-apkbridge  | cmd: Can't find service: wifi
+google-emu-apkbridge  | cmd: Can't find service: phone
+google-emu-apkbridge  | Ready. Starting server...
+google-emu-apkbridge  | [2026-04-10 13:37:58 +0000] [1] [INFO] Starting gunicorn 22.0.0
+google-emu-envoy      | [2026-04-04 10:54:44.999][1][info][main] [source/server/server.cc:430]   envoy.route.early_data_policy: envoy.route.early_data_policy.default
+google-emu-apkbridge  | [2026-04-10 13:37:58 +0000] [1] [INFO] Listening at: http://0.0.0.0:5000 (1)
+google-emu-apkbridge  | [2026-04-10 13:37:58 +0000] [1] [INFO] Using worker: sync
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   quic.http_server_connection: quic.http_server_connection.default
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.formatter: envoy.formatter.cel, envoy.formatter.metadata, envoy.formatter.req_without_query
+google-emu-apkbridge  | [2026-04-10 13:37:58 +0000] [36] [INFO] Booting worker with pid: 36
+google-emu-apkbridge  | [2026-04-10 13:37:58 +0000] [37] [INFO] Booting worker with pid: 37
+google-emu-apkbridge  | [2026-04-10 13:37:58 +0000] [38] [INFO] Booting worker with pid: 38
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.resolvers: envoy.ip
+google-emu-apkbridge  | [2026-04-10 13:37:58 +0000] [39] [INFO] Booting worker with pid: 39
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.upstreams: envoy.filters.connection_pools.tcp.generic
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.path.match: envoy.path.match.uri_template.uri_template_matcher
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.router.cluster_specifier_plugin: envoy.router.cluster_specifier_plugin.lua
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.quic.connection_id_generator: envoy.quic.deterministic_connection_id_generator
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.matching.http.custom_matchers: envoy.matching.custom_matchers.trie_matcher
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.dubbo_proxy.protocols: dubbo
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.matching.common_inputs: envoy.matching.common_inputs.environment_variable
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.matching.action: envoy.matching.actions.format_string, filter-chain-name
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.http.stateful_header_formatters: envoy.http.stateful_header_formatters.preserve_case, preserve_case
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.filters.udp_listener: envoy.filters.udp.dns_filter, envoy.filters.udp_listener.udp_proxy
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.http.cache: envoy.extensions.http.cache.file_system_http_cache, envoy.extensions.http.cache.simple
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.tls.cert_validator: envoy.tls.cert_validator.default, envoy.tls.cert_validator.spiffe
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.matching.network.custom_matchers: envoy.matching.custom_matchers.trie_matcher
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.filters.http: envoy.bandwidth_limit, envoy.buffer, envoy.cors, envoy.csrf, envoy.ext_authz, envoy.ext_proc, envoy.fault, envoy.filters.http.adaptive_concurrency, envoy.filters.http.admission_control, envoy.filters.http.alternate_protocols_cache, envoy.filters.http.aws_lambda, envoy.filters.http.aws_request_signing, envoy.filters.http.bandwidth_limit, envoy.filters.http.basic_auth, envoy.filters.http.buffer, envoy.filters.http.cache, envoy.filters.http.cdn_loop, envoy.filters.http.composite, envoy.filters.http.compressor, envoy.filters.http.connect_grpc_bridge, envoy.filters.http.cors, envoy.filters.http.credential_injector, envoy.filters.http.csrf, envoy.filters.http.custom_response, envoy.filters.http.decompressor, envoy.filters.http.dynamic_forward_proxy, envoy.filters.http.ext_authz, envoy.filters.http.ext_proc, envoy.filters.http.fault, envoy.filters.http.file_system_buffer, envoy.filters.http.gcp_authn, envoy.filters.http.geoip, envoy.filters.http.grpc_field_extraction, envoy.filters.http.grpc_http1_bridge, envoy.filters.http.grpc_http1_reverse_bridge, envoy.filters.http.grpc_json_transcoder, envoy.filters.http.grpc_stats, envoy.filters.http.grpc_web, envoy.filters.http.header_mutation, envoy.filters.http.header_to_metadata, envoy.filters.http.health_check, envoy.filters.http.ip_tagging, envoy.filters.http.json_to_metadata, envoy.filters.http.jwt_authn, envoy.filters.http.local_ratelimit, envoy.filters.http.lua, envoy.filters.http.match_delegate, envoy.filters.http.oauth2, envoy.filters.http.on_demand, envoy.filters.http.original_src, envoy.filters.http.rate_limit_quota, envoy.filters.http.ratelimit, envoy.filters.http.rbac, envoy.filters.http.router, envoy.filters.http.set_filter_state, envoy.filters.http.set_metadata, envoy.filters.http.stateful_session, envoy.filters.http.tap, envoy.filters.http.thrift_to_metadata, envoy.filters.http.wasm, envoy.geoip, envoy.grpc_http1_bridge, envoy.grpc_json_transcoder, envoy.grpc_web, envoy.health_check, envoy.ip_tagging, envoy.local_rate_limit, envoy.lua, envoy.rate_limit, envoy.router
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.quic.proof_source: envoy.quic.proof_source.filter_chain
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.config_subscription: envoy.config_subscription.ads, envoy.config_subscription.ads_collection, envoy.config_subscription.aggregated_grpc_collection, envoy.config_subscription.delta_grpc, envoy.config_subscription.delta_grpc_collection, envoy.config_subscription.filesystem, envoy.config_subscription.filesystem_collection, envoy.config_subscription.grpc, envoy.config_subscription.rest
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.guarddog_actions: envoy.watchdog.abort_action, envoy.watchdog.profile_action
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.dubbo_proxy.filters: envoy.filters.dubbo.router
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.http.injected_credentials: envoy.http.injected_credentials.generic, envoy.http.injected_credentials.oauth2
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.path.rewrite: envoy.path.rewrite.uri_template.uri_template_rewriter
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   filter_state.object: envoy.filters.listener.original_dst.local_ip, envoy.filters.listener.original_dst.remote_ip, envoy.network.application_protocols, envoy.network.transport_socket.original_dst_address, envoy.network.upstream_server_name, envoy.network.upstream_subject_alt_names, envoy.string, envoy.tcp_proxy.cluster, envoy.tcp_proxy.disable_tunneling, envoy.tcp_proxy.per_connection_idle_timeout_ms, envoy.upstream.dynamic_host, envoy.upstream.dynamic_port
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.request_id: envoy.request_id.uuid
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.compression.decompressor: envoy.compression.brotli.decompressor, envoy.compression.gzip.decompressor, envoy.compression.zstd.decompressor
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.wasm.runtime: envoy.wasm.runtime.null, envoy.wasm.runtime.v8
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.rds_factory: envoy.rds_factory.default
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.http.early_header_mutation: envoy.http.early_header_mutation.header_mutation
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.filters.network: envoy.echo, envoy.ext_authz, envoy.filters.network.connection_limit, envoy.filters.network.direct_response, envoy.filters.network.dubbo_proxy, envoy.filters.network.echo, envoy.filters.network.ext_authz, envoy.filters.network.http_connection_manager, envoy.filters.network.local_ratelimit, envoy.filters.network.mongo_proxy, envoy.filters.network.ratelimit, envoy.filters.network.rbac, envoy.filters.network.redis_proxy, envoy.filters.network.set_filter_state, envoy.filters.network.sni_cluster, envoy.filters.network.sni_dynamic_forward_proxy, envoy.filters.network.tcp_proxy, envoy.filters.network.thrift_proxy, envoy.filters.network.wasm, envoy.filters.network.zookeeper_proxy, envoy.http_connection_manager, envoy.mongo_proxy, envoy.ratelimit, envoy.redis_proxy, envoy.tcp_proxy
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.filters.udp.session: envoy.filters.udp.session.dynamic_forward_proxy, envoy.filters.udp.session.http_capsule
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.filters.listener: envoy.filters.listener.http_inspector, envoy.filters.listener.local_ratelimit, envoy.filters.listener.original_dst, envoy.filters.listener.original_src, envoy.filters.listener.proxy_protocol, envoy.filters.listener.tls_inspector, envoy.listener.http_inspector, envoy.listener.original_dst, envoy.listener.original_src, envoy.listener.proxy_protocol, envoy.listener.tls_inspector
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.quic.server.crypto_stream: envoy.quic.crypto_stream.server.quiche
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.network.dns_resolver: envoy.network.dns_resolver.cares, envoy.network.dns_resolver.getaddrinfo
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.ssl.server_context_factory: envoy.ssl.server_context_factory.default
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.http.custom_response: envoy.extensions.http.custom_response.local_response_policy, envoy.extensions.http.custom_response.redirect_policy
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.compression.compressor: envoy.compression.brotli.compressor, envoy.compression.gzip.compressor, envoy.compression.zstd.compressor
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.filters.http.upstream: envoy.buffer, envoy.ext_proc, envoy.filters.http.admission_control, envoy.filters.http.aws_lambda, envoy.filters.http.aws_request_signing, envoy.filters.http.buffer, envoy.filters.http.composite, envoy.filters.http.ext_proc, envoy.filters.http.header_mutation, envoy.filters.http.match_delegate, envoy.filters.http.upstream_codec, envoy.filters.http.wasm
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.regex_engines: envoy.regex_engines.google_re2
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.http.stateful_session: envoy.http.stateful_session.cookie, envoy.http.stateful_session.header
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.srds_factory: envoy.srds_factory.default
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.retry_host_predicates: envoy.retry_host_predicates.omit_canary_hosts, envoy.retry_host_predicates.omit_host_metadata, envoy.retry_host_predicates.previous_hosts
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.clusters: envoy.cluster.eds, envoy.cluster.logical_dns, envoy.cluster.original_dst, envoy.cluster.static, envoy.cluster.strict_dns, envoy.clusters.aggregate, envoy.clusters.dynamic_forward_proxy, envoy.clusters.redis
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.thrift_proxy.filters: envoy.filters.thrift.header_to_metadata, envoy.filters.thrift.payload_to_metadata, envoy.filters.thrift.rate_limit, envoy.filters.thrift.router
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.common.key_value: envoy.key_value.file_based
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.matching.http.input: envoy.matching.inputs.cel_data_input, envoy.matching.inputs.destination_ip, envoy.matching.inputs.destination_port, envoy.matching.inputs.direct_source_ip, envoy.matching.inputs.dns_san, envoy.matching.inputs.filter_state, envoy.matching.inputs.request_headers, envoy.matching.inputs.request_trailers, envoy.matching.inputs.response_headers, envoy.matching.inputs.response_trailers, envoy.matching.inputs.server_name, envoy.matching.inputs.source_ip, envoy.matching.inputs.source_port, envoy.matching.inputs.source_type, envoy.matching.inputs.status_code_class_input, envoy.matching.inputs.status_code_input, envoy.matching.inputs.subject, envoy.matching.inputs.uri_san, query_params
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.resource_monitors: envoy.resource_monitors.fixed_heap, envoy.resource_monitors.injected_resource
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.transport_sockets.upstream: envoy.transport_sockets.alts, envoy.transport_sockets.http_11_proxy, envoy.transport_sockets.internal_upstream, envoy.transport_sockets.quic, envoy.transport_sockets.raw_buffer, envoy.transport_sockets.starttls, envoy.transport_sockets.tap, envoy.transport_sockets.tcp_stats, envoy.transport_sockets.tls, envoy.transport_sockets.upstream_proxy_protocol, raw_buffer, starttls, tls
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.transport_sockets.downstream: envoy.transport_sockets.alts, envoy.transport_sockets.quic, envoy.transport_sockets.raw_buffer, envoy.transport_sockets.starttls, envoy.transport_sockets.tap, envoy.transport_sockets.tcp_stats, envoy.transport_sockets.tls, raw_buffer, starttls, tls
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.route_config_update_requester: envoy.route_config_update_requester.default
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.health_check.event_sinks: envoy.health_check.event_sink.file
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.listener_manager_impl: envoy.listener_manager_impl.default, envoy.listener_manager_impl.validation
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.udp_packet_writer: envoy.udp_packet_writer.default, envoy.udp_packet_writer.gso
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.stats_sinks: envoy.dog_statsd, envoy.graphite_statsd, envoy.metrics_service, envoy.open_telemetry_stat_sink, envoy.stat_sinks.dog_statsd, envoy.stat_sinks.graphite_statsd, envoy.stat_sinks.hystrix, envoy.stat_sinks.metrics_service, envoy.stat_sinks.open_telemetry, envoy.stat_sinks.statsd, envoy.stat_sinks.wasm, envoy.statsd
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.load_balancing_policies: envoy.load_balancing_policies.cluster_provided, envoy.load_balancing_policies.least_request, envoy.load_balancing_policies.maglev, envoy.load_balancing_policies.random, envoy.load_balancing_policies.ring_hash, envoy.load_balancing_policies.round_robin, envoy.load_balancing_policies.subset
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.http.original_ip_detection: envoy.http.original_ip_detection.custom_header, envoy.http.original_ip_detection.xff
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.rbac.matchers: envoy.rbac.matchers.upstream_ip_port
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.upstream_options: envoy.extensions.upstreams.http.v3.HttpProtocolOptions, envoy.extensions.upstreams.tcp.v3.TcpProtocolOptions, envoy.upstreams.http.http_protocol_options, envoy.upstreams.tcp.tcp_protocol_options
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.config.validators: envoy.config.validators.minimum_clusters, envoy.config.validators.minimum_clusters_validator
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.http.header_validators: envoy.http.header_validators.envoy_default
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.upstream.local_address_selector: envoy.upstream.local_address_selector.default_local_address_selector
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.access_loggers.extension_filters: envoy.access_loggers.extension_filters.cel
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.matching.network.input: envoy.matching.inputs.application_protocol, envoy.matching.inputs.destination_ip, envoy.matching.inputs.destination_port, envoy.matching.inputs.direct_source_ip, envoy.matching.inputs.dns_san, envoy.matching.inputs.filter_state, envoy.matching.inputs.server_name, envoy.matching.inputs.source_ip, envoy.matching.inputs.source_port, envoy.matching.inputs.source_type, envoy.matching.inputs.subject, envoy.matching.inputs.transport_protocol, envoy.matching.inputs.uri_san
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.matching.input_matchers: envoy.matching.matchers.cel_matcher, envoy.matching.matchers.consistent_hashing, envoy.matching.matchers.ip, envoy.matching.matchers.runtime_fraction
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.thrift_proxy.protocols: auto, binary, binary/non-strict, compact, twitter
+google-emu-envoy      | [2026-04-04 10:54:45.000][1][info][main] [source/server/server.cc:430]   envoy.internal_redirect_predicates: envoy.internal_redirect_predicates.allow_listed_routes, envoy.internal_redirect_predicates.previous_routes, envoy.internal_redirect_predicates.safe_cross_scheme
+google-emu-envoy      | [2026-04-04 10:54:45.001][1][warning][misc] [source/common/protobuf/message_validator_impl.cc:21] Deprecated field: type envoy.config.cluster.v3.Cluster Using deprecated option 'envoy.config.cluster.v3.Cluster.http2_protocol_options' from file cluster.proto. This configuration will be removed from Envoy soon. Please see https://www.envoyproxy.io/docs/envoy/latest/version_history/version_history for details. If continued use of this field is absolutely necessary, see https://www.envoyproxy.io/docs/envoy/latest/configuration/operations/runtime#using-runtime-overrides-for-deprecated-features for how to apply a temporary and highly discouraged override.
+google-emu-envoy      | [2026-04-04 10:54:45.002][1][info][main] [source/server/server.cc:490] HTTP header map info:
+google-emu-envoy      | [2026-04-04 10:54:45.002][1][info][main] [source/server/server.cc:493]   request header map: 664 bytes: :authority,:method,:path,:protocol,:scheme,accept,accept-encoding,access-control-request-headers,access-control-request-method,access-control-request-private-network,authentication,authorization,cache-control,cdn-loop,connection,content-encoding,content-length,content-type,expect,grpc-accept-encoding,grpc-timeout,if-match,if-modified-since,if-none-match,if-range,if-unmodified-since,keep-alive,origin,pragma,proxy-connection,proxy-status,referer,te,transfer-encoding,upgrade,user-agent,via,x-client-trace-id,x-envoy-attempt-count,x-envoy-decorator-operation,x-envoy-downstream-service-cluster,x-envoy-downstream-service-node,x-envoy-expected-rq-timeout-ms,x-envoy-external-address,x-envoy-force-trace,x-envoy-hedge-on-per-try-timeout,x-envoy-internal,x-envoy-ip-tags,x-envoy-is-timeout-retry,x-envoy-max-retries,x-envoy-original-path,x-envoy-original-url,x-envoy-retriable-header-names,x-envoy-retriable-status-codes,x-envoy-retry-grpc-on,x-envoy-retry-on,x-envoy-upstream-alt-stat-name,x-envoy-upstream-rq-per-try-timeout-ms,x-envoy-upstream-rq-timeout-alt-response,x-envoy-upstream-rq-timeout-ms,x-envoy-upstream-stream-duration-ms,x-forwarded-client-cert,x-forwarded-for,x-forwarded-host,x-forwarded-port,x-forwarded-proto,x-ot-span-context,x-request-id
+google-emu-envoy      | [2026-04-04 10:54:45.002][1][info][main] [source/server/server.cc:493]   request trailer map: 120 bytes: 
+google-emu-envoy      | [2026-04-04 10:54:45.002][1][info][main] [source/server/server.cc:493]   response header map: 432 bytes: :status,access-control-allow-credentials,access-control-allow-headers,access-control-allow-methods,access-control-allow-origin,access-control-allow-private-network,access-control-expose-headers,access-control-max-age,age,cache-control,connection,content-encoding,content-length,content-type,date,etag,expires,grpc-message,grpc-status,keep-alive,last-modified,location,proxy-connection,proxy-status,server,transfer-encoding,upgrade,vary,via,x-envoy-attempt-count,x-envoy-decorator-operation,x-envoy-degraded,x-envoy-immediate-health-check-fail,x-envoy-ratelimited,x-envoy-upstream-canary,x-envoy-upstream-healthchecked-cluster,x-envoy-upstream-service-time,x-request-id
+google-emu-envoy      | [2026-04-04 10:54:45.002][1][info][main] [source/server/server.cc:493]   response trailer map: 144 bytes: grpc-message,grpc-status
+google-emu-envoy      | [2026-04-04 10:54:45.017][1][info][main] [source/server/server.cc:869] runtime: {}
+google-emu-envoy      | [2026-04-04 10:54:45.017][1][info][admin] [source/server/admin/admin.cc:65] admin address: 0.0.0.0:9901
+google-emu-envoy      | [2026-04-04 10:54:45.017][1][info][config] [source/server/configuration_impl.cc:168] loading tracing configuration
+google-emu-envoy      | [2026-04-04 10:54:45.017][1][info][config] [source/server/configuration_impl.cc:124] loading 0 static secret(s)
+google-emu-envoy      | [2026-04-04 10:54:45.017][1][info][config] [source/server/configuration_impl.cc:130] loading 4 cluster(s)
+google-emu-envoy      | [2026-04-04 10:54:45.037][1][info][config] [source/server/configuration_impl.cc:138] loading 1 listener(s)
+google-emu-envoy      | [2026-04-04 10:54:45.037][1][warning][misc] [source/extensions/filters/network/http_connection_manager/config.cc:83] internal_address_config is not configured. The existing default behaviour will trust RFC1918 IP addresses, but this will be changed in next release. Please explictily config internal address config as the migration step.
+google-emu-envoy      | [2026-04-04 10:54:45.037][1][info][config] [source/server/configuration_impl.cc:154] loading stats configuration
+google-emu-envoy      | [2026-04-04 10:54:45.038][1][warning][main] [source/server/server.cc:936] There is no configured limit to the number of allowed active downstream connections. Configure a limit in `envoy.resource_monitors.downstream_connections` resource monitor.
+google-emu-envoy      | [2026-04-04 10:54:45.038][1][info][main] [source/server/server.cc:978] starting main dispatch loop
+google-emu-envoy      | [2026-04-04 10:54:45.039][1][info][runtime] [source/common/runtime/runtime_impl.cc:625] RTDS has finished initialization
+google-emu-envoy      | [2026-04-04 10:54:45.039][1][info][upstream] [source/common/upstream/cluster_manager_impl.cc:249] cm init: all clusters initialized
+google-emu-envoy      | [2026-04-04 10:54:45.039][1][info][main] [source/server/server.cc:958] all clusters initialized. initializing init manager
+google-emu-envoy      | [2026-04-04 10:54:45.039][1][info][config] [source/common/listener_manager/listener_manager_impl.cc:930] all dependencies initialized. starting workers
+google-emu-envoy      | [2026-04-04 11:09:45.039][1][info][main] [source/server/drain_manager_impl.cc:208] shutting down parent after drain
+google-emu-envoy      | [2026-04-07 08:29:16.178][1][warning][main] [source/server/server.cc:907] caught ENVOY_SIGTERM
+google-emu-envoy      | [2026-04-07 08:29:16.179][1][info][main] [source/server/server.cc:1046] shutting down server instance
+google-emu-envoy      | [2026-04-07 08:29:16.179][1][info][main] [source/server/server.cc:986] main dispatch loop exited
+google-emu-envoy      | [2026-04-07 08:29:16.189][1][info][main] [source/server/server.cc:1038] exiting
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:426] initializing epoch 0 (base id=0, hot restart version=11.104)
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:428] statically linked extensions:
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.filters.listener: envoy.filters.listener.http_inspector, envoy.filters.listener.local_ratelimit, envoy.filters.listener.original_dst, envoy.filters.listener.original_src, envoy.filters.listener.proxy_protocol, envoy.filters.listener.tls_inspector, envoy.listener.http_inspector, envoy.listener.original_dst, envoy.listener.original_src, envoy.listener.proxy_protocol, envoy.listener.tls_inspector
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.guarddog_actions: envoy.watchdog.abort_action, envoy.watchdog.profile_action
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.retry_host_predicates: envoy.retry_host_predicates.omit_canary_hosts, envoy.retry_host_predicates.omit_host_metadata, envoy.retry_host_predicates.previous_hosts
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.internal_redirect_predicates: envoy.internal_redirect_predicates.allow_listed_routes, envoy.internal_redirect_predicates.previous_routes, envoy.internal_redirect_predicates.safe_cross_scheme
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.request_id: envoy.request_id.uuid
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.thrift_proxy.filters: envoy.filters.thrift.header_to_metadata, envoy.filters.thrift.payload_to_metadata, envoy.filters.thrift.rate_limit, envoy.filters.thrift.router
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.rds_factory: envoy.rds_factory.default
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.ssl.server_context_factory: envoy.ssl.server_context_factory.default
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.rbac.matchers: envoy.rbac.matchers.upstream_ip_port
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   filter_state.object: envoy.filters.listener.original_dst.local_ip, envoy.filters.listener.original_dst.remote_ip, envoy.network.application_protocols, envoy.network.transport_socket.original_dst_address, envoy.network.upstream_server_name, envoy.network.upstream_subject_alt_names, envoy.string, envoy.tcp_proxy.cluster, envoy.tcp_proxy.disable_tunneling, envoy.tcp_proxy.per_connection_idle_timeout_ms, envoy.upstream.dynamic_host, envoy.upstream.dynamic_port
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.dubbo_proxy.filters: envoy.filters.dubbo.router
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.tracers.opentelemetry.resource_detectors: envoy.tracers.opentelemetry.resource_detectors.dynatrace, envoy.tracers.opentelemetry.resource_detectors.environment, envoy.tracers.opentelemetry.resource_detectors.static_config
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.transport_sockets.downstream: envoy.transport_sockets.alts, envoy.transport_sockets.quic, envoy.transport_sockets.raw_buffer, envoy.transport_sockets.starttls, envoy.transport_sockets.tap, envoy.transport_sockets.tcp_stats, envoy.transport_sockets.tls, raw_buffer, starttls, tls
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.matching.http.custom_matchers: envoy.matching.custom_matchers.trie_matcher
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.http.header_validators: envoy.http.header_validators.envoy_default
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.quic.connection_debug_visitor: envoy.quic.connection_debug_visitor.basic
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.access_loggers.extension_filters: envoy.access_loggers.extension_filters.cel
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.route.early_data_policy: envoy.route.early_data_policy.default
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.path.rewrite: envoy.path.rewrite.uri_template.uri_template_rewriter
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.regex_engines: envoy.regex_engines.google_re2
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.load_balancing_policies: envoy.load_balancing_policies.cluster_provided, envoy.load_balancing_policies.least_request, envoy.load_balancing_policies.maglev, envoy.load_balancing_policies.random, envoy.load_balancing_policies.ring_hash, envoy.load_balancing_policies.round_robin, envoy.load_balancing_policies.subset
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.http.custom_response: envoy.extensions.http.custom_response.local_response_policy, envoy.extensions.http.custom_response.redirect_policy
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.network.dns_resolver: envoy.network.dns_resolver.cares, envoy.network.dns_resolver.getaddrinfo
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.udp_packet_writer: envoy.udp_packet_writer.default, envoy.udp_packet_writer.gso
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.http.stateful_header_formatters: envoy.http.stateful_header_formatters.preserve_case, preserve_case
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.quic.connection_id_generator: envoy.quic.deterministic_connection_id_generator
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.config_mux: envoy.config_mux.delta_grpc_mux_factory, envoy.config_mux.grpc_mux_factory, envoy.config_mux.new_grpc_mux_factory, envoy.config_mux.sotw_grpc_mux_factory
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.tracers.opentelemetry.samplers: envoy.tracers.opentelemetry.samplers.always_on, envoy.tracers.opentelemetry.samplers.dynatrace
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.clusters: envoy.cluster.eds, envoy.cluster.logical_dns, envoy.cluster.original_dst, envoy.cluster.static, envoy.cluster.strict_dns, envoy.clusters.aggregate, envoy.clusters.dynamic_forward_proxy, envoy.clusters.redis
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.matching.input_matchers: envoy.matching.matchers.cel_matcher, envoy.matching.matchers.consistent_hashing, envoy.matching.matchers.ip, envoy.matching.matchers.runtime_fraction
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.matching.common_inputs: envoy.matching.common_inputs.environment_variable
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.wasm.runtime: envoy.wasm.runtime.null, envoy.wasm.runtime.v8
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   network.connection.client: default, envoy_internal
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.http.stateful_session: envoy.http.stateful_session.cookie, envoy.http.stateful_session.header
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.common.key_value: envoy.key_value.file_based
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.upstream_options: envoy.extensions.upstreams.http.v3.HttpProtocolOptions, envoy.extensions.upstreams.tcp.v3.TcpProtocolOptions, envoy.upstreams.http.http_protocol_options, envoy.upstreams.tcp.tcp_protocol_options
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.rate_limit_descriptors: envoy.rate_limit_descriptors.expr
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.tls.cert_validator: envoy.tls.cert_validator.default, envoy.tls.cert_validator.spiffe
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.connection_handler: envoy.connection_handler.default
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.upstreams: envoy.filters.connection_pools.tcp.generic
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.filters.http.upstream: envoy.buffer, envoy.ext_proc, envoy.filters.http.admission_control, envoy.filters.http.aws_lambda, envoy.filters.http.aws_request_signing, envoy.filters.http.buffer, envoy.filters.http.composite, envoy.filters.http.ext_proc, envoy.filters.http.header_mutation, envoy.filters.http.match_delegate, envoy.filters.http.upstream_codec, envoy.filters.http.wasm
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.dubbo_proxy.serializers: dubbo.hessian2
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.http.early_header_mutation: envoy.http.early_header_mutation.header_mutation
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.http.injected_credentials: envoy.http.injected_credentials.generic, envoy.http.injected_credentials.oauth2
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.filters.http: envoy.bandwidth_limit, envoy.buffer, envoy.cors, envoy.csrf, envoy.ext_authz, envoy.ext_proc, envoy.fault, envoy.filters.http.adaptive_concurrency, envoy.filters.http.admission_control, envoy.filters.http.alternate_protocols_cache, envoy.filters.http.aws_lambda, envoy.filters.http.aws_request_signing, envoy.filters.http.bandwidth_limit, envoy.filters.http.basic_auth, envoy.filters.http.buffer, envoy.filters.http.cache, envoy.filters.http.cdn_loop, envoy.filters.http.composite, envoy.filters.http.compressor, envoy.filters.http.connect_grpc_bridge, envoy.filters.http.cors, envoy.filters.http.credential_injector, envoy.filters.http.csrf, envoy.filters.http.custom_response, envoy.filters.http.decompressor, envoy.filters.http.dynamic_forward_proxy, envoy.filters.http.ext_authz, envoy.filters.http.ext_proc, envoy.filters.http.fault, envoy.filters.http.file_system_buffer, envoy.filters.http.gcp_authn, envoy.filters.http.geoip, envoy.filters.http.grpc_field_extraction, envoy.filters.http.grpc_http1_bridge, envoy.filters.http.grpc_http1_reverse_bridge, envoy.filters.http.grpc_json_transcoder, envoy.filters.http.grpc_stats, envoy.filters.http.grpc_web, envoy.filters.http.header_mutation, envoy.filters.http.header_to_metadata, envoy.filters.http.health_check, envoy.filters.http.ip_tagging, envoy.filters.http.json_to_metadata, envoy.filters.http.jwt_authn, envoy.filters.http.local_ratelimit, envoy.filters.http.lua, envoy.filters.http.match_delegate, envoy.filters.http.oauth2, envoy.filters.http.on_demand, envoy.filters.http.original_src, envoy.filters.http.rate_limit_quota, envoy.filters.http.ratelimit, envoy.filters.http.rbac, envoy.filters.http.router, envoy.filters.http.set_filter_state, envoy.filters.http.set_metadata, envoy.filters.http.stateful_session, envoy.filters.http.tap, envoy.filters.http.thrift_to_metadata, envoy.filters.http.wasm, envoy.geoip, envoy.grpc_http1_bridge, envoy.grpc_json_transcoder, envoy.grpc_web, envoy.health_check, envoy.ip_tagging, envoy.local_rate_limit, envoy.lua, envoy.rate_limit, envoy.router
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.thrift_proxy.transports: auto, framed, header, unframed
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.config.validators: envoy.config.validators.minimum_clusters, envoy.config.validators.minimum_clusters_validator
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.bootstrap: envoy.bootstrap.internal_listener, envoy.bootstrap.wasm, envoy.extensions.network.socket_interface.default_socket_interface
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.filters.network: envoy.echo, envoy.ext_authz, envoy.filters.network.connection_limit, envoy.filters.network.direct_response, envoy.filters.network.dubbo_proxy, envoy.filters.network.echo, envoy.filters.network.ext_authz, envoy.filters.network.http_connection_manager, envoy.filters.network.local_ratelimit, envoy.filters.network.mongo_proxy, envoy.filters.network.ratelimit, envoy.filters.network.rbac, envoy.filters.network.redis_proxy, envoy.filters.network.set_filter_state, envoy.filters.network.sni_cluster, envoy.filters.network.sni_dynamic_forward_proxy, envoy.filters.network.tcp_proxy, envoy.filters.network.thrift_proxy, envoy.filters.network.wasm, envoy.filters.network.zookeeper_proxy, envoy.http_connection_manager, envoy.mongo_proxy, envoy.ratelimit, envoy.redis_proxy, envoy.tcp_proxy
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.filters.udp_listener: envoy.filters.udp.dns_filter, envoy.filters.udp_listener.udp_proxy
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.health_checkers: envoy.health_checkers.grpc, envoy.health_checkers.http, envoy.health_checkers.redis, envoy.health_checkers.tcp, envoy.health_checkers.thrift
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.string_matcher: envoy.string_matcher.lua
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.geoip_providers: envoy.geoip_providers.maxmind
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.quic.proof_source: envoy.quic.proof_source.filter_chain
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.srds_factory: envoy.srds_factory.default
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.health_check.event_sinks: envoy.health_check.event_sink.file
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.retry_priorities: envoy.retry_priorities.previous_priorities
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.matching.action: envoy.matching.actions.format_string, filter-chain-name
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.matching.network.custom_matchers: envoy.matching.custom_matchers.trie_matcher
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.router.cluster_specifier_plugin: envoy.router.cluster_specifier_plugin.lua
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.tracers: envoy.dynamic.ot, envoy.tracers.datadog, envoy.tracers.dynamic_ot, envoy.tracers.opencensus, envoy.tracers.opentelemetry, envoy.tracers.skywalking, envoy.tracers.xray, envoy.tracers.zipkin, envoy.zipkin
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.path.match: envoy.path.match.uri_template.uri_template_matcher
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.quic.server_preferred_address: quic.server_preferred_address.datasource, quic.server_preferred_address.fixed
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   quic.http_server_connection: quic.http_server_connection.default
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.matching.http.input: envoy.matching.inputs.cel_data_input, envoy.matching.inputs.destination_ip, envoy.matching.inputs.destination_port, envoy.matching.inputs.direct_source_ip, envoy.matching.inputs.dns_san, envoy.matching.inputs.filter_state, envoy.matching.inputs.request_headers, envoy.matching.inputs.request_trailers, envoy.matching.inputs.response_headers, envoy.matching.inputs.response_trailers, envoy.matching.inputs.server_name, envoy.matching.inputs.source_ip, envoy.matching.inputs.source_port, envoy.matching.inputs.source_type, envoy.matching.inputs.status_code_class_input, envoy.matching.inputs.status_code_input, envoy.matching.inputs.subject, envoy.matching.inputs.uri_san, query_params
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.http.cache: envoy.extensions.http.cache.file_system_http_cache, envoy.extensions.http.cache.simple
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.filters.udp.session: envoy.filters.udp.session.dynamic_forward_proxy, envoy.filters.udp.session.http_capsule
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.quic.server.crypto_stream: envoy.quic.crypto_stream.server.quiche
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.compression.decompressor: envoy.compression.brotli.decompressor, envoy.compression.gzip.decompressor, envoy.compression.zstd.decompressor
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.thrift_proxy.protocols: auto, binary, binary/non-strict, compact, twitter
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.grpc_credentials: envoy.grpc_credentials.aws_iam, envoy.grpc_credentials.default, envoy.grpc_credentials.file_based_metadata
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.config_subscription: envoy.config_subscription.ads, envoy.config_subscription.ads_collection, envoy.config_subscription.aggregated_grpc_collection, envoy.config_subscription.delta_grpc, envoy.config_subscription.delta_grpc_collection, envoy.config_subscription.filesystem, envoy.config_subscription.filesystem_collection, envoy.config_subscription.grpc, envoy.config_subscription.rest
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.upstream.local_address_selector: envoy.upstream.local_address_selector.default_local_address_selector
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.formatter: envoy.formatter.cel, envoy.formatter.metadata, envoy.formatter.req_without_query
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.listener_manager_impl: envoy.listener_manager_impl.default, envoy.listener_manager_impl.validation
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.stats_sinks: envoy.dog_statsd, envoy.graphite_statsd, envoy.metrics_service, envoy.open_telemetry_stat_sink, envoy.stat_sinks.dog_statsd, envoy.stat_sinks.graphite_statsd, envoy.stat_sinks.hystrix, envoy.stat_sinks.metrics_service, envoy.stat_sinks.open_telemetry, envoy.stat_sinks.statsd, envoy.stat_sinks.wasm, envoy.statsd
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.compression.compressor: envoy.compression.brotli.compressor, envoy.compression.gzip.compressor, envoy.compression.zstd.compressor
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.resource_monitors: envoy.resource_monitors.fixed_heap, envoy.resource_monitors.injected_resource
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.transport_sockets.upstream: envoy.transport_sockets.alts, envoy.transport_sockets.http_11_proxy, envoy.transport_sockets.internal_upstream, envoy.transport_sockets.quic, envoy.transport_sockets.raw_buffer, envoy.transport_sockets.starttls, envoy.transport_sockets.tap, envoy.transport_sockets.tcp_stats, envoy.transport_sockets.tls, envoy.transport_sockets.upstream_proxy_protocol, raw_buffer, starttls, tls
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.http.original_ip_detection: envoy.http.original_ip_detection.custom_header, envoy.http.original_ip_detection.xff
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.matching.network.input: envoy.matching.inputs.application_protocol, envoy.matching.inputs.destination_ip, envoy.matching.inputs.destination_port, envoy.matching.inputs.direct_source_ip, envoy.matching.inputs.dns_san, envoy.matching.inputs.filter_state, envoy.matching.inputs.server_name, envoy.matching.inputs.source_ip, envoy.matching.inputs.source_port, envoy.matching.inputs.source_type, envoy.matching.inputs.subject, envoy.matching.inputs.transport_protocol, envoy.matching.inputs.uri_san
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.access_loggers: envoy.access_loggers.file, envoy.access_loggers.fluentd, envoy.access_loggers.http_grpc, envoy.access_loggers.open_telemetry, envoy.access_loggers.stderr, envoy.access_loggers.stdout, envoy.access_loggers.tcp_grpc, envoy.access_loggers.wasm, envoy.file_access_log, envoy.fluentd_access_log, envoy.http_grpc_access_log, envoy.open_telemetry_access_log, envoy.stderr_access_log, envoy.stdout_access_log, envoy.tcp_grpc_access_log, envoy.wasm_access_log
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.dubbo_proxy.protocols: dubbo
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.resolvers: envoy.ip
+google-emu-envoy      | [2026-04-07 08:29:16.416][1][info][main] [source/server/server.cc:430]   envoy.route_config_update_requester: envoy.route_config_update_requester.default
+google-emu-envoy      | [2026-04-07 08:29:16.418][1][warning][misc] [source/common/protobuf/message_validator_impl.cc:21] Deprecated field: type envoy.config.cluster.v3.Cluster Using deprecated option 'envoy.config.cluster.v3.Cluster.http2_protocol_options' from file cluster.proto. This configuration will be removed from Envoy soon. Please see https://www.envoyproxy.io/docs/envoy/latest/version_history/version_history for details. If continued use of this field is absolutely necessary, see https://www.envoyproxy.io/docs/envoy/latest/configuration/operations/runtime#using-runtime-overrides-for-deprecated-features for how to apply a temporary and highly discouraged override.
+google-emu-envoy      | [2026-04-07 08:29:16.418][1][info][main] [source/server/server.cc:490] HTTP header map info:
+google-emu-envoy      | [2026-04-07 08:29:16.418][1][info][main] [source/server/server.cc:493]   request header map: 664 bytes: :authority,:method,:path,:protocol,:scheme,accept,accept-encoding,access-control-request-headers,access-control-request-method,access-control-request-private-network,authentication,authorization,cache-control,cdn-loop,connection,content-encoding,content-length,content-type,expect,grpc-accept-encoding,grpc-timeout,if-match,if-modified-since,if-none-match,if-range,if-unmodified-since,keep-alive,origin,pragma,proxy-connection,proxy-status,referer,te,transfer-encoding,upgrade,user-agent,via,x-client-trace-id,x-envoy-attempt-count,x-envoy-decorator-operation,x-envoy-downstream-service-cluster,x-envoy-downstream-service-node,x-envoy-expected-rq-timeout-ms,x-envoy-external-address,x-envoy-force-trace,x-envoy-hedge-on-per-try-timeout,x-envoy-internal,x-envoy-ip-tags,x-envoy-is-timeout-retry,x-envoy-max-retries,x-envoy-original-path,x-envoy-original-url,x-envoy-retriable-header-names,x-envoy-retriable-status-codes,x-envoy-retry-grpc-on,x-envoy-retry-on,x-envoy-upstream-alt-stat-name,x-envoy-upstream-rq-per-try-timeout-ms,x-envoy-upstream-rq-timeout-alt-response,x-envoy-upstream-rq-timeout-ms,x-envoy-upstream-stream-duration-ms,x-forwarded-client-cert,x-forwarded-for,x-forwarded-host,x-forwarded-port,x-forwarded-proto,x-ot-span-context,x-request-id
+google-emu-envoy      | [2026-04-07 08:29:16.418][1][info][main] [source/server/server.cc:493]   request trailer map: 120 bytes: 
+google-emu-envoy      | [2026-04-07 08:29:16.418][1][info][main] [source/server/server.cc:493]   response header map: 432 bytes: :status,access-control-allow-credentials,access-control-allow-headers,access-control-allow-methods,access-control-allow-origin,access-control-allow-private-network,access-control-expose-headers,access-control-max-age,age,cache-control,connection,content-encoding,content-length,content-type,date,etag,expires,grpc-message,grpc-status,keep-alive,last-modified,location,proxy-connection,proxy-status,server,transfer-encoding,upgrade,vary,via,x-envoy-attempt-count,x-envoy-decorator-operation,x-envoy-degraded,x-envoy-immediate-health-check-fail,x-envoy-ratelimited,x-envoy-upstream-canary,x-envoy-upstream-healthchecked-cluster,x-envoy-upstream-service-time,x-request-id
+google-emu-envoy      | [2026-04-07 08:29:16.418][1][info][main] [source/server/server.cc:493]   response trailer map: 144 bytes: grpc-message,grpc-status
+google-emu-envoy      | [2026-04-07 08:29:16.437][1][info][main] [source/server/server.cc:869] runtime: {}
+google-emu-envoy      | [2026-04-07 08:29:16.437][1][info][admin] [source/server/admin/admin.cc:65] admin address: 0.0.0.0:9901
+google-emu-envoy      | [2026-04-07 08:29:16.437][1][info][config] [source/server/configuration_impl.cc:168] loading tracing configuration
+google-emu-envoy      | [2026-04-07 08:29:16.437][1][info][config] [source/server/configuration_impl.cc:124] loading 0 static secret(s)
+google-emu-envoy      | [2026-04-07 08:29:16.437][1][info][config] [source/server/configuration_impl.cc:130] loading 4 cluster(s)
+google-emu-envoy      | [2026-04-07 08:29:16.462][1][info][config] [source/server/configuration_impl.cc:138] loading 1 listener(s)
+google-emu-envoy      | [2026-04-07 08:29:16.462][1][warning][misc] [source/extensions/filters/network/http_connection_manager/config.cc:83] internal_address_config is not configured. The existing default behaviour will trust RFC1918 IP addresses, but this will be changed in next release. Please explictily config internal address config as the migration step.
+google-emu-envoy      | [2026-04-07 08:29:16.462][1][info][config] [source/server/configuration_impl.cc:154] loading stats configuration
+google-emu-envoy      | [2026-04-07 08:29:16.463][1][warning][main] [source/server/server.cc:936] There is no configured limit to the number of allowed active downstream connections. Configure a limit in `envoy.resource_monitors.downstream_connections` resource monitor.
+google-emu-envoy      | [2026-04-07 08:29:16.463][1][info][main] [source/server/server.cc:978] starting main dispatch loop
+google-emu-envoy      | [2026-04-07 08:29:16.491][1][info][runtime] [source/common/runtime/runtime_impl.cc:625] RTDS has finished initialization
+google-emu-envoy      | [2026-04-07 08:29:16.491][1][info][upstream] [source/common/upstream/cluster_manager_impl.cc:249] cm init: all clusters initialized
+google-emu-envoy      | [2026-04-07 08:29:16.491][1][info][main] [source/server/server.cc:958] all clusters initialized. initializing init manager
+google-emu-envoy      | [2026-04-07 08:29:16.491][1][info][config] [source/common/listener_manager/listener_manager_impl.cc:930] all dependencies initialized. starting workers
+google-emu-envoy      | [2026-04-07 08:44:16.491][1][info][main] [source/server/drain_manager_impl.cc:208] shutting down parent after drain
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/config
+google-emu-bridge-webrtc  | [config] fetching device-info from apkbridge...
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [config] apkbridge device-info ok, screen={"height":1920,"width":1080}
+google-emu-bridge-webrtc  | [http] GET /api/config -> 200 (27ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/config
+google-emu-bridge-webrtc  | [config] fetching device-info from apkbridge...
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [config] apkbridge device-info ok, screen={"height":1920,"width":1080}
+google-emu-bridge-webrtc  | [http] GET /api/config -> 200 (26ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (1ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token
+google-emu-bridge-webrtc  | [http] GET /api/emulator-token -> 200 (0ms)
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=45446c64536e6774497a3341, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=45396b706e355a6f7a423774, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4b5042516441596136396d45, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=56694a457037696671703978, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=2b674b442b61787a634d6161, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=45714a6e6e566457346d6147, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=654654624c364e4b52596144, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=556e2b63586a4c6b5a796355, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=304d624d3569717a44664b6c, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=7a47394a673845353264744b, use_candidate=1, nomination=0
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=796d63524332573646544f61, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=585637646a63367a63616332, use_candidate=1, nomination=0
+google-emu-emulator       | logcat: 04-12 09:45:06.867     0     0 D logd    : logdr: UID=2000 GID=2000 PID=8001 n tail=0 logMask=99 pid=0 start=0ns timeout=0ns
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=36596579664f7a7167397042, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=30714d634b43413933657657, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=44684f4475564a5353546e50, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=6c6d6f4635356c453147694e, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=7554724675426a6971565667, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=357732434e37796863483837, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=31662b743171396630724c59, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=444d4b302f5850433542495a, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=727a34372f384a5655535537, use_candidate=1, nomination=0
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4476316e6a7833456852426c, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=7a70777037754233666b306a, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=48797279696b6c694f773846, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=444856496b70524d536e654c, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=58643068374a665a47313677, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=6a41556f6359417557766a2b, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=51315331724c3931594a7949, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=6f6961416c533961304c7a4d, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=62702b564a2b5a384e426432, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=494c45527035324b78544c38, use_candidate=1, nomination=0
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4371496464616b447a506361, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4c463545564e7075634b6431, use_candidate=1, nomination=0
+google-emu-emulator       | logcat: 04-12 09:45:07.857     0     0 D logd    : logdr: UID=2000 GID=2000 PID=8004 n tail=0 logMask=10 pid=0 start=0ns timeout=0ns
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=444e785a725a742b55766546, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=6b52764f694977793658436f, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=41674c503564497932643766, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=56437a49654f644a68437942, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=575345316b576f4155477a43, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=664a756d514e693134385842, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=316a35567945516533377661, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=5a4f7657316d697941466c4d, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=396363736a483962725a3847, use_candidate=1, nomination=0
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=793068706148546531413169, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=695576465771747041533675, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4f63756b572b4c37514e7067, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=79687179613370426b6f7354, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=6453427a375231725533382f, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=3144386f415a6569762f4c7a, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=6d5a6a4f3930615949716362, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=314271696f736b5672543374, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=776e73516548392f71497077, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=74684138526f742f77327963, use_candidate=1, nomination=0
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4250654456536b4967446237, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=365238436a586e4c6b475154, use_candidate=1, nomination=0
+google-emu-emulator       | logcat: 04-12 09:45:09.367     0     0 D logd    : logdr: UID=2000 GID=2000 PID=8007 n tail=0 logMask=99 pid=0 start=0ns timeout=0ns
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4c6e59415264573955716843, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=6c57346e444f59436d2b4b68, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=686373546d2b6f4953303659, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=31324e5a4874726955485553, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=68656275654c457435706f67, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=424c76684c4f47334d525331, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4f76355435334d343850692f, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=693634586c316c684a703864, use_candidate=1, nomination=0
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=78694c4c52507155664e6363, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4a61746957306572304a3734, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=6d37567268494e5039307661, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=3944412f72496141362f466d, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=705a617454384b445651336b, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4f37624c693344506837474f, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4574422b426d6e4b344a426f, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=30795953447348706a6d3143, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4f57612b456f3568586d4b71, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=314e386850327735354c7442, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=6d63354f70624c356a4d3673, use_candidate=1, nomination=0
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=62656b387949645658714650, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4a7a7756533930644142414c, use_candidate=1, nomination=0
+google-emu-emulator       | logcat: 04-12 09:45:10.362     0     0 D logd    : logdr: UID=2000 GID=2000 PID=8010 n tail=0 logMask=10 pid=0 start=0ns timeout=0ns
+google-emu-emulator       | emulator: INFO: LoggingInterceptor.cpp:70: 1775987096072817, rcvTime: 19, sndTime: 214, SERVER_STREAMING, rcv: 103, snd: 39560, /android.emulation.control.Rtc/receiveJsepMessages(guid: "f53e8ed5-db4a-4b28-9...<truncated>...") -> [id { guid: "f53e8ed5-db4a-4b28-9...<truncated>..." } message: "{\"start\":{\"iceServer...<truncated>..."], OK
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=2b6969736150546279583577, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=6b4e78454b5a524363337a62, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=5078742f7557336473445241, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=3864572f724c6d7270444e68, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4a6c694e3272714f4641526a, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=2b314c6e77447256544b5969, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=32432f7358613034734f4a76, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=504630706b485153356b494d, use_candidate=1, nomination=0
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=497875594641554b506b6e39, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=3259365064644c3572482b35, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4a6a356e6c72344d424d466f, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=75747a2f3275625635567477, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=5a5646595154305843427573, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=3933556566754f5430756133, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4d68563459784f4c462f3446, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=31325574342b543458616132, use_candidate=1, nomination=0
+google-emu-emulator       | video: (connection.cc:828): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C--I|-|0|0|35184321641983|-]: Timed out after 15025 ms without a response, rtt=6000
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07400:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->ndp1/iKf:1:8191:relay:udp:83.85.170.x:49168|C-xI|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=4f30476e4255347265707268, use_candidate=1, nomination=0
+google-emu-emulator       | video: (p2p_transport_channel.cc:1809): Channel[0|1|__]: Transport channel state changed from 1 to 2
+google-emu-emulator       | video: (jsep_transport_controller.cc:1443): 0 Transport 1 state changed. Check if state is complete.
+google-emu-emulator       | video: (connection.cc:1197): Connection deleted with number of pings sent: 157
+google-emu-emulator       | video: (p2p_transport_channel.cc:1999): Channel[0|1|__]: Removed connection ae07400 (1 remaining)
+google-emu-emulator       | video: (connection.cc:828): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C--I|-|0|0|35184321641983|-]: Timed out after 15025 ms without a response, rtt=6000
+google-emu-emulator       | video: (connection.cc:1148): Conn[ae07e00:0:Net[eth0:172.22.0.x/16:Ethernet:id=1]:CdL7fwYv:1:0:local:udp:172.22.0.x:40046->pzArMTGe:1:8191:relay:udp:83.85.170.x:49180|C-xI|-|0|0|35184321641983|-]: Sent STUN BINDING request, id=2f646642537a426c65736d4d, use_candidate=1, nomination=0
+google-emu-emulator       | video: (p2p_transport_channel.cc:1809): Channel[0|1|__]: Transport channel state changed from 2 to 3
+google-emu-emulator       | video: (jsep_transport_controller.cc:1443): 0 Transport 1 state changed. Check if state is complete.
+google-emu-emulator       | video: (jsep_transport_controller.cc:1443): 0 Transport 1 state changed. Check if state is complete.
+google-emu-emulator       | video: (connection.cc:1197): Connection deleted with number of pings sent: 157
+google-emu-emulator       | video: (p2p_transport_channel.cc:1999): Channel[0|1|__]: Removed connection ae07e00 (0 remaining)
+google-emu-emulator       | video: (peer_connection.cc:4697): Changing IceConnectionState 1 => 4
+google-emu-emulator       | video: (Participant.cpp:257): OnIceConnectionChange: Participant: f53e8ed5-db4a-4b28-92a9-81793a521cd4: kIceConnectionFailed
+google-emu-emulator       | video: (peer_connection.cc:4716): Changing standardized IceConnectionState 1 => 4
+google-emu-emulator       | video: (Participant.cpp:263): OnConnectionChange: Participant: f53e8ed5-db4a-4b28-92a9-81793a521cd4: kFailed
+google-emu-emulator       | video: (Switchboard.cpp:66): Finalizing f53e8ed5-db4a-4b28-92a9-81793a521cd4
+google-emu-emulator       | video: (Switchboard.cpp:76): disconnect: f53e8ed5-db4a-4b28-92a9-81793a521cd4, available: 1
+google-emu-emulator       | video: (Participant.cpp:281): Closing peer connection.
+google-emu-emulator       | video: (webrtc_video_engine.cc:2477): VideoSendStream stats: 694368512, {input_fps: 0, encode_fps: 0, encode_ms: 0, encode_usage_perc: 0, target_bps: 0, media_bps: 0, suspended: false, bw_adapted_res: false, cpu_adapted_res: false, bw_adapted_fps: false, cpu_adapted_fps: false, #cpu_adaptations: 0, #quality_adaptations: 0} {ssrc: 625176349, type: media, width: 0, height: 0, key: 0, delta: 0, total_bps: 0, retransmit_bps: 0, avg_delay_ms: 0, max_delay_ms: 0, cum_loss: 0, max_ext_seq: 0, nack: 0, fir: 0, pli: 0}
+google-emu-emulator       | video: (webrtc_video_engine.cc:1557): Call stats: 694368512, {send_bw_bps: 0, recv_bw_bps: 0, max_pad_bps: 0, pacer_delay_ms: 0, rtt_ms: -1}
+google-emu-emulator       | video: (peer_connection.cc:4793): Session: 6773158910614736691 Old state: kStable New state: kClosed
+google-emu-emulator       | video: (Participant.cpp:257): OnIceConnectionChange: Participant: f53e8ed5-db4a-4b28-92a9-81793a521cd4: kIceConnectionClosed
+google-emu-emulator       | video: (Participant.cpp:263): OnConnectionChange: Participant: f53e8ed5-db4a-4b28-92a9-81793a521cd4: kClosed
+google-emu-emulator       | video: (webrtc_video_engine.cc:1212): SetVideoSend (ssrc= 625176349, options: nullptr, source = nullptr)
+google-emu-emulator       | video: (GrpcVideoSource.cpp:242): OnSinkWantsChanged desired pixels: -1431655936, max: 2147483647, fps: 60, align: 1
+google-emu-emulator       | video: (channel.cc:522): Channel disabled
+google-emu-emulator       | video: (video_send_stream.cc:177): VideoSendStream::Stop
+google-emu-emulator       | video: (channel.cc:970): Changing video state, send=0
+google-emu-emulator       | video: (video_send_stream.cc:177): VideoSendStream::Stop
+google-emu-emulator       | video: (video_send_stream_impl.cc:388): VideoSendStream::Stop
+google-emu-emulator       | video: (video_send_stream_impl.cc:388): VideoSendStream::Stop
+google-emu-emulator       | video: (video_send_stream_impl.cc:388): VideoSendStream::Stop
+google-emu-emulator       | video: (video_send_stream_impl.cc:313): ~VideoSendStreamInternal: {encoder_settings: { experiment_cpu_load_estimator: off}}, rtp: {ssrcs: [625176349], rids: [], mid: '0', rtcp_mode: RtcpMode::kReducedSize, max_packet_size: 1200, extmap-allow-mixed: false, extensions: [{uri: http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01, id: 3}, {uri: http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time, id: 2}, {uri: http://www.webrtc.org/experiments/rtp-hdrext/color-space, id: 9}, {uri: http://www.webrtc.org/experiments/rtp-hdrext/playout-delay, id: 12}, {uri: http://www.webrtc.org/experiments/rtp-hdrext/video-content-type, id: 11}, {uri: http://www.webrtc.org/experiments/rtp-hdrext/video-timing, id: 7}, {uri: urn:3gpp:video-orientation, id: 13}, {uri: urn:ietf:params:rtp-hdrext:sdes:mid, id: 4}, {uri: urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id, id: 6}, {uri: urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id, id: 5}], lntf: {enabled: false}, nack: {rtp_history_ms: 1000}, ulpfec: {ulpfec_payload_type: 124, red_payload_type: 125, red_rtx_payload_type: 122}, payload_name: VP8, payload_type: 96, raw_payload: false, flexfec: {payload_type: -1, ssrc: 0, protected_media_ssrcs: []}, rtx: {ssrcs: [358648673], payload_type: 97}, c_name: SHVAtINfmgK5r4OM}, rtcp_report_interval_ms: 1000, send_transport: (Transport), render_delay_ms: 0, target_delay_ms: 0, suspend_below_min_bitrate: off}
+google-emu-emulator       | video: (send_statistics_proxy.cc:669): Frames encoded 0
+google-emu-emulator       | video: WebRTC.Video.Screenshare.DroppedFrames.Capturer 0
+google-emu-emulator       | video: WebRTC.Video.Screenshare.DroppedFrames.EncoderQueue 1
+google-emu-emulator       | video: WebRTC.Video.Screenshare.DroppedFrames.Encoder 0
+google-emu-emulator       | video: WebRTC.Video.Screenshare.DroppedFrames.Ratelimiter 0
+google-emu-emulator       | video: WebRTC.Video.Screenshare.DroppedFrames.CongestionWindow 0
+google-emu-emulator       | video: (channel.cc:164): Destroyed channel: 0
+google-emu-emulator       | video: (channel.cc:522): Channel disabled
+google-emu-emulator       | video: (channel.cc:821): Changing voice state, recv=0 send=0
+google-emu-emulator       | video: (webrtc_voice_engine.cc:1817): RemoveSendStream: 3789798867
+google-emu-emulator       | video: (audio_send_stream.cc:179): ~AudioSendStream: 3789798867
+google-emu-emulator       | video: (channel.cc:164): Destroyed channel: 1
+google-emu-emulator       | video: (peer_connection.cc:6740): Tearing down data channel transport for mid=2
+google-emu-emulator       | video: (openssl_stream_adapter.cc:912): Cleanup
+google-emu-emulator       | video: (paced_sender.cc:176): ProcessThreadAttached 0x0
+google-emu-emulator       | video: (paced_sender.cc:176): ProcessThreadAttached 0x0
+google-emu-emulator       | video: (peer_connection.cc:1076): Session: 6773158910614736691 is destroyed.
+google-emu-emulator       | video: (dtmf_sender.cc:225): The Dtmf provider is deleted. Clear the sending queue.
+google-emu-emulator       | video: (Participant.cpp:230): Participant f53e8ed5-db4a-4b28-92a9-81793a521cd4, completed.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (Switchboard.cpp:195): Unknown identity: f53e8ed5-db4a-4b28-92a9-81793a521cd4
+google-emu-emulator       | video: (RtcService.cpp:213): RtcPacket: id { guid: "f53e8ed5-db4a-4b28-92a9-81793a521cd4" } message: "{ \"bye\" : \"disconnected\" }"
+google-emu-emulator       | video: (LoggingInterceptor.cpp:70): 1775987096072918, rcvTime: 16, sndTime: 186, SERVER_STREAMING, rcv: 103, snd: 52856, /android.emulation.control.Rtc/receiveJsepMessages(guid: "f53e8ed5-db4a-4b28-9...<truncated>...") -> [id { guid: "f53e8ed5-db4a-4b28-9...<truncated>..." } message: "{\"start\":{\"iceServer...<truncated>..."], OK
+google-emu-emulator       | logcat: 04-12 09:45:10.729   406  7965 I adbd    : host-29: read failed: I/O error
+google-emu-emulator       | logcat: 04-12 09:45:10.729   406  7965 I adbd    : host-29: connection terminated: read failed
+google-emu-emulator       | logcat: 04-12 09:45:10.729   406   406 I adbd    : host-29: already offline
+google-emu-emulator       | logcat: 04-12 09:45:10.729   406   406 I adbd    : destroying transport host-29
+google-emu-emulator       | logcat: 04-12 09:45:10.729   406   406 I adbd    : BlockingConnectionAdapter(host-29): stopping
+google-emu-emulator       | logcat: 04-12 09:45:10.729   406   406 I adbd    : BlockingConnectionAdapter(host-29): stopped
+google-emu-emulator       | logcat: 04-12 09:45:10.729   406   406 I adbd    : BlockingConnectionAdapter(host-29): destructing
+google-emu-emulator       | logcat: 04-12 09:45:10.729   406   406 I adbd    : BlockingConnectionAdapter(host-29): already stopped
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | logcat: 04-12 09:45:12.563   532   532 D CompatibilityChangeReporter: Compat change id reported: 135634846; UID 10096; state: DISABLED
+google-emu-emulator       | logcat: 04-12 09:45:12.563   532   582 D CompatibilityChangeReporter: Compat change id reported: 143937733; UID 10096; state: ENABLED
+google-emu-emulator       | logcat: 04-12 09:45:12.566   304   304 D Zygote  : Forked child process 8014
+google-emu-emulator       | logcat: 04-12 09:45:12.566   532   582 I ActivityManager: Start proc 8014:com.google.android.partnersetup/u0a96 for service {com.google.android.partnersetup/com.google.android.partnersetup.InstalledAppJobService}
+google-emu-emulator       | logcat: 04-12 09:45:12.568  8014  8014 W id.partnersetu: Unexpected CPU variant for X86 using defaults: x86_64
+google-emu-emulator       | logcat: 04-12 09:45:12.570   406   432 I adbd    : jdwp connection from 8014
+google-emu-emulator       | logcat: 04-12 09:45:12.574  8014  8014 I id.partnersetu: The ClassLoaderContext is a special shared library.
+google-emu-emulator       | logcat: 04-12 09:45:12.575  8014  8014 I id.partnersetu: The ClassLoaderContext is a special shared library.
+google-emu-emulator       | logcat: 04-12 09:45:12.575  8014  8014 D nativeloader: classloader namespace configured for unbundled product apk. library_path=/product/priv-app/PartnerSetupPrebuilt/lib/x86_64:/product/lib64:/system/product/lib64
+google-emu-emulator       | logcat: 04-12 09:45:12.576  8014  8014 D NetworkSecurityConfig: No Network Security Config specified, using platform default
+google-emu-emulator       | logcat: 04-12 09:45:12.602   532  1835 I ActivityManager: Killing 6169:com.google.android.gms.ui/u0a107 (adj 975): empty for 3122s
+google-emu-emulator       | logcat: 04-12 09:45:12.576  8014  8014 D NetworkSecurityConfig: No Network Security Config specified, using platform default
+google-emu-emulator       | logcat: 04-12 09:45:12.606   304   304 I Zygote  : Process 6169 exited due to signal 9 (Killed)
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | logcat: 04-12 09:45:12.642   532   583 I libprocessgroup: Successfully killed process cgroup uid 10107 pid 6169 in 39ms
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.
+google-emu-emulator       | video: (video_stream_encoder.cc:765): Same/old NTP timestamp (3984975901505 <= 3984975901505) for incoming frame. Dropping.

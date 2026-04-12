@@ -1,0 +1,13 @@
+[turn-harness] Generated emulator-style TURN payload {
+  iceServers: [
+    {
+      urls: [Array],
+      username: '1778579070:emuuser',
+      credential: '4xgSU70EOADaTWQMaZgcdUnQsAQ='
+    }
+  ]
+}
+[turn-harness] DNS lookup ok for turn.corsicanescape.com [ '83.85.170.147' ]
+[turn-harness] TCP connect ok for turn.corsicanescape.com:3478
+[turn-harness] Relay candidates gathered: 1
+[turn-harness] PASS: TURN reachable, credentials accepted, and emulator-style payload produced a relay connection path

@@ -751,6 +751,34 @@ function isNativeUpstreamSendingVideo(peerStats) {
   );
 }
 
+function shouldFallbackNativeIceTransport(nativeDiagnostics, nativeFailureReason) {
+  const startSummary = nativeDiagnostics?.startIceServers;
+  const localCandidates = nativeDiagnostics?.localCandidateSummary;
+  const remoteCandidates = nativeDiagnostics?.remoteCandidateSummary;
+  const selectedPair = nativeDiagnostics?.peerStats?.selectedCandidatePair || null;
+  const packetsReceived = Number(nativeDiagnostics?.peerStats?.packetsReceived ?? 0);
+  const bytesReceived = Number(nativeDiagnostics?.peerStats?.bytesReceived ?? 0);
+
+  if (!startSummary?.hasTurn || selectedPair) {
+    return false;
+  }
+
+  if (!["disconnected", "no-inbound-rtp", "unreachable-host-candidates"].includes(nativeFailureReason?.code || "")) {
+    return false;
+  }
+
+  const localRelayOnly =
+    (localCandidates?.total ?? 0) > 0 &&
+    (localCandidates?.relay ?? 0) > 0 &&
+    (localCandidates?.host ?? 0) === 0 &&
+    (localCandidates?.srflx ?? 0) === 0 &&
+    (localCandidates?.publicHost ?? 0) === 0;
+  const remoteNoRelay = (remoteCandidates?.total ?? 0) > 0 && (remoteCandidates?.relay ?? 0) === 0;
+  const noInboundMedia = packetsReceived === 0 && bytesReceived === 0;
+
+  return localRelayOnly && remoteNoRelay && noInboundMedia;
+}
+
 function buildCustomWebrtcOverlay(webrtcDiagnostics) {
   const bridgeOverlay = buildCaptureOverlay(
     webrtcDiagnostics?.sessionInfo,
@@ -1716,6 +1744,7 @@ function App() {
   });
   const [nativeWebrtcKey, setNativeWebrtcKey] = useState(0);
   const [nativeRetryCount, setNativeRetryCount] = useState(0);
+  const [nativeIceTransportMode, setNativeIceTransportMode] = useState("relay");
   const [emulatorToken, setEmulatorToken] = useState(null);
   const emulatorTokenFetchedRef = useRef(false);
   const webrtcFailureRef = useRef(false);
@@ -1771,8 +1800,10 @@ function App() {
       apiState,
       emulatorState: emuState,
       lastMessage: message,
+      nativeIceTransportMode,
       nativeHasVideoFrame,
       nativeUpstreamSending,
+      startIceServers: nativeDiagnostics?.startIceServers || null,
       nativeVideoStats,
       selectedCandidatePair: nativeDiagnostics?.peerStats?.selectedCandidatePair || null,
       streamMode,
@@ -1786,6 +1817,7 @@ function App() {
     emuState,
     message,
     nativeDiagnostics,
+    nativeIceTransportMode,
     nativeHasVideoFrame,
     nativeUpstreamSending,
     nativeVideoStats,
@@ -2189,7 +2221,7 @@ function App() {
             fetchFallbackIceServers();
           }
           const fallbackSummary = summarizeIceServers(fallbackIceServers);
-          const shouldPreferRelay = startSummary.hasTurn;
+          const shouldPreferRelay = startSummary.hasTurn && nativeIceTransportMode === "relay";
 
         // When the emulator advertises no ICE servers at all the browser has no
         // way to gather reflexive candidates, so the peer connection stays stuck
@@ -2237,6 +2269,7 @@ function App() {
             hasTurn: startSummary.hasTurn,
             hasStun: startSummary.hasStun,
             injectedIce: Boolean(injectedIceServers),
+            requestedTransportMode: nativeIceTransportMode,
             iceTransportPolicy:
               patchedSignal?.start?.iceTransportPolicy || signal?.start?.iceTransportPolicy || "all",
           });
@@ -2257,6 +2290,10 @@ function App() {
           }
           if (patchedSignal !== baseSignal) {
             pushNativeEvent("Forcing native browser ICE transport policy to relay because TURN is configured");
+          } else if (startSummary.hasTurn && nativeIceTransportMode !== "relay") {
+            pushNativeEvent("Native browser is allowing mixed ICE candidates after a failed relay-only attempt", {
+              requestedTransportMode: nativeIceTransportMode,
+            });
           }
           originalHandleStart(patchedSignal);
         } catch (error) {
@@ -2342,7 +2379,7 @@ function App() {
       detachPeerListeners();
       nativePeerCleanupRef.current();
     };
-  }, [streamMode, nativeWebrtcKey]);
+  }, [nativeIceTransportMode, streamMode, nativeWebrtcKey]);
 
   useEffect(() => {
     if (streamMode !== "native-webrtc") {
@@ -2538,6 +2575,20 @@ function App() {
       return;
     }
 
+    if (nativeIceTransportMode === "relay" && shouldFallbackNativeIceTransport(nativeDiagnostics, nativeFailureReason)) {
+      const fallbackMessage =
+        "Native WebRTC relay-only ICE failed because the emulator only advertised host/srflx candidates. Retrying with mixed ICE to recover video.";
+      setMessage(fallbackMessage);
+      setWebrtcNotice(fallbackMessage);
+      setEmuState("connecting");
+      setNativeVideoStats(null);
+      setNativeHasVideoFrame(false);
+      setNativeIceTransportMode("all");
+      setNativeRetryCount((count) => count + 1);
+      setNativeWebrtcKey((value) => value + 1);
+      return;
+    }
+
     setMessage(
       `Native WebRTC hit "${nativeFailureReason.summary}" and is restarting session ${nativeRetryCount + 1}/${NATIVE_WEBRTC_MAX_RETRIES}...`
     );
@@ -2546,7 +2597,16 @@ function App() {
     setNativeHasVideoFrame(false);
     setNativeRetryCount((count) => count + 1);
     setNativeWebrtcKey((value) => value + 1);
-  }, [emuState, nativeDiagnostics, nativeFailureReason, nativeHasVideoFrame, nativeRetryCount, nativeVideoStats, streamMode]);
+  }, [
+    emuState,
+    nativeDiagnostics,
+    nativeFailureReason,
+    nativeHasVideoFrame,
+    nativeIceTransportMode,
+    nativeRetryCount,
+    nativeVideoStats,
+    streamMode,
+  ]);
 
   useEffect(() => {
     if (streamMode !== "native-webrtc") {
@@ -2797,6 +2857,7 @@ function App() {
     nativeFailureSignatureRef.current = null;
     nativeRootCauseRef.current = null;
     setNativeRetryCount(0);
+    setNativeIceTransportMode("relay");
     if (nextMode === "native-webrtc") {
       setWebrtcNotice("");
       setEmuState("connecting");
@@ -3185,6 +3246,10 @@ function App() {
                 <div>Diagnosis: {nativeFailureReason.summary}</div>
                 <div>
                   ICE servers: {formatIceServerSummary(nativeDiagnostics.startIceServers)}
+                </div>
+                <div>
+                  ICE transport mode:{" "}
+                  {nativeIceTransportMode === "relay" ? "relay-only (TURN preferred)" : "mixed candidates (relay + direct)"}
                 </div>
                 {nativeMissingTurnNotice ? <div>{nativeMissingTurnNotice}</div> : null}
                 <div>

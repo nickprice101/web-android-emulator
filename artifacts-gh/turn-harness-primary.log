@@ -1,0 +1,13 @@
+[turn-harness] Generated emulator-style TURN payload {
+  iceServers: [
+    {
+      urls: [Array],
+      username: '1778579069:emuuser',
+      credential: '0WRcW3paAGDfBntuvLYs+1V6A84='
+    }
+  ]
+}
+[turn-harness] DNS lookup ok for turn.corsicanescape.com [ '83.85.170.147' ]
+[turn-harness] TCP connect ok for turn.corsicanescape.com:443
+[turn-harness] TLS handshake ok for turn.corsicanescape.com:443 { authorized: true, authorizationError: null }
+[turn-harness] FAIL: No relay candidates were gathered. TLS preflight to turn.corsicanescape.com:443 succeeded, but the WebRTC client never completed a TURN allocation over turns:. This usually points to a client-side turns:/libwebrtc limitation or an early TURN-over-TLS socket setup failure rather than coturn auth. Candidate errors: [{"url":"turns:turn.corsicanescape.com:443?transport=tcp","hostCandidate":null,"errorCode":701,"errorText":null},{"url":"turns:turn.corsicanescape.com:443?transport=tcp","hostCandidate":null,"errorCode":701,"errorText":"TURN host lookup received error."},{"url":"turns:turn.corsicanescape.com:443?transport=tcp","hostCandidate":null,"errorCode":701,"errorText":"Failed to create TURN client socket."}]

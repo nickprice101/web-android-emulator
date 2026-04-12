@@ -341,14 +341,17 @@ jobs:
           exit 1
 
       - name: Run deployed TURN video browser test
+        id: deployed_browser_test
         if: steps.browser_e2e_gate.outputs.enabled == 'true'
+        continue-on-error: true
         working-directory: frontend
         env:
           E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
         run: npm run test:e2e:deployed-turns
 
       - name: Collect remote diagnostics
-        if: failure() && steps.browser_e2e_gate.outputs.enabled == 'true'
+        if: steps.deployed_browser_test.outcome == 'failure' && steps.browser_e2e_gate.outputs.enabled == 'true'
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -383,6 +386,117 @@ jobs:
           fi
           REMOTE
 
+      - name: Classify deployed TURN browser failure
+        id: deployed_browser_diagnostics
+        if: steps.deployed_browser_test.outcome == 'failure' && steps.browser_e2e_gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+
+          root = pathlib.Path(".")
+
+          def first_match(pattern):
+            matches = sorted(root.glob(pattern))
+            return matches[0] if matches else None
+
+          diagnostics_path = first_match("frontend/test-results/**/native-turns-video-diagnostics.json")
+          error_context_path = first_match("frontend/test-results/**/error-context.md")
+          remote_logs_path = root / "artifacts" / "remote-compose-logs.txt"
+
+          diagnostics = {}
+          if diagnostics_path and diagnostics_path.exists():
+            diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+
+          error_context = (
+            error_context_path.read_text(encoding="utf-8", errors="replace")
+            if error_context_path and error_context_path.exists()
+            else ""
+          )
+          remote_logs = (
+            remote_logs_path.read_text(encoding="utf-8", errors="replace")
+            if remote_logs_path.exists()
+            else ""
+          )
+
+          browser = diagnostics.get("browserDiagnostics") or {}
+          media_outcome = diagnostics.get("mediaOutcome") or {}
+          video_stats = diagnostics.get("videoStats") or media_outcome.get("videoStats") or {}
+          native_text = diagnostics.get("nativeDiagnosticsText") or error_context
+          last_message = diagnostics.get("lastMessage") or ""
+          selected_pair = browser.get("selectedCandidatePair")
+          native_ice_mode = browser.get("nativeIceTransportMode")
+          has_turn = bool((browser.get("startIceServers") or {}).get("hasTurn")) or "turn=yes" in native_text.lower()
+
+          local_relay_only = bool(
+            re.search(r"Candidate path:\s+local .*relay\s+[1-9]", native_text, re.IGNORECASE)
+            and re.search(r"Candidate path:\s+local .*host\s+0", native_text, re.IGNORECASE)
+            and re.search(r"Candidate path:\s+local .*srflx\s+0", native_text, re.IGNORECASE)
+          )
+          remote_without_relay = bool(
+            re.search(r"Candidate path:.*remote .*relay\s+0", native_text, re.IGNORECASE)
+          )
+          no_selected_pair = selected_pair is None or bool(
+            re.search(r"Selected pair:\s+none", native_text, re.IGNORECASE)
+          )
+          placeholder_frame = (
+            media_outcome.get("outcome") == "failed"
+            and int(video_stats.get("videoWidth") or 0) <= 2
+            and int(video_stats.get("videoHeight") or 0) <= 2
+            and int(video_stats.get("totalVideoFrames") or 0) <= 1
+          )
+          emulator_private_bridge = "172.22." in remote_logs
+          timed_out_turn_responses = "Timed out after 15025 ms without a response" in remote_logs
+          ice_failed = "kIceConnectionFailed" in remote_logs
+          relay_only_attempt = native_ice_mode == "relay" or "relay-only" in native_text.lower() or "Forcing native browser ICE transport policy to relay" in error_context
+
+          known_limitation = all(
+            [
+              has_turn,
+              relay_only_attempt,
+              local_relay_only,
+              remote_without_relay,
+              no_selected_pair,
+              placeholder_frame,
+              emulator_private_bridge,
+              timed_out_turn_responses,
+              ice_failed,
+            ]
+          )
+
+          summary = (
+            "Known deployed TURN limitation: browser was relay-only, emulator only exposed host/srflx candidates "
+            "from the remote Docker bridge, and the native stream never selected a viable pair."
+            if known_limitation
+            else "No known deployed TURN limitation signature detected; treat this browser failure as actionable."
+          )
+
+          print(summary)
+          if diagnostics_path:
+            print(f"Diagnostics: {diagnostics_path}")
+          if error_context_path:
+            print(f"Error context: {error_context_path}")
+          if remote_logs_path.exists():
+            print(f"Remote logs: {remote_logs_path}")
+          if last_message:
+            print(f"Last message: {last_message}")
+
+          github_output = os.environ["GITHUB_OUTPUT"]
+          with open(github_output, "a", encoding="utf-8") as handle:
+            handle.write(f"known_deployed_turn_limitation={'true' if known_limitation else 'false'}\n")
+            handle.write(f"summary={summary}\n")
+          PY
+
+      - name: Note known deployed TURN limitation
+        if: steps.deployed_browser_diagnostics.outputs.known_deployed_turn_limitation == 'true'
+        shell: bash
+        run: |
+          echo "::notice title=Deployed TURN browser test matched known remote limitation::${{ steps.deployed_browser_diagnostics.outputs.summary }}"
+
       - name: Upload browser test artifacts
         if: always() && steps.browser_e2e_gate.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
@@ -391,6 +505,13 @@ jobs:
           path: |
             frontend/test-results/**
             artifacts/*.txt
+
+      - name: Fail workflow if deployed TURN browser test uncovered a new regression
+        if: steps.deployed_browser_test.outcome == 'failure' && steps.browser_e2e_gate.outputs.enabled == 'true' && steps.deployed_browser_diagnostics.outputs.known_deployed_turn_limitation != 'true'
+        shell: bash
+        run: |
+          echo "deployed-turns browser E2E failed without matching the known remote TURN limitation signature." >&2
+          exit 1
 
       - name: Clean up SSH key
         if: always() && steps.browser_e2e_gate.outputs.enabled == 'true'

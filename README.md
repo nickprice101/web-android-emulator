@@ -82,9 +82,24 @@ http://YOUR_HOST:18080
 
 Native WebRTC should be the primary experience. PNG mode remains available as a fallback if you need to compare behavior or recover while debugging.
 
-The `bridge-webrtc` Docker image continues to install the published
-`@roamhq/wrtc` package, so Intel/Linux deployments use the standard upstream
-`linux-x64` binary path rather than a local Windows-only native fork.
+The `bridge-webrtc` Docker image now pins `@roamhq/wrtc` to the fork commit
+that contains the native `turns:` investigation work and builds a Linux binary
+from that fork during the image build. This keeps Intel/Linux deployments on
+the same addon source tree we are using for native TURN debugging instead of
+falling back to the upstream prebuilt `linux-x64` package.
+
+If you need to test a newer addon commit, override the build args before
+starting the stack:
+
+```bash
+export WRTC_FORK_REPO=https://github.com/nickprice101/node-webrtc.git
+export WRTC_FORK_REF=00ce1c2340477568d9ca76fd54659b666a69d767
+docker compose build bridge-webrtc
+```
+
+The `bridge-webrtc` image takes longer to build now because it compiles the
+forked addon inside the Linux container before copying the resulting
+`build-linux-x64/wrtc.node` into the final runtime image.
 
 ## Test framework testbed
 

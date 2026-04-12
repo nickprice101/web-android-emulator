@@ -84,6 +84,9 @@ services:
     container_name: google-emu-bridge-webrtc
     build:
       context: ./bridge-webrtc
+      args:
+        WRTC_FORK_REPO: "${WRTC_FORK_REPO:-https://github.com/nickprice101/node-webrtc.git}"
+        WRTC_FORK_REF: "${WRTC_FORK_REF:-00ce1c2340477568d9ca76fd54659b666a69d767}"
     image: google-emu-bridge-webrtc:latest
     environment:
       PORT: "8090"

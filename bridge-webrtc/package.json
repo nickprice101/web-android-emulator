@@ -4,9 +4,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "build:wrtc-fork": "node scripts/build-forked-wrtc.mjs"
   },
   "dependencies": {
-    "@roamhq/wrtc": "0.10.0"
+    "@roamhq/wrtc": "https://codeload.github.com/nickprice101/node-webrtc/tar.gz/00ce1c2340477568d9ca76fd54659b666a69d767"
   }
 }

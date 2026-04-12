@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   readFileSync,
@@ -24,6 +25,7 @@ const DEFAULT_NIX_GNI = [
   "clang_use_chrome_plugins=false",
   "",
 ].join("\n");
+const WRAPPER_SCRIPT_MODE = 0o755;
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const bridgeRoot = resolve(scriptDir, "..");
@@ -83,6 +85,59 @@ function normalizeShellScriptLineEndings(rootDir) {
   }
 }
 
+function prepareLinuxCompilerWrappers(forkRoot) {
+  if (process.platform !== "linux") {
+    return process.env;
+  }
+
+  const buildDir = join(
+    forkRoot,
+    `build-${process.platform}-${process.arch}`,
+    "external",
+    "libwebrtc",
+    "download",
+    "src",
+    "third_party",
+    "llvm-build",
+    "Release+Asserts",
+    "bin",
+  );
+  const wrapperDir = join(forkRoot, ".codex-compiler");
+  const compilerNames = [
+    ["clang", "CC"],
+    ["clang++", "CXX"],
+  ];
+
+  mkdirSync(wrapperDir, { recursive: true });
+
+  for (const [compilerName] of compilerNames) {
+    const wrapperPath = join(wrapperDir, compilerName);
+    const script = [
+      "#!/usr/bin/env bash",
+      "set -e",
+      `CHROMIUM_CLANG="${join(buildDir, compilerName).replace(/\\/g, "/")}"`,
+      `if [ -x "${"$"}CHROMIUM_CLANG" ]; then`,
+      `  exec "${"$"}CHROMIUM_CLANG" "${"$"}@"`,
+      "fi",
+      `if command -v ${compilerName} >/dev/null 2>&1; then`,
+      `  exec ${compilerName} "${"$"}@"`,
+      "fi",
+      `exec ${compilerName === "clang++" ? "c++" : "cc"} "${"$"}@"`,
+      "",
+    ].join("\n");
+    writeFileSync(wrapperPath, script, "utf8");
+    chmodSync(wrapperPath, WRAPPER_SCRIPT_MODE);
+  }
+
+  console.log(`[forked-wrtc] prepared Linux compiler wrappers in ${wrapperDir}`);
+
+  return {
+    ...process.env,
+    CC: join(wrapperDir, "clang"),
+    CXX: join(wrapperDir, "clang++"),
+  };
+}
+
 function main() {
   const forkRepo = process.env.WRTC_FORK_REPO || DEFAULT_FORK_REPO;
   const forkRef = process.env.WRTC_FORK_REF || DEFAULT_FORK_REF;
@@ -104,6 +159,7 @@ function main() {
     run("git", ["checkout", forkRef], { cwd: tempRoot });
     ensureGeneratedForkFiles(tempRoot);
     normalizeShellScriptLineEndings(tempRoot);
+    const buildEnv = prepareLinuxCompilerWrappers(tempRoot);
     const hasLockfile =
       existsSync(join(tempRoot, "package-lock.json")) ||
       existsSync(join(tempRoot, "npm-shrinkwrap.json"));
@@ -113,8 +169,8 @@ function main() {
         hasLockfile ? " (lockfile detected)" : " (no lockfile present)"
       }`,
     );
-    run(NPM_COMMAND, installArgs, { cwd: tempRoot, env: process.env });
-    run(NPM_COMMAND, ["run", "build"], { cwd: tempRoot, env: process.env });
+    run(NPM_COMMAND, installArgs, { cwd: tempRoot, env: buildEnv });
+    run(NPM_COMMAND, ["run", "build"], { cwd: tempRoot, env: buildEnv });
 
     const compiledBinary = join(
       tempRoot,

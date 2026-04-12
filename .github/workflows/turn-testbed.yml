@@ -210,11 +210,11 @@ jobs:
           exit 1
 
   deployed-turns-browser-e2e:
-    if: ${{ secrets.SSH_B64 != '' && secrets.SSH_IP != '' && secrets.SSH_USER != '' && secrets.SSH_PATH != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       E2E_BASE_URL: http://127.0.0.1:18080
+      SSH_B64: ${{ secrets.SSH_B64 }}
       SSH_IP: ${{ secrets.SSH_IP }}
       SSH_PATH: ${{ secrets.SSH_PATH }}
       SSH_USER: ${{ secrets.SSH_USER }}
@@ -222,22 +222,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check deployed browser E2E prerequisites
+        id: browser_e2e_gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for key in SSH_B64 SSH_IP SSH_PATH SSH_USER; do
+            if [[ -z "${!key:-}" ]]; then
+              missing+=("${key}")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping deployed turns browser E2E because required secrets are missing: ${missing[*]}"
+            {
+              echo "## Deployed Browser E2E"
+              echo
+              echo "Skipped because required secrets are missing: \`${missing[*]}\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
       - name: Setup Node.js
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install frontend dependencies
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
         working-directory: frontend
         run: npm ci
 
       - name: Install Playwright Chromium
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
       - name: Set up SSH key and known_hosts
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
         env:
-          SSH_B64: ${{ secrets.SSH_B64 }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         shell: bash
         run: |
@@ -259,6 +287,7 @@ jobs:
           fi
 
       - name: Verify deployed emulator stack on remote host
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -285,6 +314,7 @@ jobs:
           REMOTE
 
       - name: Start SSH port forward to deployed frontend
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -297,6 +327,7 @@ jobs:
             "${SSH_USER}@${SSH_IP}"
 
       - name: Wait for forwarded frontend
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -310,13 +341,14 @@ jobs:
           exit 1
 
       - name: Run deployed TURN video browser test
+        if: steps.browser_e2e_gate.outputs.enabled == 'true'
         working-directory: frontend
         env:
           E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
         run: npm run test:e2e:deployed-turns
 
       - name: Collect remote diagnostics
-        if: failure()
+        if: failure() && steps.browser_e2e_gate.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -352,7 +384,7 @@ jobs:
           REMOTE
 
       - name: Upload browser test artifacts
-        if: always()
+        if: always() && steps.browser_e2e_gate.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: deployed-turns-video-e2e-artifacts
@@ -361,6 +393,6 @@ jobs:
             artifacts/*.txt
 
       - name: Clean up SSH key
-        if: always()
+        if: always() && steps.browser_e2e_gate.outputs.enabled == 'true'
         shell: bash
         run: shred -u "${SSH_KEY_FILE}" 2>/dev/null || rm -f "${SSH_KEY_FILE}"

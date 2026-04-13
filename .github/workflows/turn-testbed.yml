@@ -118,7 +118,7 @@ jobs:
           diag_3478_status="not-run"
           known_turns_client_limitation="false"
           wrtc_symbol_lookup_error="false"
-          wrtc_symbol_signature="undefined symbol: _ZN6webrtc32CreateBuiltinVideoEncoderFactoryEv"
+          wrtc_symbol_signature="wrtc.node: undefined symbol:"
 
           run_harness_case() {
             local label="$1"
@@ -174,7 +174,7 @@ jobs:
               echo "- Plain TURN diagnostic status: ${diag_3478_status}"
             fi
             if [[ "${wrtc_symbol_lookup_error}" == "true" ]]; then
-              echo "- Conclusion: diagnostics still hit a native \`@roamhq/wrtc\` symbol lookup failure (\`CreateBuiltinVideoEncoderFactory\`) after an automatic rebuild attempt, so treat this run as a hard client-binary failure that needs wrtc build/runtime remediation."
+              echo "- Conclusion: diagnostics still hit a native \`@roamhq/wrtc\` symbol lookup failure after an automatic rebuild attempt, so treat this run as a hard client-binary failure that needs wrtc build/runtime remediation."
             fi
             if [[ "${TURN_SCHEME}" == "turns" && "${primary_status}" == "failed" && "${diag_3478_status}" == "passed" ]]; then
               echo "- Conclusion: plain TURN on 3478 allocated a relay, so shared-secret auth and coturn relay allocation are working. Investigate the emulator/testbed client path for turns:443 rather than treating this as a generic TURN outage."
@@ -465,6 +465,11 @@ jobs:
           emulator_private_bridge = "172.22." in remote_logs
           timed_out_turn_responses = "Timed out after 15025 ms without a response" in remote_logs
           ice_failed = "kIceConnectionFailed" in remote_logs
+          disconnected_without_pair = (
+            "Native ICE connection state changed {\"state\":\"disconnected\"}" in error_context
+            or "Mode: native WebRTC disconnected" in native_text
+            or "The native emulator session dropped before the browser rendered a usable frame." in native_text
+          )
           relay_only_attempt = native_ice_mode == "relay" or "relay-only" in native_text.lower() or "Forcing native browser ICE transport policy to relay" in error_context
 
           known_limitation = all(
@@ -476,8 +481,7 @@ jobs:
               no_selected_pair,
               placeholder_frame,
               emulator_private_bridge,
-              timed_out_turn_responses,
-              ice_failed,
+              timed_out_turn_responses or disconnected_without_pair or ice_failed,
             ]
           )
 

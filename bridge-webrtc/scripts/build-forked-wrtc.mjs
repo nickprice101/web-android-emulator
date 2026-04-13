@@ -26,6 +26,46 @@ const DEFAULT_NIX_GNI = [
   "clang_use_chrome_plugins=false",
   "",
 ].join("\n");
+const BRANCH_HEADS_5735_BASELINE_RESTORE_PATHS = [
+  "CMakeLists.txt",
+  "scripts/build-webrtc.bat",
+  "scripts/build-webrtc.sh",
+  "src/binding.cc",
+  "src/dictionaries/node_webrtc/rtc_session_description_init.cc",
+  "src/dictionaries/webrtc/data_channel_init.cc",
+  "src/dictionaries/webrtc/ice_candidate_interface.cc",
+  "src/dictionaries/webrtc/ice_candidate_interface.hh",
+  "src/dictionaries/webrtc/rtc_stats.cc",
+  "src/dictionaries/webrtc/rtc_stats_member_interface.cc",
+  "src/dictionaries/webrtc/rtc_stats_member_interface.hh",
+  "src/dictionaries/webrtc/rtc_stats_report.cc",
+  "src/dictionaries/webrtc/rtc_stats_report.hh",
+  "src/dictionaries/webrtc/rtp_codec_capability.cc",
+  "src/dictionaries/webrtc/rtp_codec_parameters.cc",
+  "src/dictionaries/webrtc/rtp_source.cc",
+  "src/dictionaries/webrtc/video_frame_buffer.cc",
+  "src/dictionaries/webrtc/video_frame_buffer.hh",
+  "src/enums/webrtc/ice_role.hh",
+  "src/enums/webrtc/media_type.cc",
+  "src/enums/webrtc/media_type.hh",
+  "src/interfaces/media_stream.cc",
+  "src/interfaces/media_stream_track.cc",
+  "src/interfaces/rtc_audio_source.cc",
+  "src/interfaces/rtc_data_channel.cc",
+  "src/interfaces/rtc_data_channel.hh",
+  "src/interfaces/rtc_ice_transport.cc",
+  "src/interfaces/rtc_ice_transport.hh",
+  "src/interfaces/rtc_peer_connection.cc",
+  "src/interfaces/rtc_peer_connection.hh",
+  "src/interfaces/rtc_peer_connection/peer_connection_factory.cc",
+  "src/interfaces/rtc_peer_connection/peer_connection_factory.hh",
+  "src/interfaces/rtc_rtp_receiver.cc",
+  "src/interfaces/rtc_rtp_sender.cc",
+  "src/interfaces/rtc_rtp_transceiver.cc",
+  "src/interfaces/rtc_video_source.cc",
+  "src/methods/get_user_media.cc",
+  "src/webrtc_compat.hh",
+];
 const WRAPPER_SCRIPT_MODE = 0o755;
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -85,8 +125,15 @@ function restoreFilesFromRevision(forkRoot, revision, relativePaths) {
     });
 
     if (result.status !== 0) {
+      const stderr = result.stderr || "";
+      if (stderr.includes("exists on disk, but not in")) {
+        console.log(
+          `[forked-wrtc] keeping ${relativePath}; it does not exist in baseline ${revision}`,
+        );
+        continue;
+      }
       throw new Error(
-        `failed to read ${relativePath} from ${revision}: ${result.stderr || "unknown error"}`,
+        `failed to read ${relativePath} from ${revision}: ${stderr || "unknown error"}`,
       );
     }
 
@@ -211,58 +258,18 @@ function patchBranchHeads5735Compatibility(forkRoot) {
     return;
   }
 
-  restoreFilesFromRevision(forkRoot, M114_BASELINE_FORK_REVISION, [
-    "src/binding.cc",
-    "src/dictionaries/webrtc/data_channel_init.cc",
-    "src/dictionaries/webrtc/ice_candidate_interface.cc",
-    "src/dictionaries/webrtc/ice_candidate_interface.hh",
-    "src/enums/webrtc/ice_role.hh",
-    "src/interfaces/rtc_ice_transport.cc",
-    "src/interfaces/rtc_ice_transport.hh",
-  ]);
-
-  replaceInFile(
-    join(forkRoot, "src", "interfaces", "rtc_peer_connection", "peer_connection_factory.hh"),
-    [
-      [
-        "#include <webrtc/api/environment/environment.h>\n",
-        "",
-      ],
-      [
-        "\n  const webrtc::Environment &env() const { return _env; }\n",
-        "\n",
-      ],
-      [
-        "  webrtc::Environment _env;\n",
-        "",
-      ],
-    ],
+  restoreFilesFromRevision(
+    forkRoot,
+    M114_BASELINE_FORK_REVISION,
+    BRANCH_HEADS_5735_BASELINE_RESTORE_PATHS,
   );
 
   replaceInFile(
-    join(forkRoot, "src", "interfaces", "rtc_peer_connection", "peer_connection_factory.cc"),
+    join(forkRoot, "CMakeLists.txt"),
     [
       [
-        "#include <webrtc/api/environment/environment_factory.h>\n",
-        "",
-      ],
-      [
-        "PeerConnectionFactory::PeerConnectionFactory(const Napi::CallbackInfo &info)\n    : Napi::ObjectWrap<PeerConnectionFactory>(info),\n      _env(webrtc::CreateEnvironment()) {",
-        "PeerConnectionFactory::PeerConnectionFactory(const Napi::CallbackInfo &info)\n    : Napi::ObjectWrap<PeerConnectionFactory>(info) {",
-      ],
-      [
-        "  _networkManager = std::unique_ptr<rtc::NetworkManager>(\n      new rtc::BasicNetworkManager(_env, _workerThread->socketserver()));",
-        "  _networkManager = std::unique_ptr<rtc::NetworkManager>(\n      new rtc::BasicNetworkManager(_workerThread->socketserver()));",
-      ],
-    ],
-  );
-
-  replaceInFile(
-    join(forkRoot, "src", "interfaces", "rtc_peer_connection.cc"),
-    [
-      [
-        "  auto portAllocator =\n      std::unique_ptr<webrtc::PortAllocator>(new webrtc::BasicPortAllocator(\n          _factory->env(), _factory->getNetworkManager(),\n          _factory->getSocketFactory()));",
-        "  auto portAllocator =\n      std::unique_ptr<webrtc::PortAllocator>(new webrtc::BasicPortAllocator(\n          _factory->getNetworkManager(), _factory->getSocketFactory()));",
+        "# M114: branch-heads/5735\nset(WEBRTC_REVISION branch-heads/5735)\n",
+        "# M114: branch-heads/5735\nset(DEFAULT_WEBRTC_REVISION branch-heads/5735)\nif(DEFINED ENV{WEBRTC_REVISION} AND NOT \"$ENV{WEBRTC_REVISION}\" STREQUAL \"\")\n  set(DEFAULT_WEBRTC_REVISION \"$ENV{WEBRTC_REVISION}\")\nendif()\nset(WEBRTC_REVISION \"${DEFAULT_WEBRTC_REVISION}\" CACHE STRING \"libwebrtc branch/tag/ref to fetch\")\nmessage(STATUS \"Using WEBRTC_REVISION=${WEBRTC_REVISION}\")\n",
       ],
     ],
   );
@@ -392,13 +399,22 @@ function main() {
     run(NPM_COMMAND, installArgs, { cwd: tempRoot, env: buildEnv });
     run(NPM_COMMAND, ["run", "build"], { cwd: tempRoot, env: buildEnv });
 
-    const compiledBinary = join(
+    const buildOutputDir = join(
       tempRoot,
       `build-${process.platform}-${process.arch}`,
-      "wrtc.node",
     );
-    if (!existsSync(compiledBinary)) {
-      throw new Error(`compiled wrtc binary not found at ${compiledBinary}`);
+    const compiledBinaryCandidates = [
+      join(buildOutputDir, "wrtc.node"),
+      join(buildOutputDir, "Release", "wrtc.node"),
+      join(buildOutputDir, "Debug", "wrtc.node"),
+    ];
+    const compiledBinary = compiledBinaryCandidates.find((candidate) =>
+      existsSync(candidate),
+    );
+    if (!compiledBinary) {
+      throw new Error(
+        `compiled wrtc binary not found in any expected output path: ${compiledBinaryCandidates.join(", ")}`,
+      );
     }
 
     mkdirSync(binaryDir, { recursive: true });

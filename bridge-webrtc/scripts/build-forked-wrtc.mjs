@@ -27,6 +27,9 @@ const DEFAULT_NIX_GNI = [
   "",
 ].join("\n");
 const BRANCH_HEADS_5735_BASELINE_RESTORE_PATHS = [
+  "CMakeLists.txt",
+  "scripts/build-webrtc.bat",
+  "scripts/build-webrtc.sh",
   "src/binding.cc",
   "src/dictionaries/node_webrtc/rtc_session_description_init.cc",
   "src/dictionaries/webrtc/data_channel_init.cc",
@@ -259,6 +262,16 @@ function patchBranchHeads5735Compatibility(forkRoot) {
     forkRoot,
     M114_BASELINE_FORK_REVISION,
     BRANCH_HEADS_5735_BASELINE_RESTORE_PATHS,
+  );
+
+  replaceInFile(
+    join(forkRoot, "CMakeLists.txt"),
+    [
+      [
+        "# M114: branch-heads/5735\nset(WEBRTC_REVISION branch-heads/5735)\n",
+        "# M114: branch-heads/5735\nset(DEFAULT_WEBRTC_REVISION branch-heads/5735)\nif(DEFINED ENV{WEBRTC_REVISION} AND NOT \"$ENV{WEBRTC_REVISION}\" STREQUAL \"\")\n  set(DEFAULT_WEBRTC_REVISION \"$ENV{WEBRTC_REVISION}\")\nendif()\nset(WEBRTC_REVISION \"${DEFAULT_WEBRTC_REVISION}\" CACHE STRING \"libwebrtc branch/tag/ref to fetch\")\nmessage(STATUS \"Using WEBRTC_REVISION=${WEBRTC_REVISION}\")\n",
+      ],
+    ],
   );
 
   replaceInFile(

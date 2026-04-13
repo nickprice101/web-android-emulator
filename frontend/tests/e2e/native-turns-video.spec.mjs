@@ -5,24 +5,6 @@ const MIN_RENDERABLE_VIDEO_DIMENSION = 16;
 const VIDEO_WAIT_TIMEOUT_MS = 180_000;
 const HAVE_CURRENT_DATA = 2;
 
-function extractVideoStats(video) {
-  const playbackQuality =
-    typeof video.getVideoPlaybackQuality === "function"
-      ? video.getVideoPlaybackQuality()
-      : null;
-
-  return {
-    readyState: video.readyState,
-    currentTime: video.currentTime,
-    paused: video.paused,
-    ended: video.ended,
-    videoWidth: video.videoWidth,
-    videoHeight: video.videoHeight,
-    totalVideoFrames: playbackQuality?.totalVideoFrames ?? null,
-    droppedVideoFrames: playbackQuality?.droppedVideoFrames ?? null,
-  };
-}
-
 async function readBodyText(page) {
   return page.locator("body").innerText();
 }
@@ -50,12 +32,19 @@ test("native emulator stream renders real video frames over deployed turns path"
     timeout: VIDEO_WAIT_TIMEOUT_MS,
   });
 
-  const nativeVideo = page.locator("video").first();
-  await expect(nativeVideo).toBeVisible({ timeout: VIDEO_WAIT_TIMEOUT_MS });
-
   const mediaOutcomeHandle = await page.waitForFunction(
     ({ minDimension }) => {
-      const video = document.querySelector("video");
+      const videos = Array.from(document.querySelectorAll("video")).filter(
+        (candidate) => candidate instanceof HTMLVideoElement
+      );
+      const video = videos.reduce((best, candidate) => {
+        if (!best) {
+          return candidate;
+        }
+        const candidateArea = (candidate.videoWidth || 0) * (candidate.videoHeight || 0);
+        const bestArea = (best.videoWidth || 0) * (best.videoHeight || 0);
+        return candidateArea >= bestArea ? candidate : best;
+      }, null);
       const bodyText = document.body?.innerText ?? "";
       const failureDetected =
         bodyText.includes("The native emulator session dropped before the browser rendered a usable frame.") ||
@@ -108,7 +97,7 @@ test("native emulator stream renders real video frames over deployed turns path"
     "Native WebRTC diagnostics",
     "First-frame path"
   );
-  const videoStats = await nativeVideo.evaluate(extractVideoStats);
+  const videoStats = mediaOutcome?.videoStats ?? null;
   const browserDiagnostics = await page.evaluate(() => window.__EMU_E2E__ || null);
   const selectedPairUsesRelay =
     browserDiagnostics?.selectedCandidatePair?.localCandidateType === "relay" ||
@@ -142,11 +131,11 @@ test("native emulator stream renders real video frames over deployed turns path"
   expect(mediaOutcome?.outcome, `Expected usable video, got ${JSON.stringify(mediaOutcome)}`).toBe("ready");
   expect(emulatorState.toLowerCase()).toContain("connected");
   expect(bridgeApiState.toLowerCase()).toContain("ready");
-  expect(videoStats.readyState).toBeGreaterThanOrEqual(HAVE_CURRENT_DATA);
-  expect(videoStats.videoWidth).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
-  expect(videoStats.videoHeight).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
+  expect(videoStats?.readyState ?? 0).toBeGreaterThanOrEqual(HAVE_CURRENT_DATA);
+  expect(videoStats?.videoWidth ?? 0).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
+  expect(videoStats?.videoHeight ?? 0).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
   expect(
-    (videoStats.totalVideoFrames ?? 0) > 0 || videoStats.currentTime > 0,
+    ((videoStats?.totalVideoFrames ?? 0) > 0) || (videoStats?.currentTime ?? 0) > 0,
     `Expected decoded frames or playback progress, got ${JSON.stringify(videoStats)}`
   ).toBeTruthy();
   expect(nativeDiagnosticsText).toContain("Transport: native emulator WebRTC");

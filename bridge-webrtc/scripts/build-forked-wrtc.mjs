@@ -122,8 +122,15 @@ function restoreFilesFromRevision(forkRoot, revision, relativePaths) {
     });
 
     if (result.status !== 0) {
+      const stderr = result.stderr || "";
+      if (stderr.includes("exists on disk, but not in")) {
+        console.log(
+          `[forked-wrtc] keeping ${relativePath}; it does not exist in baseline ${revision}`,
+        );
+        continue;
+      }
       throw new Error(
-        `failed to read ${relativePath} from ${revision}: ${result.stderr || "unknown error"}`,
+        `failed to read ${relativePath} from ${revision}: ${stderr || "unknown error"}`,
       );
     }
 

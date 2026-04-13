@@ -271,6 +271,28 @@ function patchBranchHeads5735Compatibility(forkRoot) {
         "# M114: branch-heads/5735\nset(WEBRTC_REVISION branch-heads/5735)\n",
         "# M114: branch-heads/5735\nset(DEFAULT_WEBRTC_REVISION branch-heads/5735)\nif(DEFINED ENV{WEBRTC_REVISION} AND NOT \"$ENV{WEBRTC_REVISION}\" STREQUAL \"\")\n  set(DEFAULT_WEBRTC_REVISION \"$ENV{WEBRTC_REVISION}\")\nendif()\nset(WEBRTC_REVISION \"${DEFAULT_WEBRTC_REVISION}\" CACHE STRING \"libwebrtc branch/tag/ref to fetch\")\nmessage(STATUS \"Using WEBRTC_REVISION=${WEBRTC_REVISION}\")\n",
       ],
+      [
+        "else()\n  set(byproducts\n    ${libc++_objects}\n    ${libc++abi_objects}\n    ${libwebrtc_binary_dir}/obj/libwebrtc.a\n    ${libwebrtc_binary_dir}/obj/api/libjingle_peerconnection_api.a\n    ${libwebrtc_binary_dir}/obj/media/librtc_media_engine_defaults.a\n  )\nendif()",
+        "else()\n  set(byproducts\n    ${libc++_objects}\n    ${libc++abi_objects}\n    ${libwebrtc_binary_dir}/obj/libwebrtc.a\n    ${libwebrtc_binary_dir}/obj/api/libjingle_peerconnection_api.a\n    ${libwebrtc_binary_dir}/obj/api/video_codecs/libbuiltin_video_encoder_factory.a\n    ${libwebrtc_binary_dir}/obj/api/video_codecs/libbuiltin_video_decoder_factory.a\n    ${libwebrtc_binary_dir}/obj/media/librtc_internal_video_codecs.a\n    ${libwebrtc_binary_dir}/obj/media/librtc_media_engine_defaults.a\n    ${libwebrtc_binary_dir}/obj/modules/video_coding/libwebrtc_h264.a\n    ${libwebrtc_binary_dir}/obj/modules/video_coding/libwebrtc_multiplex.a\n    ${libwebrtc_binary_dir}/obj/modules/video_coding/libwebrtc_vp8.a\n    ${libwebrtc_binary_dir}/obj/modules/video_coding/libwebrtc_vp9.a\n  )\nendif()",
+      ],
+      [
+        "# Media engine defaults (includes all codec factories)\nadd_library(librtc_media_engine_defaults STATIC IMPORTED)\nadd_dependencies(librtc_media_engine_defaults project_libwebrtc)\nset_property(TARGET librtc_media_engine_defaults PROPERTY IMPORTED_LOCATION \"${libwebrtc_binary_dir}/obj/media/librtc_media_engine_defaults.a\")",
+        "# Media engine defaults (includes all codec factories)\nadd_library(librtc_media_engine_defaults STATIC IMPORTED)\nadd_dependencies(librtc_media_engine_defaults project_libwebrtc)\nset_property(TARGET librtc_media_engine_defaults PROPERTY IMPORTED_LOCATION \"${libwebrtc_binary_dir}/obj/media/librtc_media_engine_defaults.a\")\n\nadd_library(libbuiltin_video_encoder_factory STATIC IMPORTED)\nadd_dependencies(libbuiltin_video_encoder_factory project_libwebrtc)\nset_property(TARGET libbuiltin_video_encoder_factory PROPERTY IMPORTED_LOCATION \"${libwebrtc_binary_dir}/obj/api/video_codecs/libbuiltin_video_encoder_factory.a\")\n\nadd_library(libbuiltin_video_decoder_factory STATIC IMPORTED)\nadd_dependencies(libbuiltin_video_decoder_factory project_libwebrtc)\nset_property(TARGET libbuiltin_video_decoder_factory PROPERTY IMPORTED_LOCATION \"${libwebrtc_binary_dir}/obj/api/video_codecs/libbuiltin_video_decoder_factory.a\")\n\nadd_library(librtc_internal_video_codecs STATIC IMPORTED)\nadd_dependencies(librtc_internal_video_codecs project_libwebrtc)\nset_property(TARGET librtc_internal_video_codecs PROPERTY IMPORTED_LOCATION \"${libwebrtc_binary_dir}/obj/media/librtc_internal_video_codecs.a\")\n\nadd_library(libwebrtc_h264 STATIC IMPORTED)\nadd_dependencies(libwebrtc_h264 project_libwebrtc)\nset_property(TARGET libwebrtc_h264 PROPERTY IMPORTED_LOCATION \"${libwebrtc_binary_dir}/obj/modules/video_coding/libwebrtc_h264.a\")\n\nadd_library(libwebrtc_multiplex STATIC IMPORTED)\nadd_dependencies(libwebrtc_multiplex project_libwebrtc)\nset_property(TARGET libwebrtc_multiplex PROPERTY IMPORTED_LOCATION \"${libwebrtc_binary_dir}/obj/modules/video_coding/libwebrtc_multiplex.a\")\n\nadd_library(libwebrtc_vp8 STATIC IMPORTED)\nadd_dependencies(libwebrtc_vp8 project_libwebrtc)\nset_property(TARGET libwebrtc_vp8 PROPERTY IMPORTED_LOCATION \"${libwebrtc_binary_dir}/obj/modules/video_coding/libwebrtc_vp8.a\")\n\nadd_library(libwebrtc_vp9 STATIC IMPORTED)\nadd_dependencies(libwebrtc_vp9 project_libwebrtc)\nset_property(TARGET libwebrtc_vp9 PROPERTY IMPORTED_LOCATION \"${libwebrtc_binary_dir}/obj/modules/video_coding/libwebrtc_vp9.a\")",
+      ],
+      [
+        "target_link_libraries(${MODULE} PRIVATE\n  ${CMAKE_THREAD_LIBS_INIT}\n  libpeerconnection\n  libwebrtc\n  librtc_media_engine_defaults\n  ${CMAKE_JS_LIB}\n)",
+        "target_link_libraries(${MODULE} PRIVATE\n  ${CMAKE_THREAD_LIBS_INIT}\n  libpeerconnection\n  libwebrtc\n  librtc_media_engine_defaults\n  libbuiltin_video_encoder_factory\n  libbuiltin_video_decoder_factory\n  librtc_internal_video_codecs\n  libwebrtc_h264\n  libwebrtc_multiplex\n  libwebrtc_vp8\n  libwebrtc_vp9\n  ${CMAKE_JS_LIB}\n)",
+      ],
+    ],
+  );
+
+  replaceInFile(
+    join(forkRoot, "scripts", "build-webrtc.sh"),
+    [
+      [
+        "export TARGETS=\"webrtc libjingle_peerconnection libc++ libc++abi rtc_media_engine_defaults\"",
+        "export TARGETS=\"webrtc libjingle_peerconnection libc++ libc++abi rtc_media_engine_defaults builtin_video_encoder_factory builtin_video_decoder_factory rtc_internal_video_codecs webrtc_h264 webrtc_multiplex webrtc_vp8 webrtc_vp9\"",
+      ],
     ],
   );
 

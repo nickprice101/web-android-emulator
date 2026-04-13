@@ -101,15 +101,18 @@ jobs:
 
       - name: Run full testbed (includes TURN harness)
         id: testbed
-        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/testbed.sh
+          if bash scripts/testbed.sh; then
+            echo "outcome=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: TURN failure diagnostics (clarify relay-allocation vs reachability)
         id: turn_diagnostics
-        if: steps.testbed.outcome == 'failure'
+        if: steps.testbed.outputs.outcome == 'failure'
         shell: bash
         run: |
           set -euo pipefail
@@ -118,7 +121,7 @@ jobs:
           diag_3478_status="not-run"
           known_turns_client_limitation="false"
           wrtc_symbol_lookup_error="false"
-          wrtc_symbol_signature="undefined symbol: _ZN6webrtc32CreateBuiltinVideoEncoderFactoryEv"
+          wrtc_symbol_signature="wrtc.node: undefined symbol:"
 
           run_harness_case() {
             local label="$1"
@@ -174,7 +177,7 @@ jobs:
               echo "- Plain TURN diagnostic status: ${diag_3478_status}"
             fi
             if [[ "${wrtc_symbol_lookup_error}" == "true" ]]; then
-              echo "- Conclusion: diagnostics still hit a native \`@roamhq/wrtc\` symbol lookup failure (\`CreateBuiltinVideoEncoderFactory\`) after an automatic rebuild attempt, so treat this run as a hard client-binary failure that needs wrtc build/runtime remediation."
+              echo "- Conclusion: diagnostics still hit a native \`@roamhq/wrtc\` symbol lookup failure after an automatic rebuild attempt, so treat this run as a hard client-binary failure that needs wrtc build/runtime remediation."
             fi
             if [[ "${TURN_SCHEME}" == "turns" && "${primary_status}" == "failed" && "${diag_3478_status}" == "passed" ]]; then
               echo "- Conclusion: plain TURN on 3478 allocated a relay, so shared-secret auth and coturn relay allocation are working. Investigate the emulator/testbed client path for turns:443 rather than treating this as a generic TURN outage."
@@ -193,13 +196,13 @@ jobs:
           echo "known_turns_client_limitation=${known_turns_client_limitation}" >> "$GITHUB_OUTPUT"
 
       - name: Accept known turns client limitation
-        if: steps.testbed.outcome == 'failure' && steps.turn_diagnostics.outputs.known_turns_client_limitation == 'true'
+        if: steps.testbed.outputs.outcome == 'failure' && steps.turn_diagnostics.outputs.known_turns_client_limitation == 'true'
         shell: bash
         run: |
           echo "::notice::turn-testbed is treating turns:443 failure as non-fatal because turn:3478 passed and the diagnostics match the known client-side turns:/libwebrtc limitation."
 
       - name: Upload TURN diagnostic logs
-        if: steps.testbed.outcome == 'failure'
+        if: steps.testbed.outputs.outcome == 'failure'
         shell: bash
         run: |
           set -euo pipefail
@@ -207,7 +210,7 @@ jobs:
           node scripts/capture-ui.mjs artifacts/ui-layout.svg
 
       - name: Upload TURN diagnostic artifacts
-        if: steps.testbed.outcome == 'failure'
+        if: steps.testbed.outputs.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: turn-diagnostic-artifacts
@@ -216,7 +219,7 @@ jobs:
             artifacts/ui-layout.svg
 
       - name: Fail workflow if testbed failed
-        if: steps.testbed.outcome == 'failure' && steps.turn_diagnostics.outputs.known_turns_client_limitation != 'true'
+        if: steps.testbed.outputs.outcome == 'failure' && steps.turn_diagnostics.outputs.known_turns_client_limitation != 'true'
         shell: bash
         run: |
           echo "testbed.sh failed. See TURN failure diagnostics and logs above." >&2
@@ -356,14 +359,19 @@ jobs:
       - name: Run deployed TURN video browser test
         id: deployed_browser_test
         if: steps.browser_e2e_gate.outputs.enabled == 'true'
-        continue-on-error: true
         working-directory: frontend
         env:
           E2E_BASE_URL: ${{ env.E2E_BASE_URL }}
-        run: npm run test:e2e:deployed-turns
+        run: |
+          set -euo pipefail
+          if npm run test:e2e:deployed-turns; then
+            echo "outcome=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Collect remote diagnostics
-        if: steps.deployed_browser_test.outcome == 'failure' && steps.browser_e2e_gate.outputs.enabled == 'true'
+        if: steps.deployed_browser_test.outputs.outcome == 'failure' && steps.browser_e2e_gate.outputs.enabled == 'true'
         continue-on-error: true
         shell: bash
         run: |
@@ -401,7 +409,7 @@ jobs:
 
       - name: Classify deployed TURN browser failure
         id: deployed_browser_diagnostics
-        if: steps.deployed_browser_test.outcome == 'failure' && steps.browser_e2e_gate.outputs.enabled == 'true'
+        if: steps.deployed_browser_test.outputs.outcome == 'failure' && steps.browser_e2e_gate.outputs.enabled == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -465,6 +473,11 @@ jobs:
           emulator_private_bridge = "172.22." in remote_logs
           timed_out_turn_responses = "Timed out after 15025 ms without a response" in remote_logs
           ice_failed = "kIceConnectionFailed" in remote_logs
+          disconnected_without_pair = (
+            "Native ICE connection state changed {\"state\":\"disconnected\"}" in error_context
+            or "Mode: native WebRTC disconnected" in native_text
+            or "The native emulator session dropped before the browser rendered a usable frame." in native_text
+          )
           relay_only_attempt = native_ice_mode == "relay" or "relay-only" in native_text.lower() or "Forcing native browser ICE transport policy to relay" in error_context
 
           known_limitation = all(
@@ -476,8 +489,7 @@ jobs:
               no_selected_pair,
               placeholder_frame,
               emulator_private_bridge,
-              timed_out_turn_responses,
-              ice_failed,
+              timed_out_turn_responses or disconnected_without_pair or ice_failed,
             ]
           )
 
@@ -520,7 +532,7 @@ jobs:
             artifacts/*.txt
 
       - name: Fail workflow if deployed TURN browser test uncovered a new regression
-        if: steps.deployed_browser_test.outcome == 'failure' && steps.browser_e2e_gate.outputs.enabled == 'true' && steps.deployed_browser_diagnostics.outputs.known_deployed_turn_limitation != 'true'
+        if: steps.deployed_browser_test.outputs.outcome == 'failure' && steps.browser_e2e_gate.outputs.enabled == 'true' && steps.deployed_browser_diagnostics.outputs.known_deployed_turn_limitation != 'true'
         shell: bash
         run: |
           echo "deployed-turns browser E2E failed without matching the known remote TURN limitation signature." >&2

@@ -399,13 +399,22 @@ function main() {
     run(NPM_COMMAND, installArgs, { cwd: tempRoot, env: buildEnv });
     run(NPM_COMMAND, ["run", "build"], { cwd: tempRoot, env: buildEnv });
 
-    const compiledBinary = join(
+    const buildOutputDir = join(
       tempRoot,
       `build-${process.platform}-${process.arch}`,
-      "wrtc.node",
     );
-    if (!existsSync(compiledBinary)) {
-      throw new Error(`compiled wrtc binary not found at ${compiledBinary}`);
+    const compiledBinaryCandidates = [
+      join(buildOutputDir, "wrtc.node"),
+      join(buildOutputDir, "Release", "wrtc.node"),
+      join(buildOutputDir, "Debug", "wrtc.node"),
+    ];
+    const compiledBinary = compiledBinaryCandidates.find((candidate) =>
+      existsSync(candidate),
+    );
+    if (!compiledBinary) {
+      throw new Error(
+        `compiled wrtc binary not found in any expected output path: ${compiledBinaryCandidates.join(", ")}`,
+      );
     }
 
     mkdirSync(binaryDir, { recursive: true });

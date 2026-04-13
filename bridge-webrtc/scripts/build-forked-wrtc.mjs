@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
-  copyFileSync,
+  cpSync,
   existsSync,
   readFileSync,
   readdirSync,
@@ -417,9 +417,20 @@ function main() {
       );
     }
 
+    const compiledArtifactDir = dirname(compiledBinary);
+    rmSync(binaryDir, { force: true, recursive: true });
     mkdirSync(binaryDir, { recursive: true });
-    copyFileSync(compiledBinary, builtBinary);
-    console.log(`[forked-wrtc] copied ${compiledBinary} -> ${builtBinary}`);
+    cpSync(compiledArtifactDir, binaryDir, { force: true, recursive: true });
+
+    if (!existsSync(builtBinary)) {
+      throw new Error(
+        `expected ${builtBinary} after copying artifacts from ${compiledArtifactDir}, but it was not found`,
+      );
+    }
+
+    console.log(
+      `[forked-wrtc] copied build artifacts from ${compiledArtifactDir} -> ${binaryDir}`,
+    );
   } finally {
     rmSync(tempRoot, { force: true, recursive: true });
   }

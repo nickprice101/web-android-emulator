@@ -73,6 +73,11 @@ assert.match(
 const emulatorTurnWrapper = readRepoFile("emulator/start-emulator-with-turn.sh");
 assert.match(
   emulatorTurnWrapper,
+  /append_param_if_missing "-no-sim"/,
+  "emulator wrapper must disable SIM/modem startup by default to avoid ::1 modem socket startup failures on IPv6-restricted container hosts"
+);
+assert.match(
+  emulatorTurnWrapper,
   /TURNCFG_URLS_FORMAT="\$\{TURNCFG_URLS_FORMAT:-array\}"/,
   "emulator TURN wrapper must default TURN cfg urls to array form while keeping TURNCFG_URLS_FORMAT override support"
 );

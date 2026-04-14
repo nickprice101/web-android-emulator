@@ -1,5 +1,6 @@
 ARG EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
 FROM ${EMULATOR_IMAGE}
+ARG EMULATOR_IMAGE
 
 ARG EMULATOR_SYSTEM_IMAGE=system-images;android-34;google_apis;x86_64
 ARG EMULATOR_PLATFORM=platforms;android-34
@@ -28,7 +29,7 @@ RUN set -eux; \
     done; \
   fi; \
   if [ -z "${SDKMANAGER_BIN}" ] || [ -z "${AVDMANAGER_BIN}" ]; then \
-    echo "Unable to locate sdkmanager/avdmanager in base image ${EMULATOR_IMAGE}" >&2; \
+    echo "Unable to locate sdkmanager/avdmanager in base image ${EMULATOR_IMAGE:-unknown}" >&2; \
     find /android /opt -maxdepth 6 -type f \( -name sdkmanager -o -name avdmanager \) 2>/dev/null || true; \
     exit 1; \
   fi; \

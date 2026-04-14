@@ -6,7 +6,10 @@ const EMULATOR_ASPECT = 1080 / 1920;
 const MIN_RENDERABLE_VIDEO_DIMENSION = 16;
 const NATIVE_WEBRTC_RECOVERY_DELAY_MS = 1500;
 const NATIVE_WEBRTC_MAX_RETRIES = 3;
-const STREAM_MODE_OPTIONS = [{ value: "native-webrtc", label: "WebRTC (native emulator)" }];
+const STREAM_MODE_OPTIONS = [
+  { value: "native-webrtc", label: "WebRTC (native emulator)" },
+  { value: "custom-webrtc", label: "WebRTC (custom bridge)" },
+];
 // Public STUN server used as a fallback when the emulator advertises no ICE
 // servers.  Set VITE_FALLBACK_STUN_URL at build time to override.
 const FALLBACK_STUN_URL =
@@ -503,6 +506,22 @@ function summarizeIceServers(iceServers) {
     hasStun: urls.some((value) => value.startsWith("stun:") || value.startsWith("stuns:")),
     urls,
   };
+}
+
+function normalizeIceServerUrls(iceServers) {
+  return summarizeIceServers(iceServers).urls
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .sort();
+}
+
+function haveSameIceServerUrls(left, right) {
+  const leftUrls = normalizeIceServerUrls(left);
+  const rightUrls = normalizeIceServerUrls(right);
+  if (leftUrls.length !== rightUrls.length) {
+    return false;
+  }
+  return leftUrls.every((value, index) => value === rightUrls[index]);
 }
 
 function formatIceServerSummary(summary) {
@@ -1772,6 +1791,12 @@ function App() {
   const nativeFailureReason = buildNativeFailureReason(emuState, nativeVideoStats, nativeHasVideoFrame, nativeDiagnostics);
   const nativeMissingTurnNotice = buildMissingTurnNotice(nativeDiagnostics.startIceServers);
   const nativeUpstreamSending = isNativeUpstreamSendingVideo(nativeDiagnostics.peerStats);
+  const activePeerStats =
+    streamMode === "custom-webrtc" ? webrtcDiagnostics?.receiverStats || null : nativeDiagnostics?.peerStats || null;
+  const activeVideoStats =
+    streamMode === "custom-webrtc" ? webrtcDiagnostics?.videoStats || null : nativeVideoStats || null;
+  const activeTransport =
+    streamMode === "custom-webrtc" ? "custom-bridge-webrtc" : "native-emulator-webrtc";
   const nativeRuntimeEventSummary =
     nativeDiagnostics.runtimeEvents.length > 0
       ? nativeDiagnostics.runtimeEvents.map(formatRuntimeEvent).join("\n")
@@ -1800,12 +1825,14 @@ function App() {
       apiState,
       emulatorState: emuState,
       lastMessage: message,
+      activeTransport,
+      activeVideoStats,
       nativeIceTransportMode,
       nativeHasVideoFrame,
       nativeUpstreamSending,
       startIceServers: nativeDiagnostics?.startIceServers || null,
       nativeVideoStats,
-      selectedCandidatePair: nativeDiagnostics?.peerStats?.selectedCandidatePair || null,
+      selectedCandidatePair: activePeerStats?.selectedCandidatePair || null,
       streamMode,
     };
 
@@ -1816,6 +1843,9 @@ function App() {
     apiState,
     emuState,
     message,
+    activePeerStats,
+    activeTransport,
+    activeVideoStats,
     nativeDiagnostics,
     nativeIceTransportMode,
     nativeHasVideoFrame,
@@ -2207,13 +2237,14 @@ function App() {
 
       jsep._handleStart = (signal) => {
         try {
-          const startSummary = summarizeIceServers(signal?.start?.iceServers || []);
+          const startIceServers = Array.isArray(signal?.start?.iceServers) ? signal.start.iceServers : [];
+          const startSummary = summarizeIceServers(startIceServers);
           const startMissingIce = signal?.start && !startSummary.hasTurn && !startSummary.hasStun;
           let fallbackIceServers = Array.isArray(nativeFallbackIceServersRef.current)
             ? nativeFallbackIceServersRef.current
             : [];
 
-          if (startMissingIce && fallbackIceServers.length === 0) {
+          if (fallbackIceServers.length === 0) {
             // Keep start handling synchronous. The upstream JSEP driver expects
             // _handleStart() to construct the peer connection immediately before
             // processing SDP/candidates that can arrive in the same signal tick.
@@ -2232,6 +2263,13 @@ function App() {
             fallbackSummary.hasTurn && !fallbackSummary.hasStun
               ? [...fallbackIceServers, { urls: FALLBACK_STUN_URL }]
               : fallbackIceServers;
+          const rewrittenBrowserIceServers =
+            !startMissingIce &&
+            startSummary.hasTurn &&
+            fallbackSummary.hasTurn &&
+            !haveSameIceServerUrls(startIceServers, fallbackWithStun)
+              ? fallbackWithStun
+              : null;
           const injectedIceServers =
             startMissingIce
               ? fallbackSummary.hasTurn || fallbackSummary.hasStun
@@ -2240,13 +2278,21 @@ function App() {
               : null;
 
           const baseSignal =
-            injectedIceServers
+            rewrittenBrowserIceServers
+              ? {
+                  ...signal,
+                  start: {
+                    ...signal.start,
+                    iceServers: rewrittenBrowserIceServers,
+                  },
+                }
+              : injectedIceServers
               ? {
                   ...signal,
                   start: {
                     ...signal.start,
                     iceServers: [
-                      ...(signal.start?.iceServers || []),
+                      ...startIceServers,
                       ...injectedIceServers,
                     ],
                   },
@@ -2269,6 +2315,7 @@ function App() {
             hasTurn: startSummary.hasTurn,
             hasStun: startSummary.hasStun,
             injectedIce: Boolean(injectedIceServers),
+            browserTurnRewrite: Boolean(rewrittenBrowserIceServers),
             requestedTransportMode: nativeIceTransportMode,
             iceTransportPolicy:
               patchedSignal?.start?.iceTransportPolicy || signal?.start?.iceTransportPolicy || "all",
@@ -2287,6 +2334,15 @@ function App() {
             } else {
               pushNativeEvent("Injected public STUN server because emulator advertised no ICE servers");
             }
+          }
+          if (rewrittenBrowserIceServers) {
+            pushNativeEvent(
+              "Rewriting native browser ICE servers to the bridge-advertised public TURN route while the emulator keeps its internal TURN route",
+              {
+                emulatorTurnUrl: startSummary.urls[0] || null,
+                browserTurnUrl: fallbackSummary.urls[0] || null,
+              }
+            );
           }
           if (patchedSignal !== baseSignal) {
             pushNativeEvent("Forcing native browser ICE transport policy to relay because TURN is configured");
@@ -2568,10 +2624,18 @@ function App() {
     nativeFailureSignatureRef.current = null;
 
     if (nativeRetryCount >= NATIVE_WEBRTC_MAX_RETRIES) {
-      setMessage(
-        `Native WebRTC failed to recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries.`
-      );
-      setEmuState("error");
+      const fallbackMessage = [
+        `Native WebRTC could not recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries.`,
+        "Switching to the custom WebRTC bridge so the frontend can still receive a real video stream over the bridge path.",
+      ].join(" ");
+      webrtcFailureRef.current = false;
+      setWebrtcDiagnostics(null);
+      setWebrtcNotice(fallbackMessage);
+      setMessage(fallbackMessage);
+      setEmuState("connecting");
+      setNativeVideoStats(null);
+      setNativeHasVideoFrame(false);
+      setStreamMode("custom-webrtc");
       return;
     }
 

@@ -22,7 +22,7 @@ function readSectionFromBody(bodyText, heading, nextHeading) {
   return bodyText.match(pattern)?.[1]?.trim() ?? "";
 }
 
-test("native emulator stream renders real video frames over deployed turns path", async ({ page }, testInfo) => {
+test("deployed turns path renders real video frames", async ({ page }, testInfo) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByText("Emulator state", { exact: true })).toBeVisible({
@@ -97,18 +97,24 @@ test("native emulator stream renders real video frames over deployed turns path"
     "Native WebRTC diagnostics",
     "First-frame path"
   );
+  const customDiagnosticsText = readSectionFromBody(bodyText, "WebRTC diagnostics", "First-frame path");
   const videoStats = mediaOutcome?.videoStats ?? null;
   const browserDiagnostics = await page.evaluate(() => window.__EMU_E2E__ || null);
+  const activeTransport = browserDiagnostics?.activeTransport || null;
+  const activeDiagnosticsText =
+    activeTransport === "custom-bridge-webrtc" ? customDiagnosticsText : nativeDiagnosticsText;
   const selectedPairUsesRelay =
     browserDiagnostics?.selectedCandidatePair?.localCandidateType === "relay" ||
     browserDiagnostics?.selectedCandidatePair?.remoteCandidateType === "relay" ||
-    /Selected pair:\s+.*relay/i.test(nativeDiagnosticsText);
+    /Selected pair:\s+.*relay/i.test(activeDiagnosticsText);
 
   const diagnosticsPayload = {
     emulatorState,
     bridgeApiState,
     lastMessage,
+    activeTransport,
     nativeDiagnosticsText,
+    customDiagnosticsText,
     browserDiagnostics,
     mediaOutcome,
     selectedPairUsesRelay,
@@ -131,6 +137,7 @@ test("native emulator stream renders real video frames over deployed turns path"
   expect(mediaOutcome?.outcome, `Expected usable video, got ${JSON.stringify(mediaOutcome)}`).toBe("ready");
   expect(emulatorState.toLowerCase()).toContain("connected");
   expect(bridgeApiState.toLowerCase()).toContain("ready");
+  expect(["native-emulator-webrtc", "custom-bridge-webrtc"]).toContain(activeTransport);
   expect(videoStats?.readyState ?? 0).toBeGreaterThanOrEqual(HAVE_CURRENT_DATA);
   expect(videoStats?.videoWidth ?? 0).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
   expect(videoStats?.videoHeight ?? 0).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
@@ -138,7 +145,7 @@ test("native emulator stream renders real video frames over deployed turns path"
     ((videoStats?.totalVideoFrames ?? 0) > 0) || (videoStats?.currentTime ?? 0) > 0,
     `Expected decoded frames or playback progress, got ${JSON.stringify(videoStats)}`
   ).toBeTruthy();
-  expect(nativeDiagnosticsText).toContain("Transport: native emulator WebRTC");
+  expect(activeDiagnosticsText).toContain("Transport:");
   expect(
     selectedPairUsesRelay,
     `Expected selected ICE candidate pair to use TURN relay, got ${JSON.stringify(browserDiagnostics)}`

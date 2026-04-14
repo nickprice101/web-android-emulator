@@ -9,6 +9,7 @@ import { URL } from "node:url";
 import wrtc from "@roamhq/wrtc";
 import { buildFfmpegArgs } from "./ffmpeg-config.mjs";
 import { isRenderableNativeRtcFrame } from "./native-rtc-frame-guard.mjs";
+import { resolveNativeRtcPeerIceTransportPolicy } from "./native-rtc-ice-policy.mjs";
 import { prepareIceServersForNode } from "./turn-tls-shim.mjs";
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, nonstandard = {} } = wrtc;
@@ -2174,10 +2175,15 @@ class NativeRtcVideoRelay {
           recordSessionLog(this.session, level, `native-rtc: ${message}`, details);
         },
       });
+      const emulatorIceTransportPolicy = resolveNativeRtcPeerIceTransportPolicy(signal.start);
+      recordSessionLog(this.session, "info", "native-rtc: configuring emulator peer ICE transport", {
+        requestedIceTransportPolicy: signal.start.iceTransportPolicy || null,
+        appliedIceTransportPolicy: emulatorIceTransportPolicy,
+      });
       this.turnTlsTunnelCleanup = preparedIceServers.close;
       this.emulatorPeer = new RTCPeerConnection({
         iceServers: preparedIceServers.iceServers,
-        iceTransportPolicy: preferRelayTransport ? "relay" : "all",
+        iceTransportPolicy: emulatorIceTransportPolicy,
       });
       this.emulatorPeer.onicecandidate = (event) => {
         if (event.candidate) {

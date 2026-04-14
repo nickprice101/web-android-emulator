@@ -20,15 +20,59 @@ jobs:
       SSH_USER: ${{ secrets.SSH_USER }}
       SSH_PATH: ${{ secrets.SSH_PATH }}
       BUILD_ONLY: ${{ inputs.build_only && 'true' || 'false' }}
-      # Prefer API 34, but keep a known-good API 30 fallback for environments
-      # where the API 34 manifest is temporarily unavailable.
-      EMULATOR_IMAGE_PRIMARY: us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19
+      # Base image for the forked Android 14 build (the Dockerfile upgrades this
+      # gRPC-Web-capable API 30 base to Android 14 system images during build).
+      EMULATOR_IMAGE_PRIMARY: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
       EMULATOR_IMAGE_FALLBACK: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
-      EMULATOR_IMAGE: us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19
+      EMULATOR_IMAGE: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
+      REQUIRE_API34_PRIMARY: "false"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Verify emulator image references are resolvable
+        run: |
+          set -euo pipefail
+
+          image_is_resolvable() {
+            local image="$1"
+            for attempt in 1 2 3; do
+              if docker manifest inspect "${image}" > /dev/null 2>&1; then
+                return 0
+              fi
+              if [[ "${attempt}" -lt 3 ]]; then
+                sleep 5
+              fi
+            done
+            return 1
+          }
+
+          if image_is_resolvable "${EMULATOR_IMAGE_PRIMARY}"; then
+            echo "Primary image reference is resolvable: ${EMULATOR_IMAGE_PRIMARY}"
+            primary_ok=true
+          else
+            echo "Primary image reference is not resolvable: ${EMULATOR_IMAGE_PRIMARY}" >&2
+            primary_ok=false
+          fi
+
+          if image_is_resolvable "${EMULATOR_IMAGE_FALLBACK}"; then
+            echo "Fallback image reference is resolvable: ${EMULATOR_IMAGE_FALLBACK}"
+            fallback_ok=true
+          else
+            echo "Fallback image reference is not resolvable: ${EMULATOR_IMAGE_FALLBACK}" >&2
+            fallback_ok=false
+          fi
+
+          if [[ "${REQUIRE_API34_PRIMARY}" == "true" && "${primary_ok}" != "true" ]]; then
+            echo "Primary API 34 emulator image reference could not be resolved." >&2
+            exit 1
+          fi
+
+          if [[ "${fallback_ok}" != "true" ]]; then
+            echo "Fallback emulator image reference could not be resolved." >&2
+            exit 1
+          fi
 
       - name: Set up SSH key and known_hosts
         if: ${{ !inputs.build_only }}
@@ -232,7 +276,8 @@ jobs:
               bash -l -s <<'REMOTE'
             set -euo pipefail
             for attempt in 1 2 3; do
-              if docker manifest inspect "${EMULATOR_IMAGE}" > /dev/null 2>&1; then
+              if docker pull "${EMULATOR_IMAGE}" > /dev/null 2>&1 \
+                 && docker image inspect "${EMULATOR_IMAGE}" > /dev/null 2>&1; then
                 echo "ok"
                 exit 0
               fi
@@ -248,6 +293,10 @@ jobs:
           selected_image="${EMULATOR_IMAGE_PRIMARY}"
           if [[ "$(resolve_image_on_remote "${EMULATOR_IMAGE_PRIMARY}")" == "ok" ]]; then
             echo "Using primary emulator image: ${EMULATOR_IMAGE_PRIMARY}"
+          elif [[ "${REQUIRE_API34_PRIMARY}" == "true" ]]; then
+            echo "Primary API 34 emulator image could not be pulled on the remote host." >&2
+            echo "Primary: ${EMULATOR_IMAGE_PRIMARY}" >&2
+            exit 1
           elif [[ "$(resolve_image_on_remote "${EMULATOR_IMAGE_FALLBACK}")" == "ok" ]]; then
             selected_image="${EMULATOR_IMAGE_FALLBACK}"
             echo "Primary image unavailable; falling back to: ${EMULATOR_IMAGE_FALLBACK}"
@@ -267,7 +316,8 @@ jobs:
           resolve_image_on_runner() {
             local candidate="$1"
             for attempt in 1 2 3; do
-              if docker manifest inspect "${candidate}" > /dev/null 2>&1; then
+              if docker pull "${candidate}" > /dev/null 2>&1 \
+                 && docker image inspect "${candidate}" > /dev/null 2>&1; then
                 echo "ok"
                 return 0
               fi
@@ -282,6 +332,10 @@ jobs:
           selected_image="${EMULATOR_IMAGE_PRIMARY}"
           if [[ "$(resolve_image_on_runner "${EMULATOR_IMAGE_PRIMARY}")" == "ok" ]]; then
             echo "Using primary emulator image: ${EMULATOR_IMAGE_PRIMARY}"
+          elif [[ "${REQUIRE_API34_PRIMARY}" == "true" ]]; then
+            echo "Primary API 34 emulator image could not be pulled on the GitHub runner." >&2
+            echo "Primary: ${EMULATOR_IMAGE_PRIMARY}" >&2
+            exit 1
           elif [[ "$(resolve_image_on_runner "${EMULATOR_IMAGE_FALLBACK}")" == "ok" ]]; then
             selected_image="${EMULATOR_IMAGE_FALLBACK}"
             echo "Primary image unavailable on runner; falling back to: ${EMULATOR_IMAGE_FALLBACK}"

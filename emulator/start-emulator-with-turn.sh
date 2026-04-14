@@ -253,28 +253,61 @@ else
   log "TURN_KEY not set (or placeholder); skipping -turncfg setup"
 fi
 
-if [ ! -x /android/sdk/launch-emulator.sh ]; then
-  echo "Missing emulator launcher at /android/sdk/launch-emulator.sh" >&2
+LAUNCHER_PATH="${EMULATOR_LAUNCHER:-}"
+if [ -n "${LAUNCHER_PATH}" ] && [ ! -x "${LAUNCHER_PATH}" ]; then
+  echo "Configured EMULATOR_LAUNCHER is not executable: ${LAUNCHER_PATH}" >&2
   exit 1
 fi
+
+if [ -z "${LAUNCHER_PATH}" ] && [ -x /android/sdk/launch-emulator.sh ]; then
+  LAUNCHER_PATH="/android/sdk/launch-emulator.sh"
+fi
+
+if [ -z "${LAUNCHER_PATH}" ] && [ -n "${APP_PATH:-}" ] && [ -x "${APP_PATH}/mixins/scripts/run.sh" ]; then
+  LAUNCHER_PATH="${APP_PATH}/mixins/scripts/run.sh"
+fi
+
+if [ -z "${LAUNCHER_PATH}" ] && [ -x /home/androidusr/docker-android/mixins/scripts/run.sh ]; then
+  LAUNCHER_PATH="/home/androidusr/docker-android/mixins/scripts/run.sh"
+fi
+
+if [ -z "${LAUNCHER_PATH}" ]; then
+  echo "No compatible emulator launcher found. Checked /android/sdk/launch-emulator.sh and docker-android run.sh." >&2
+  exit 1
+fi
+
+log "Using emulator launcher: ${LAUNCHER_PATH}"
 
 # Copy the emulator's gRPC JWT token to the shared volume so that the
 # bridge-webrtc service can authenticate its gRPC-Web requests.
 # The watcher runs in the background so that exec below can still replace
 # this shell process with launch-emulator.sh.
-TOKEN_DST_DIR="/run/emu-token"
-(
-  mkdir -p "${TOKEN_DST_DIR}"
-  while true; do
-    TOKEN_SRC=$(find /root/.android/avd/ /android/avd/ /root/.config/emulator/ -name "emu-grpc-token" 2>/dev/null | head -1)
-    if [ -n "${TOKEN_SRC}" ] && [ -f "${TOKEN_SRC}" ]; then
-      if ! cmp -s "${TOKEN_SRC}" "${TOKEN_DST_DIR}/emu-grpc-token" 2>/dev/null; then
-        cp "${TOKEN_SRC}" "${TOKEN_DST_DIR}/emu-grpc-token"
-        echo "[token-watcher] copied token from ${TOKEN_SRC}"
-      fi
-    fi
-    sleep 2
-  done
-) &
+TOKEN_WATCHER_MODE="${EMULATOR_TOKEN_WATCHER:-auto}"
+if [ "${TOKEN_WATCHER_MODE}" = "auto" ]; then
+  if [ "${LAUNCHER_PATH}" = "/android/sdk/launch-emulator.sh" ]; then
+    TOKEN_WATCHER_MODE="enabled"
+  else
+    TOKEN_WATCHER_MODE="disabled"
+  fi
+fi
 
-exec /android/sdk/launch-emulator.sh "$@"
+if [ "${TOKEN_WATCHER_MODE}" = "enabled" ]; then
+  TOKEN_DST_DIR="/run/emu-token"
+  (
+    mkdir -p "${TOKEN_DST_DIR}"
+    while true; do
+      TOKEN_SRC=$(find /root/.android/avd/ /android/avd/ /root/.config/emulator/ -name "emu-grpc-token" 2>/dev/null | head -1)
+      if [ -n "${TOKEN_SRC}" ] && [ -f "${TOKEN_SRC}" ]; then
+        if ! cmp -s "${TOKEN_SRC}" "${TOKEN_DST_DIR}/emu-grpc-token" 2>/dev/null; then
+          cp "${TOKEN_SRC}" "${TOKEN_DST_DIR}/emu-grpc-token"
+          echo "[token-watcher] copied token from ${TOKEN_SRC}"
+        fi
+      fi
+      sleep 2
+    done
+  ) &
+else
+  log "Token watcher disabled for launcher ${LAUNCHER_PATH}"
+fi
+
+exec "${LAUNCHER_PATH}" "$@"

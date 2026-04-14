@@ -15,6 +15,20 @@ log() {
   printf '%s %s\n' "[start-emulator-with-turn]" "$*" >&2
 }
 
+ensure_ipv6_loopback_host() {
+  if grep -Eq '^[[:space:]]*::1[[:space:]]+.*\blocalhost\b' /etc/hosts 2>/dev/null; then
+    return 0
+  fi
+
+  if [ ! -w /etc/hosts ]; then
+    log "WARNING: /etc/hosts is not writable; unable to add ::1 localhost entry."
+    return 0
+  fi
+
+  printf '%s\n' '::1 localhost ip6-localhost ip6-loopback' >> /etc/hosts
+  log "Added missing ::1 localhost mapping to /etc/hosts for qemu modem socket resolution."
+}
+
 append_param_if_missing() {
   flag="$1"
   case " ${EMULATOR_PARAMS_VALUE} " in
@@ -38,6 +52,8 @@ append_param_if_missing "-camera-back none"
 append_param_if_missing "-camera-front none"
 append_param_if_missing "-no-snapshot-save"
 export EMULATOR_PARAMS="${EMULATOR_PARAMS_VALUE}"
+
+ensure_ipv6_loopback_host
 
 is_placeholder_turn_secret() {
   case "$1" in

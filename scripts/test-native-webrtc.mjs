@@ -49,8 +49,8 @@ assert.match(
 );
 assert.match(
   frontendMain,
-  /const shouldPreferRelay = startSummary\.hasTurn;/,
-  "relay-only policy should only be forced when the emulator itself advertised TURN"
+  /const shouldPreferRelay = startSummary\.hasTurn && nativeIceTransportMode === "relay";/,
+  "relay-only policy should only be forced when the emulator itself advertised TURN and the browser is still in relay mode"
 );
 assert.match(
   frontendMain,

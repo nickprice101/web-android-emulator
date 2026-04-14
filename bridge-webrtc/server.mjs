@@ -9,6 +9,7 @@ import { URL } from "node:url";
 import wrtc from "@roamhq/wrtc";
 import { buildFfmpegArgs } from "./ffmpeg-config.mjs";
 import { isRenderableNativeRtcFrame } from "./native-rtc-frame-guard.mjs";
+import { prepareIceServersForNode } from "./turn-tls-shim.mjs";
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, nonstandard = {} } = wrtc;
 const { RTCVideoSource, RTCVideoSink } = nonstandard;
@@ -962,6 +963,7 @@ function sessionPayload(session) {
     turnConnectivity: session.turnConnectivity,
     turnResolution: session.turnResolution || null,
     turnUrlStrategy: session.turnUrlStrategy || null,
+    turnTlsTunnels: session.turnTlsTunnels || [],
     turnCandidateErrors: session.turnCandidateErrors.slice(-5),
     recentLogs: session.logs.slice(-10),
     eventStreamUrl: `/bridge/api/session/${session.id}/events`,
@@ -1101,6 +1103,8 @@ function createSession(offer) {
     turnConnectivity: null,
     turnResolution: null,
     turnUrlStrategy: null,
+    turnTlsTunnels: [],
+    turnTlsTunnelCleanup: null,
     answerAttempts: [],
     turnPolicy: null,
     relayFallbackUsed: false,
@@ -1125,6 +1129,12 @@ function closeSessionResources(session) {
     session.peer.close();
     session.peer = null;
   }
+
+  if (typeof session.turnTlsTunnelCleanup === "function") {
+    session.turnTlsTunnelCleanup();
+    session.turnTlsTunnelCleanup = null;
+  }
+  session.turnTlsTunnels = [];
 
   session.peerConnectionState = "closed";
   session.iceConnectionState = "closed";
@@ -2032,6 +2042,7 @@ class NativeRtcVideoRelay {
     this.abortController = new AbortController();
     this.guid = null;
     this.running = false;
+    this.turnTlsTunnelCleanup = null;
   }
 
   async start() {
@@ -2147,15 +2158,25 @@ class NativeRtcVideoRelay {
 
   async _handleJsepSignal(signal) {
     if (signal.start) {
+      if (typeof this.turnTlsTunnelCleanup === "function") {
+        this.turnTlsTunnelCleanup();
+        this.turnTlsTunnelCleanup = null;
+      }
       if (this.emulatorPeer) {
         this.emulatorPeer.close();
       }
-      const iceServers =
+      const sourceIceServers =
         Array.isArray(signal.start.iceServers) && signal.start.iceServers.length > 0
           ? signal.start.iceServers
           : buildIceServers();
+      const preparedIceServers = await prepareIceServersForNode(sourceIceServers, {
+        logger: (level, message, details) => {
+          recordSessionLog(this.session, level, `native-rtc: ${message}`, details);
+        },
+      });
+      this.turnTlsTunnelCleanup = preparedIceServers.close;
       this.emulatorPeer = new RTCPeerConnection({
-        iceServers,
+        iceServers: preparedIceServers.iceServers,
         iceTransportPolicy: preferRelayTransport ? "relay" : "all",
       });
       this.emulatorPeer.onicecandidate = (event) => {
@@ -2234,6 +2255,10 @@ class NativeRtcVideoRelay {
   stop() {
     this.running = false;
     this.abortController.abort();
+    if (typeof this.turnTlsTunnelCleanup === "function") {
+      this.turnTlsTunnelCleanup();
+      this.turnTlsTunnelCleanup = null;
+    }
     if (this.videoSink) {
       this.videoSink.stop();
       this.videoSink = null;
@@ -2369,8 +2394,16 @@ async function buildAnswer(session) {
       });
     }
 
+    const preparedIceServers = await prepareIceServersForNode(buildIceServersForUrls(turnUrls), {
+      logger: (level, message, details) => {
+        recordSessionLog(session, level, message, details);
+      },
+    });
+    session.turnTlsTunnels = preparedIceServers.tunnels;
+    session.turnTlsTunnelCleanup = preparedIceServers.close;
+
     const peer = new RTCPeerConnection({
-      iceServers: buildIceServersForUrls(turnUrls),
+      iceServers: preparedIceServers.iceServers,
       iceTransportPolicy,
     });
 

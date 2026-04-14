@@ -4,6 +4,7 @@ import tls from 'node:tls';
 import { createHmac } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import wrtc from '@roamhq/wrtc';
+import { prepareIceServersForNode } from '../turn-tls-shim.mjs';
 
 const { RTCPeerConnection } = wrtc;
 
@@ -85,9 +86,17 @@ function connectTls(host, port) {
 }
 
 async function gatherRelayCandidate({ url, username, credential }) {
+  const preparedIceServers = await prepareIceServersForNode([
+    { urls: [url], username, credential },
+  ]);
+
+  if (preparedIceServers.tunnels.length > 0) {
+    info('Using local turns->TLS tunnel for node WebRTC client', preparedIceServers.tunnels);
+  }
+
   const pc = new RTCPeerConnection({
     iceTransportPolicy: 'relay',
-    iceServers: [{ urls: [url], username, credential }],
+    iceServers: preparedIceServers.iceServers,
   });
 
   const relayCandidates = [];
@@ -123,6 +132,7 @@ async function gatherRelayCandidate({ url, username, credential }) {
   }
 
   pc.close();
+  preparedIceServers.close();
   return { relayCandidates, candidateErrors, timedOut: !gatheringComplete };
 }
 

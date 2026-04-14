@@ -3,9 +3,9 @@ Designed for app development without the need for Android Studio or similar to b
 
 Based on a self-hosted dockerised solution using the depreciated (Jan 2026) Google emulator docker image with a bespoke frontend pasted on top.
 
-Default emulator base image is now Android 14 / API 34 (`34-google-x64-no-metrics:34.1.19`) because the older Android 11 API 30 image has been observed to trigger framework-level native crashes in modern Google apps (for example `com.google.android.gm` crashing in `android.os.CancellationSignal.createTransport`).
+Default emulator build now **forks** the gRPC-Web-capable Google API 30 base image and upgrades the system image/AVD to Android 14 (API 34) during build. This preserves the API 30 launch stack (`/android/sdk/launch-emulator.sh` + gRPC-Web endpoint behavior) while running an Android 14 guest image.
 
-NOTE: The emulator's native WebRTC stream is the default low-latency path. PNG remains available as a slower fallback for comparison and recovery.
+NOTE: The stack defaults to native WebRTC relay mode over emulator gRPC-Web endpoints.
 
 The emulator container generates short-lived coturn REST credentials at startup from the shared `TURN_KEY` secret. The browser receives an ephemeral TURN username/password pair, not the long-lived shared secret.
 
@@ -15,9 +15,9 @@ The stack now defaults `TURN_TTL` to 30 days (`2592000`) so long-lived deploymen
 
 ## Native WebRTC path
 
-This fork uses the emulator's built-in WebRTC implementation through the existing gRPC-Web endpoints exposed via Envoy.
+This fork uses the emulator's built-in WebRTC implementation through gRPC-Web endpoints exposed via Envoy.
 
-The frontend uses the native emulator WebRTC stream by default, while `apkbridge` continues to handle APK install/build helpers, device info, raw frame inspection, input helper endpoints, and log access.
+The frontend uses native emulator WebRTC relay mode by default, while `apkbridge` continues to handle APK install/build helpers, device info, raw frame inspection, input helper endpoints, and log access.
 
 ### Minimal exposed ports
 
@@ -41,7 +41,10 @@ docker compose up --build
 If you must pin a different emulator container image, build with:
 
 ```bash
-EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19 docker compose build emulator
+EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297 \
+EMULATOR_SYSTEM_IMAGE=system-images\;android-34\;google_apis\;x86_64 \
+EMULATOR_PLATFORM=platforms\;android-34 \
+docker compose build emulator
 ```
 
 To temporarily debug whether your network is blocking TURN-over-TLS on `443/tcp`,

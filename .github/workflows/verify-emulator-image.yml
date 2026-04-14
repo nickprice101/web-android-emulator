@@ -1,0 +1,75 @@
+name: Verify Emulator Image URLs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify-emulator-image-urls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify image manifest URLs from deploy workflow env
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          deploy = Path(".github/workflows/deploy.yml").read_text(encoding="utf-8")
+
+          def env_value(key: str) -> str:
+            m = re.search(rf"^\s*{re.escape(key)}:\s*(.+)\s*$", deploy, flags=re.MULTILINE)
+            if not m:
+              raise SystemExit(f"Missing {key} in deploy.yml")
+            return m.group(1).strip().strip('"').strip("'")
+
+          primary = env_value("EMULATOR_IMAGE_PRIMARY")
+          fallback = env_value("EMULATOR_IMAGE_FALLBACK")
+          require_primary = env_value("REQUIRE_API34_PRIMARY").lower() == "true"
+
+          def image_http_code(image: str) -> int:
+            if ":" not in image:
+              raise SystemExit(f"Image reference must include a tag: {image}")
+
+            if image.startswith("us-docker.pkg.dev/"):
+              image_no_registry = image.removeprefix("us-docker.pkg.dev/")
+              repo, tag = image_no_registry.rsplit(":", 1)
+              url = f"https://us-docker.pkg.dev/v2/{repo}/manifests/{tag}"
+              headers = {"Accept": "application/vnd.docker.distribution.manifest.v2+json"}
+            else:
+              # Docker Hub image references (e.g. budtmo/docker-android:emulator_14.0)
+              repo, tag = image.rsplit(":", 1)
+              if "/" not in repo:
+                repo = f"library/{repo}"
+              url = f"https://hub.docker.com/v2/repositories/{repo}/tags/{tag}"
+              headers = {}
+
+            req = Request(url, headers=headers)
+            try:
+              with urlopen(req, timeout=30) as resp:
+                return resp.getcode()
+            except Exception as exc:
+              if hasattr(exc, "code"):
+                return int(exc.code)
+              raise
+
+          primary_code = image_http_code(primary)
+          fallback_code = image_http_code(fallback)
+
+          print(f"Primary image:  {primary}")
+          print(f"Primary status: {primary_code}")
+          print(f"Fallback image:  {fallback}")
+          print(f"Fallback status: {fallback_code}")
+          print(f"Require primary API34: {require_primary}")
+
+          if require_primary and primary_code != 200:
+            raise SystemExit("Primary API34 image does not resolve (status != 200).")
+
+          if fallback_code != 200:
+            raise SystemExit("Fallback image does not resolve (status != 200).")
+          PY

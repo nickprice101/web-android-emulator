@@ -6,7 +6,9 @@ services:
     build:
       context: ./emulator
       args:
-        EMULATOR_IMAGE: "${EMULATOR_IMAGE:-us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19}"
+        EMULATOR_IMAGE: "${EMULATOR_IMAGE:-us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297}"
+        EMULATOR_SYSTEM_IMAGE: "${EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64}"
+        EMULATOR_PLATFORM: "${EMULATOR_PLATFORM:-platforms;android-34}"
     image: google-emu-emulator:latest
     privileged: true
     devices:
@@ -90,7 +92,7 @@ services:
     image: google-emu-bridge-webrtc:latest
     environment:
       PORT: "8090"
-      CAPTURE_MODE: "native-rtc"
+      CAPTURE_MODE: "${CAPTURE_MODE:-native-rtc}"
       EMULATOR_GRPC_WEB_URL: "http://envoy:8080"
       APKBRIDGE_BASE_URL: "http://apkbridge:5000"
       TURN_HOST: "turn.corsicanescape.com"

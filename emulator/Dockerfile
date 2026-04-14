@@ -9,12 +9,15 @@ RUN set -eux; \
   ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/android/sdk}"; \
   export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"; \
   export ANDROID_SDK_ROOT; \
+  ensure_packages() { \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"; \
+    rm -rf /var/lib/apt/lists/*; \
+  }; \
   SDKMANAGER_BIN="$(command -v sdkmanager || true)"; \
   AVDMANAGER_BIN="$(command -v avdmanager || true)"; \
   if [ -z "${SDKMANAGER_BIN}" ] || [ -z "${AVDMANAGER_BIN}" ]; then \
-    apt-get update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl unzip; \
-    rm -rf /var/lib/apt/lists/*; \
+    ensure_packages ca-certificates curl unzip; \
     mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools"; \
     TMP_ZIP="$(mktemp)"; \
     TMP_DIR="$(mktemp -d)"; \
@@ -27,6 +30,9 @@ RUN set -eux; \
     export PATH="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${PATH}"; \
     SDKMANAGER_BIN="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"; \
     AVDMANAGER_BIN="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/avdmanager"; \
+  fi; \
+  if ! command -v java >/dev/null 2>&1; then \
+    ensure_packages openjdk-17-jre-headless; \
   fi; \
   if [ -z "${SDKMANAGER_BIN}" ]; then \
     for candidate in \

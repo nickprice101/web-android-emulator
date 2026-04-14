@@ -29,6 +29,37 @@ ensure_ipv6_loopback_host() {
   log "Added missing ::1 localhost mapping to /etc/hosts for qemu modem socket resolution."
 }
 
+ensure_ipv6_loopback_interface() {
+  if command -v ip >/dev/null 2>&1 && ip -6 addr show dev lo 2>/dev/null | grep -q '::1/128'; then
+    return 0
+  fi
+
+  # qemu's modem chardev binds to ::1. Some container hosts boot with IPv6
+  # disabled in the namespace, which makes getaddrinfo(::1) fail with
+  # "Name or service not known". Re-enable IPv6 and restore ::1 on loopback.
+  if command -v sysctl >/dev/null 2>&1; then
+    sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1 || true
+    sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1 || true
+    sysctl -w net.ipv6.conf.lo.disable_ipv6=0 >/dev/null 2>&1 || true
+  fi
+
+  if ! command -v ip >/dev/null 2>&1; then
+    log "WARNING: ip command unavailable; cannot ensure ::1 exists on loopback."
+    return 0
+  fi
+
+  ip link set lo up >/dev/null 2>&1 || true
+  if ! ip -6 addr show dev lo 2>/dev/null | grep -q '::1/128'; then
+    ip -6 addr add ::1/128 dev lo >/dev/null 2>&1 || true
+  fi
+
+  if ip -6 addr show dev lo 2>/dev/null | grep -q '::1/128'; then
+    log "Verified IPv6 loopback (::1) is present on lo."
+  else
+    log "WARNING: unable to provision ::1 on loopback; qemu modem socket may still fail."
+  fi
+}
+
 append_param_if_missing() {
   flag="$1"
   case " ${EMULATOR_PARAMS_VALUE} " in
@@ -51,9 +82,15 @@ append_param_if_missing "-no-boot-anim"
 append_param_if_missing "-camera-back none"
 append_param_if_missing "-camera-front none"
 append_param_if_missing "-no-snapshot-save"
+# Some container hosts disable IPv6 loopback inside network namespaces. When
+# that happens, recent emulator/qemu builds can fail at startup while trying to
+# bring up the modem chardev on ::1. Disable SIM/modem initialization by
+# default to avoid the IPv6-only modem bind path.
+append_param_if_missing "-no-sim"
 export EMULATOR_PARAMS="${EMULATOR_PARAMS_VALUE}"
 
 ensure_ipv6_loopback_host
+ensure_ipv6_loopback_interface
 
 is_placeholder_turn_secret() {
   case "$1" in

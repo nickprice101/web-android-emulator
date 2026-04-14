@@ -6,8 +6,28 @@ ARG EMULATOR_SYSTEM_IMAGE=system-images;android-34;google_apis;x86_64
 ARG EMULATOR_PLATFORM=platforms;android-34
 
 RUN set -eux; \
+  ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/android/sdk}"; \
+  export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"; \
+  export ANDROID_SDK_ROOT; \
   SDKMANAGER_BIN="$(command -v sdkmanager || true)"; \
   AVDMANAGER_BIN="$(command -v avdmanager || true)"; \
+  if [ -z "${SDKMANAGER_BIN}" ] || [ -z "${AVDMANAGER_BIN}" ]; then \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl unzip; \
+    rm -rf /var/lib/apt/lists/*; \
+    mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools"; \
+    TMP_ZIP="$(mktemp)"; \
+    TMP_DIR="$(mktemp -d)"; \
+    curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -o "${TMP_ZIP}"; \
+    unzip -q "${TMP_ZIP}" -d "${TMP_DIR}"; \
+    mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools/latest"; \
+    rm -rf "${ANDROID_SDK_ROOT}/cmdline-tools/latest/"*; \
+    mv "${TMP_DIR}/cmdline-tools/"* "${ANDROID_SDK_ROOT}/cmdline-tools/latest/"; \
+    rm -rf "${TMP_ZIP}" "${TMP_DIR}"; \
+    export PATH="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${PATH}"; \
+    SDKMANAGER_BIN="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"; \
+    AVDMANAGER_BIN="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/avdmanager"; \
+  fi; \
   if [ -z "${SDKMANAGER_BIN}" ]; then \
     for candidate in \
       /android/sdk/cmdline-tools/latest/bin/sdkmanager \
@@ -33,10 +53,10 @@ RUN set -eux; \
     find /android /opt -maxdepth 6 -type f \( -name sdkmanager -o -name avdmanager \) 2>/dev/null || true; \
     exit 1; \
   fi; \
-  yes | "${SDKMANAGER_BIN}" --licenses >/dev/null; \
-  "${SDKMANAGER_BIN}" --channel=0 "${EMULATOR_SYSTEM_IMAGE}" "${EMULATOR_PLATFORM}"; \
   mkdir -p /root/.android; \
   touch /root/.android/repositories.cfg; \
+  yes | "${SDKMANAGER_BIN}" --licenses >/dev/null; \
+  "${SDKMANAGER_BIN}" --channel=0 "${EMULATOR_SYSTEM_IMAGE}" "${EMULATOR_PLATFORM}"; \
   echo "no" | "${AVDMANAGER_BIN}" create avd --force --name Pixel2 --package "${EMULATOR_SYSTEM_IMAGE}" --device "pixel_5"
 
 COPY start-emulator-with-turn.sh /usr/local/bin/start-emulator-with-turn.sh

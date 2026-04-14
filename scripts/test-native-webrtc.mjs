@@ -78,6 +78,16 @@ assert.match(
 );
 assert.match(
   emulatorTurnWrapper,
+  /ensure_ipv6_loopback_interface\(\)/,
+  "emulator wrapper must proactively restore IPv6 loopback so qemu modem chardev host=::1 can resolve in restricted container namespaces"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /ip -6 addr add ::1\/128 dev lo/,
+  "emulator wrapper must attempt to re-add ::1 to loopback when the container runtime has IPv6 disabled"
+);
+assert.match(
+  emulatorTurnWrapper,
   /TURNCFG_URLS_FORMAT="\$\{TURNCFG_URLS_FORMAT:-array\}"/,
   "emulator TURN wrapper must default TURN cfg urls to array form while keeping TURNCFG_URLS_FORMAT override support"
 );

@@ -3,7 +3,7 @@ Designed for app development without the need for Android Studio or similar to b
 
 Based on a self-hosted dockerised solution using the depreciated (Jan 2026) Google emulator docker image with a bespoke frontend pasted on top.
 
-Default emulator build now **forks** the gRPC-Web-capable Google API 30 base image and upgrades the system image/AVD to Android 14 (API 34) during build. This preserves the API 30 launch stack (`/android/sdk/launch-emulator.sh` + gRPC-Web endpoint behavior) while running an Android 14 guest image.
+Default emulator build pulls the runtime base image from Google's Artifact Registry (`us-docker.pkg.dev/android-emulator-268719/images/...`) and then installs the Android 14 (API 34) SDK platform + system image via `sdkmanager` from Google's Android SDK repository (`https://dl.google.com/android/repository/`). This preserves the API 30 launch stack (`/android/sdk/launch-emulator.sh` + gRPC-Web endpoint behavior) while running an Android 14 guest image.
 
 NOTE: The stack defaults to native WebRTC relay mode over emulator gRPC-Web endpoints.
 

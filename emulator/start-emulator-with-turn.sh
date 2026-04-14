@@ -51,6 +51,11 @@ append_param_if_missing "-no-boot-anim"
 append_param_if_missing "-camera-back none"
 append_param_if_missing "-camera-front none"
 append_param_if_missing "-no-snapshot-save"
+# Some container hosts disable IPv6 loopback inside network namespaces. When
+# that happens, recent emulator/qemu builds can fail at startup while trying to
+# bring up the modem chardev on ::1. Disable SIM/modem initialization by
+# default to avoid the IPv6-only modem bind path.
+append_param_if_missing "-no-sim"
 export EMULATOR_PARAMS="${EMULATOR_PARAMS_VALUE}"
 
 ensure_ipv6_loopback_host

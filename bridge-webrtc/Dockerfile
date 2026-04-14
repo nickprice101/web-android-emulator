@@ -26,7 +26,7 @@ RUN npm ci --omit=dev \
     && WRTC_FORK_REPO="$WRTC_FORK_REPO" WRTC_FORK_REF="$WRTC_FORK_REF" npm run build:wrtc-fork \
     && npm cache clean --force
 
-COPY server.mjs ffmpeg-config.mjs native-rtc-frame-guard.mjs ./
+COPY server.mjs ffmpeg-config.mjs native-rtc-frame-guard.mjs native-rtc-ice-policy.mjs turn-tls-shim.mjs ./
 
 FROM node:20-bookworm-slim
 
@@ -38,7 +38,7 @@ RUN apt-get update \
 
 COPY --from=wrtc-builder /app/package.json /app/package-lock.json ./
 COPY --from=wrtc-builder /app/node_modules ./node_modules
-COPY --from=wrtc-builder /app/server.mjs /app/ffmpeg-config.mjs /app/native-rtc-frame-guard.mjs ./
+COPY --from=wrtc-builder /app/server.mjs /app/ffmpeg-config.mjs /app/native-rtc-frame-guard.mjs /app/native-rtc-ice-policy.mjs /app/turn-tls-shim.mjs ./
 
 EXPOSE 8090
 

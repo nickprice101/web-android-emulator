@@ -22,7 +22,7 @@ jobs:
       BUILD_ONLY: ${{ inputs.build_only && 'true' || 'false' }}
       # Prefer API 34, but keep a known-good API 30 fallback for environments
       # where the API 34 manifest is temporarily unavailable.
-      EMULATOR_IMAGE_PRIMARY: us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19
+      EMULATOR_IMAGE_PRIMARY: us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.18
       EMULATOR_IMAGE_FALLBACK: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
       EMULATOR_IMAGE: us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19
 

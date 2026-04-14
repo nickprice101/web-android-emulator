@@ -242,7 +242,7 @@ jobs:
             done
             echo "fail"
             exit 0
-REMOTE
+          REMOTE
           }
 
           selected_image="${EMULATOR_IMAGE_PRIMARY}"
@@ -253,6 +253,40 @@ REMOTE
             echo "Primary image unavailable; falling back to: ${EMULATOR_IMAGE_FALLBACK}"
           else
             echo "Neither emulator image is resolvable on the remote host." >&2
+            echo "Primary:  ${EMULATOR_IMAGE_PRIMARY}" >&2
+            echo "Fallback: ${EMULATOR_IMAGE_FALLBACK}" >&2
+            exit 1
+          fi
+
+          echo "EMULATOR_IMAGE=${selected_image}" >> "$GITHUB_ENV"
+
+      - name: Validate emulator base image on runner
+        if: ${{ inputs.build_only }}
+        run: |
+          set -euo pipefail
+          resolve_image_on_runner() {
+            local candidate="$1"
+            for attempt in 1 2 3; do
+              if docker manifest inspect "${candidate}" > /dev/null 2>&1; then
+                echo "ok"
+                return 0
+              fi
+              if [[ "${attempt}" -lt 3 ]]; then
+                sleep 10
+              fi
+            done
+            echo "fail"
+            return 0
+          }
+
+          selected_image="${EMULATOR_IMAGE_PRIMARY}"
+          if [[ "$(resolve_image_on_runner "${EMULATOR_IMAGE_PRIMARY}")" == "ok" ]]; then
+            echo "Using primary emulator image: ${EMULATOR_IMAGE_PRIMARY}"
+          elif [[ "$(resolve_image_on_runner "${EMULATOR_IMAGE_FALLBACK}")" == "ok" ]]; then
+            selected_image="${EMULATOR_IMAGE_FALLBACK}"
+            echo "Primary image unavailable on runner; falling back to: ${EMULATOR_IMAGE_FALLBACK}"
+          else
+            echo "Neither emulator image is resolvable on the GitHub runner." >&2
             echo "Primary:  ${EMULATOR_IMAGE_PRIMARY}" >&2
             echo "Fallback: ${EMULATOR_IMAGE_FALLBACK}" >&2
             exit 1

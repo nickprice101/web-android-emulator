@@ -505,6 +505,22 @@ function summarizeIceServers(iceServers) {
   };
 }
 
+function normalizeIceServerUrls(iceServers) {
+  return summarizeIceServers(iceServers).urls
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .sort();
+}
+
+function haveSameIceServerUrls(left, right) {
+  const leftUrls = normalizeIceServerUrls(left);
+  const rightUrls = normalizeIceServerUrls(right);
+  if (leftUrls.length !== rightUrls.length) {
+    return false;
+  }
+  return leftUrls.every((value, index) => value === rightUrls[index]);
+}
+
 function formatIceServerSummary(summary) {
   if (!summary) {
     return "n/a";
@@ -2207,7 +2223,8 @@ function App() {
 
       jsep._handleStart = (signal) => {
         try {
-          const startSummary = summarizeIceServers(signal?.start?.iceServers || []);
+          const startIceServers = Array.isArray(signal?.start?.iceServers) ? signal.start.iceServers : [];
+          const startSummary = summarizeIceServers(startIceServers);
           const startMissingIce = signal?.start && !startSummary.hasTurn && !startSummary.hasStun;
           let fallbackIceServers = Array.isArray(nativeFallbackIceServersRef.current)
             ? nativeFallbackIceServersRef.current
@@ -2232,6 +2249,13 @@ function App() {
             fallbackSummary.hasTurn && !fallbackSummary.hasStun
               ? [...fallbackIceServers, { urls: FALLBACK_STUN_URL }]
               : fallbackIceServers;
+          const rewrittenBrowserIceServers =
+            !startMissingIce &&
+            startSummary.hasTurn &&
+            fallbackSummary.hasTurn &&
+            !haveSameIceServerUrls(startIceServers, fallbackWithStun)
+              ? fallbackWithStun
+              : null;
           const injectedIceServers =
             startMissingIce
               ? fallbackSummary.hasTurn || fallbackSummary.hasStun
@@ -2240,13 +2264,21 @@ function App() {
               : null;
 
           const baseSignal =
-            injectedIceServers
+            rewrittenBrowserIceServers
+              ? {
+                  ...signal,
+                  start: {
+                    ...signal.start,
+                    iceServers: rewrittenBrowserIceServers,
+                  },
+                }
+              : injectedIceServers
               ? {
                   ...signal,
                   start: {
                     ...signal.start,
                     iceServers: [
-                      ...(signal.start?.iceServers || []),
+                      ...startIceServers,
                       ...injectedIceServers,
                     ],
                   },
@@ -2269,6 +2301,7 @@ function App() {
             hasTurn: startSummary.hasTurn,
             hasStun: startSummary.hasStun,
             injectedIce: Boolean(injectedIceServers),
+            browserTurnRewrite: Boolean(rewrittenBrowserIceServers),
             requestedTransportMode: nativeIceTransportMode,
             iceTransportPolicy:
               patchedSignal?.start?.iceTransportPolicy || signal?.start?.iceTransportPolicy || "all",
@@ -2287,6 +2320,15 @@ function App() {
             } else {
               pushNativeEvent("Injected public STUN server because emulator advertised no ICE servers");
             }
+          }
+          if (rewrittenBrowserIceServers) {
+            pushNativeEvent(
+              "Rewriting native browser ICE servers to the bridge-advertised public TURN route while the emulator keeps its internal TURN route",
+              {
+                emulatorTurnUrl: startSummary.urls[0] || null,
+                browserTurnUrl: fallbackSummary.urls[0] || null,
+              }
+            );
           }
           if (patchedSignal !== baseSignal) {
             pushNativeEvent("Forcing native browser ICE transport policy to relay because TURN is configured");

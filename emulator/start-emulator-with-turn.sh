@@ -382,23 +382,38 @@ fi
 
 # Some emulator versions add iptables DROP rules for the ADB port during
 # initialization, causing socat to receive "Connection timed out" instead of
-# "Connection refused" when forwarding connections on loopback. Maintain an
-# iptables ACCEPT rule for the ADB port (5557) on loopback so that the socat
-# forwarder in launch-emulator.sh can always reach the emulator. The rule is
-# re-inserted every few seconds to ensure it remains at the head of the INPUT
-# chain even if the emulator re-adds a DROP rule during startup.
+# "Connection refused" when forwarding connections on loopback. The emulator
+# may insert a DROP rule at position 1, which pushes any existing ACCEPT to
+# position 2 where it loses to the DROP. Simply checking whether the ACCEPT
+# rule *exists* is therefore insufficient — we must actively remove DROP rules
+# for the port and unconditionally re-insert the ACCEPT at the head of the
+# chain on every iteration.
 ADB_PORT="${EMULATOR_ADB_PORT:-5557}"
-ADB_PORT_GUARD_INTERVAL="${ADB_PORT_GUARD_INTERVAL:-8}"
+ADB_PORT_GUARD_INTERVAL="${ADB_PORT_GUARD_INTERVAL:-3}"
+
+_ensure_adb_accept() {
+  command -v iptables >/dev/null 2>&1 || return 0
+  # Remove any DROP rules for the ADB port (both src-specific and general)
+  # so that loopback connections from the socat forwarder are never blocked.
+  while iptables -D INPUT -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j DROP 2>/dev/null; do :; done
+  while iptables -D INPUT -p tcp --dport "${ADB_PORT}" -j DROP 2>/dev/null; do :; done
+  # Delete any existing ACCEPT copy first to avoid duplicates, then re-insert
+  # at position 1 so it is evaluated before any future DROP rules.
+  iptables -D INPUT -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null || true
+  if ! iptables -I INPUT 1 -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
+    log "WARNING: iptables ACCEPT rule for ADB port ${ADB_PORT} could not be inserted (iptables not available or insufficient permissions)"
+  fi
+}
+
+# Insert the initial ACCEPT rule synchronously before exec so there is no
+# window between process start and the first guard iteration where a DROP rule
+# added by launch-emulator.sh could block socat.
+_ensure_adb_accept
+
 (
   while true; do
-    if command -v iptables >/dev/null 2>&1; then
-      if ! iptables -C INPUT -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
-        if ! iptables -I INPUT 1 -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
-          log "WARNING: iptables ACCEPT rule for ADB port ${ADB_PORT} could not be inserted (iptables not available or insufficient permissions)"
-        fi
-      fi
-    fi
     sleep "${ADB_PORT_GUARD_INTERVAL}"
+    _ensure_adb_accept 2>/dev/null || true
   done
 ) &
 log "ADB port guard started for port ${ADB_PORT} (interval ${ADB_PORT_GUARD_INTERVAL}s)"

@@ -65,7 +65,16 @@ RUN set -eux; \
   "${SDKMANAGER_BIN}" --channel=0 "${EMULATOR_SYSTEM_IMAGE}" "${EMULATOR_PLATFORM}"; \
   touch /root/.android/androidtool.cfg; \
   printf '%s\n' 'android.settings.auto.update.check=false' >> /root/.android/androidtool.cfg; \
-  echo "no" | "${AVDMANAGER_BIN}" create avd --force --name Pixel2 --package "${EMULATOR_SYSTEM_IMAGE}" --device "pixel_5"
+  echo "no" | "${AVDMANAGER_BIN}" create avd --force --name Pixel2 --package "${EMULATOR_SYSTEM_IMAGE}" --device "pixel_5"; \
+  _avd_config="${HOME}/.android/avd/Pixel2.avd/config.ini"; \
+  if [ -f "${_avd_config}" ]; then \
+    sed -i '/^hw\.gsmModem=/d' "${_avd_config}"; \
+    printf '%s\n' 'hw.gsmModem=no' >> "${_avd_config}"; \
+    echo "Set hw.gsmModem=no in ${_avd_config} to prevent QEMU modem socket on ::1"; \
+  else \
+    echo "WARNING: AVD config not found at ${_avd_config}" >&2; \
+    exit 1; \
+  fi
 
 COPY start-emulator-with-turn.sh /usr/local/bin/start-emulator-with-turn.sh
 

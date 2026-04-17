@@ -87,6 +87,12 @@ append_param_if_missing "-no-snapshot-save"
 # bring up the modem chardev on ::1. Disable SIM/modem initialization by
 # default to avoid the IPv6-only modem bind path.
 append_param_if_missing "-no-sim"
+# PulseAudio is often unavailable or misconfigured in headless container
+# environments. When the emulator cannot connect to the PulseAudio server it
+# logs "Could not init 'pa' audio driver" and may stall during audio
+# subsystem initialization, delaying port binding. Disable audio by default
+# since it is not needed for ADB/WebRTC emulator use.
+append_param_if_missing "-no-audio"
 export EMULATOR_PARAMS="${EMULATOR_PARAMS_VALUE}"
 
 ensure_ipv6_loopback_host

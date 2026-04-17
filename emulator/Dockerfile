@@ -1,9 +1,9 @@
-ARG EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
+ARG EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19
 FROM ${EMULATOR_IMAGE}
 ARG EMULATOR_IMAGE
 
-ARG EMULATOR_SYSTEM_IMAGE=system-images;android-30;google_apis;x86_64
-ARG EMULATOR_PLATFORM=platforms;android-30
+ARG EMULATOR_SYSTEM_IMAGE=system-images;android-34;google_apis;x86_64
+ARG EMULATOR_PLATFORM=platforms;android-34
 
 RUN set -eux; \
   ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/android/sdk}"; \

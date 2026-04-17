@@ -17,7 +17,7 @@ services:
     environment:
       ADBKEY: |
         PLACEHOLDER_ADB_KEY
-      EMULATOR_PARAMS: "-no-audio -grpc 8554 -no-snapshot-load -wipe-data -partition-size 4096 -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
+      EMULATOR_PARAMS: "-no-audio -grpc 8554 -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
       TURN_HOST: "turn.corsicanescape.com"
       TURN_PORT: "${TURN_PORT:-443}"
       TURN_PROTOCOL: "tcp"

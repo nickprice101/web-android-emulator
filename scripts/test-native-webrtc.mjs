@@ -121,5 +121,22 @@ assert.match(
   /chmod 755 "\$\{turn_cfg_script\}"/,
   "emulator TURN wrapper must keep the generated turncfg script executable by non-root emulator users"
 );
+assert.match(
+  emulatorTurnWrapper,
+  /iptables -[CI] INPUT.*--dport.*"\$\{ADB_PORT\}".*-j ACCEPT/,
+  "emulator wrapper must maintain an iptables ACCEPT rule for the ADB port on loopback so socat forwarding is not blocked by emulator-added DROP rules"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /ADB_PORT_GUARD_INTERVAL/,
+  "emulator wrapper must expose ADB_PORT_GUARD_INTERVAL so the iptables polling cadence is configurable"
+);
+
+const emulatorDockerfile = readRepoFile("emulator/Dockerfile");
+assert.doesNotMatch(
+  emulatorDockerfile,
+  /sdkmanager.*"emulator"/,
+  "emulator Dockerfile must NOT update the emulator binary via sdkmanager; the base image bundles a compatible version and newer sdkmanager builds add iptables ADB-port restrictions that break socat forwarding"
+);
 
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

@@ -62,7 +62,9 @@ RUN set -eux; \
   mkdir -p /root/.android; \
   touch /root/.android/repositories.cfg; \
   yes | "${SDKMANAGER_BIN}" --licenses >/dev/null; \
-  "${SDKMANAGER_BIN}" --channel=0 "${EMULATOR_SYSTEM_IMAGE}" "${EMULATOR_PLATFORM}"; \
+  "${SDKMANAGER_BIN}" --channel=0 "emulator" "${EMULATOR_SYSTEM_IMAGE}" "${EMULATOR_PLATFORM}"; \
+  touch /root/.android/androidtool.cfg; \
+  printf '%s\n' 'android.settings.auto.update.check=false' >> /root/.android/androidtool.cfg; \
   echo "no" | "${AVDMANAGER_BIN}" create avd --force --name Pixel2 --package "${EMULATOR_SYSTEM_IMAGE}" --device "pixel_5"
 
 COPY start-emulator-with-turn.sh /usr/local/bin/start-emulator-with-turn.sh

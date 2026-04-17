@@ -389,7 +389,7 @@ fi
 # for the port and unconditionally re-insert the ACCEPT at the head of the
 # chain on every iteration.
 ADB_PORT="${EMULATOR_ADB_PORT:-5557}"
-ADB_PORT_GUARD_INTERVAL="${ADB_PORT_GUARD_INTERVAL:-3}"
+ADB_PORT_GUARD_INTERVAL="${ADB_PORT_GUARD_INTERVAL:-1}"
 
 _ensure_adb_accept() {
   command -v iptables >/dev/null 2>&1 || return 0

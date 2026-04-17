@@ -6,7 +6,7 @@ services:
     build:
       context: ./emulator
       args:
-        EMULATOR_IMAGE: "${EMULATOR_IMAGE:-us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19}"
+        EMULATOR_IMAGE: "${EMULATOR_IMAGE:-us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297}"
         EMULATOR_SYSTEM_IMAGE: "${EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64}"
         EMULATOR_PLATFORM: "${EMULATOR_PLATFORM:-platforms;android-34}"
     image: google-emu-emulator:latest

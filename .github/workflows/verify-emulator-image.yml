@@ -10,66 +10,77 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify image manifest URLs from deploy workflow env
+      - name: Verify checked-in Google image references resolve
+        shell: bash
         run: |
           set -euo pipefail
 
           python3 - <<'PY'
+          import json
           import re
-          import sys
+          import subprocess
           from pathlib import Path
-          from urllib.request import Request, urlopen
 
-          deploy = Path(".github/workflows/deploy.yml").read_text(encoding="utf-8")
+          files = [
+              Path("docker-compose.yml"),
+              Path("emulator/Dockerfile"),
+              Path(".github/workflows/deploy.yml"),
+          ]
 
-          def env_value(key: str) -> str:
-            m = re.search(rf"^\s*{re.escape(key)}:\s*(.+)\s*$", deploy, flags=re.MULTILINE)
-            if not m:
-              raise SystemExit(f"Missing {key} in deploy.yml")
-            return m.group(1).strip().strip('"').strip("'")
+          image_pattern = re.compile(
+              r"us-docker\.pkg\.dev/android-emulator-268719/images/[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+"
+          )
 
-          primary = env_value("EMULATOR_IMAGE_PRIMARY")
-          fallback = env_value("EMULATOR_IMAGE_FALLBACK")
-          require_primary = env_value("REQUIRE_API34_PRIMARY").lower() == "true"
+          image_refs = {}
+          for file_path in files:
+              content = file_path.read_text(encoding="utf-8")
+              for image in image_pattern.findall(content):
+                  image_refs.setdefault(image, set()).add(str(file_path))
 
-          def image_http_code(image: str) -> int:
-            if ":" not in image:
-              raise SystemExit(f"Image reference must include a tag: {image}")
+          if not image_refs:
+              raise SystemExit("No Google emulator image references were found.")
 
-            if image.startswith("us-docker.pkg.dev/"):
+          def google_manifest_url(image: str) -> str:
               image_no_registry = image.removeprefix("us-docker.pkg.dev/")
               repo, tag = image_no_registry.rsplit(":", 1)
-              url = f"https://us-docker.pkg.dev/v2/{repo}/manifests/{tag}"
-              headers = {"Accept": "application/vnd.docker.distribution.manifest.v2+json"}
-            else:
-              # Docker Hub image references (e.g. budtmo/docker-android:emulator_14.0)
-              repo, tag = image.rsplit(":", 1)
-              if "/" not in repo:
-                repo = f"library/{repo}"
-              url = f"https://hub.docker.com/v2/repositories/{repo}/tags/{tag}"
-              headers = {}
+              repo_path, image_name = repo.rsplit("/", 1)
+              return f"https://us-docker.pkg.dev/v2/{repo_path}/{image_name}/manifests/{tag}"
 
-            req = Request(url, headers=headers)
-            try:
-              with urlopen(req, timeout=30) as resp:
-                return resp.getcode()
-            except Exception as exc:
-              if hasattr(exc, "code"):
-                return int(exc.code)
-              raise
+          failures = []
+          for image, origins in sorted(image_refs.items()):
+              url = google_manifest_url(image)
+              result = subprocess.run(
+                  [
+                      "curl",
+                      "--silent",
+                      "--show-error",
+                      "--location",
+                      "--head",
+                      "--write-out",
+                      "\n%{http_code}",
+                      "--header",
+                      "Accept: application/vnd.docker.distribution.manifest.v2+json",
+                      url,
+                  ],
+                  text=True,
+                  capture_output=True,
+                  check=False,
+              )
+              http_code = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "000"
+              print(json.dumps({
+                  "image": image,
+                  "origins": sorted(origins),
+                  "url": url,
+                  "http_code": http_code,
+              }))
+              if http_code != "200":
+                  failures.append((image, sorted(origins), url, http_code, result.stderr.strip()))
 
-          primary_code = image_http_code(primary)
-          fallback_code = image_http_code(fallback)
-
-          print(f"Primary image:  {primary}")
-          print(f"Primary status: {primary_code}")
-          print(f"Fallback image:  {fallback}")
-          print(f"Fallback status: {fallback_code}")
-          print(f"Require primary API34: {require_primary}")
-
-          if require_primary and primary_code != 200:
-            raise SystemExit("Primary API34 image does not resolve (status != 200).")
-
-          if fallback_code != 200:
-            raise SystemExit("Fallback image does not resolve (status != 200).")
+          if failures:
+              lines = ["One or more Google emulator image references did not resolve:"]
+              for image, origins, url, http_code, stderr in failures:
+                  lines.append(f"- {image} from {', '.join(origins)} -> {http_code} ({url})")
+                  if stderr:
+                      lines.append(f"  stderr: {stderr}")
+              raise SystemExit("\n".join(lines))
           PY

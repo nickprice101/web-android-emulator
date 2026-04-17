@@ -395,8 +395,13 @@ _ensure_adb_accept() {
   command -v iptables >/dev/null 2>&1 || return 0
   # Remove any DROP rules for the ADB port (both src-specific and general)
   # so that loopback connections from the socat forwarder are never blocked.
-  while iptables -D INPUT -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j DROP 2>/dev/null; do :; done
-  while iptables -D INPUT -p tcp --dport "${ADB_PORT}" -j DROP 2>/dev/null; do :; done
+  # Log each removal so repeated DROP insertions by the emulator are visible.
+  while iptables -D INPUT -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j DROP 2>/dev/null; do
+    log "Removed iptables DROP rule for ADB port ${ADB_PORT} src 127.0.0.1"
+  done
+  while iptables -D INPUT -p tcp --dport "${ADB_PORT}" -j DROP 2>/dev/null; do
+    log "Removed iptables DROP rule for ADB port ${ADB_PORT} (all sources)"
+  done
   # Delete any existing ACCEPT copy first to avoid duplicates, then re-insert
   # at position 1 so it is evaluated before any future DROP rules.
   iptables -D INPUT -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null || true
@@ -413,7 +418,7 @@ _ensure_adb_accept
 (
   while true; do
     sleep "${ADB_PORT_GUARD_INTERVAL}"
-    _ensure_adb_accept 2>/dev/null || true
+    _ensure_adb_accept || true
   done
 ) &
 log "ADB port guard started for port ${ADB_PORT} (interval ${ADB_PORT_GUARD_INTERVAL}s)"

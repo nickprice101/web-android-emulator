@@ -183,6 +183,14 @@ if [ "${boot_completed}" != "1" ]; then
 fi
 log "Android guest API level is ${guest_api} and boot_completed=${boot_completed}."
 
+log "Checking container logs for stale API 30 fallback or fatal modem startup errors..."
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'version: AndroidVersion\.ApiLevel=30|Pkg\.Dependencies=emulator#30\.0\.4'; then
+  fail "Container logs still show the base launcher resolving an API 30 guest"
+fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1'; then
+  fail "Container logs still show the fatal QEMU modem ::1 resolution failure"
+fi
+
 log "Scanning container logs for persistent socat timeout errors..."
 timeout_count=$(docker logs "${CONTAINER_NAME}" 2>&1 | grep -c "Connection timed out" || true)
 if [ "${timeout_count}" -gt "${MAX_ACCEPTABLE_TIMEOUTS}" ]; then

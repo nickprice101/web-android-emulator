@@ -74,6 +74,16 @@ RUN set -eux; \
   else \
     echo "WARNING: AVD config not found at ${_avd_config}" >&2; \
     exit 1; \
+  fi; \
+  _base_avd_config="/Pixel2.avd/config.ini"; \
+  if [ -f "${_base_avd_config}" ]; then \
+    sed -i '/^hw\.gsmModem=/d' "${_base_avd_config}"; \
+    printf '%s\n' 'hw.gsmModem=no' >> "${_base_avd_config}"; \
+    sed -i '/^image\.sysdir\.1=/d' "${_base_avd_config}"; \
+    printf 'image.sysdir.1=%s\n' "system-images/android-34/google_apis/x86_64/" >> "${_base_avd_config}"; \
+    echo "Also patched ${_base_avd_config}: hw.gsmModem=no and image.sysdir.1 set to API 34"; \
+  else \
+    echo "Note: ${_base_avd_config} not present at build time; runtime patching will handle it"; \
   fi
 
 COPY start-emulator-with-turn.sh /usr/local/bin/start-emulator-with-turn.sh

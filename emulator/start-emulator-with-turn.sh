@@ -121,15 +121,63 @@ log "  EMULATOR_SYSTEM_IMAGE      : ${EMULATOR_SYSTEM_IMAGE:-not set}"
 log "  EMULATOR_PLATFORM          : ${EMULATOR_PLATFORM:-not set}"
 log "  emulator binary version    : ${_emulator_version}"
 if [ -n "${_system_image_props}" ]; then
-  _api_level="$(grep 'AndroidVersion.ApiLevel' "${_system_image_props}" 2>/dev/null | head -1 || true)"
-  _pkg_revision="$(grep 'Pkg.Revision' "${_system_image_props}" 2>/dev/null | head -1 || true)"
   log "  system image props (${_system_image_props}):"
-  log "    ${_api_level:-AndroidVersion.ApiLevel: not found}"
-  log "    ${_pkg_revision:-Pkg.Revision: not found}"
+  while IFS= read -r _prop_line; do
+    case "${_prop_line}" in
+      '#'*|'') continue ;;
+      *) log "    ${_prop_line}" ;;
+    esac
+  done < "${_system_image_props}"
 else
   log "  system image props: not found under ${ANDROID_SDK_ROOT}/system-images/android-34"
 fi
-unset _emulator_bin _emulator_version _system_image_props _api_level _pkg_revision _props_path
+unset _emulator_bin _emulator_version _system_image_props _props_path _prop_line
+
+# Apply critical AVD config.ini patches before the emulator is launched.
+#
+# (a) hw.gsmModem=no  — prevents QEMU from creating the modem chardev socket
+#     bound to ::1 (IPv6 loopback), which causes a fatal "address resolution
+#     failed" crash on hosts where IPv6 is disabled (e.g. Unraid).  The
+#     -no-sim flag passed to the emulator binary does NOT suppress this chardev;
+#     only the AVD config.ini key prevents it.
+#
+# (b) image.sysdir.1  — ensures the AVD uses the API 34 system image rather
+#     than any pre-existing API 30 image the base image may have bundled at a
+#     non-standard path (e.g. /Pixel2.avd/).  The build-time avdmanager patch
+#     targets $HOME/.android/avd/Pixel2.avd/config.ini, but some base images
+#     also maintain a second copy at /Pixel2.avd/config.ini that is the
+#     authoritative file read by launch-emulator.sh at runtime.  Patching all
+#     discovered config files here is the safe fallback.
+_patch_single_avd_config() {
+  _cfg="$1"
+  _sdk="${ANDROID_SDK_ROOT:-/android/sdk}"
+  _api34_sysdir="system-images/android-34/google_apis/x86_64/"
+  sed -i '/^hw\.gsmModem=/d' "${_cfg}" 2>/dev/null || true
+  printf 'hw.gsmModem=%s\n' 'no' >> "${_cfg}"
+  if [ -d "${_sdk}/${_api34_sysdir}" ]; then
+    sed -i '/^image\.sysdir\.1=/d' "${_cfg}" 2>/dev/null || true
+    printf 'image.sysdir.1=%s\n' "${_api34_sysdir}" >> "${_cfg}"
+    log "  [avd-patch] ${_cfg}: set hw.gsmModem=no, image.sysdir.1=${_api34_sysdir}"
+  else
+    log "  [avd-patch] ${_cfg}: set hw.gsmModem=no (API 34 sysdir not found at ${_sdk}/${_api34_sysdir}, sysdir unchanged)"
+  fi
+}
+
+log "Patching AVD config.ini files (hw.gsmModem=no + API 34 system image):"
+_avd_patched=0
+for _cfg_candidate in \
+    "${HOME}/.android/avd/Pixel2.avd/config.ini" \
+    /Pixel2.avd/config.ini \
+    "${ANDROID_SDK_ROOT:-/android/sdk}/avd/Pixel2.avd/config.ini"; do
+  if [ -f "${_cfg_candidate}" ]; then
+    _patch_single_avd_config "${_cfg_candidate}"
+    _avd_patched=$((_avd_patched + 1))
+  fi
+done
+if [ "${_avd_patched}" -eq 0 ]; then
+  log "WARNING: No Pixel2 AVD config.ini found; hw.gsmModem and sysdir patches were NOT applied"
+fi
+unset _avd_patched _cfg_candidate
 
 is_placeholder_turn_secret() {
   case "$1" in

@@ -1,4 +1,4 @@
-ARG EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
+ARG EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19
 FROM ${EMULATOR_IMAGE}
 ARG EMULATOR_IMAGE
 

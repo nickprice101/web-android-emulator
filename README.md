@@ -3,7 +3,7 @@ Designed for app development without the need for Android Studio or similar to b
 
 Based on a self-hosted dockerised solution using the depreciated (Jan 2026) Google emulator docker image with a bespoke frontend pasted on top.
 
-Default emulator build pulls the runtime base image from Google's Artifact Registry (`us-docker.pkg.dev/android-emulator-268719/images/...`) and then installs the Android 14 (API 34) SDK platform + system image via `sdkmanager` from Google's Android SDK repository (`https://dl.google.com/android/repository/`). This preserves the API 30 launch stack (`/android/sdk/launch-emulator.sh` + gRPC-Web endpoint behavior) while running an Android 14 guest image.
+Default emulator build uses the Android 14 (API 34) Google emulator image from Google's Artifact Registry (`us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19`). The Dockerfile installs the Android 14 (API 34) SDK platform and system image via `sdkmanager` and creates a `Pixel2` AVD backed by the `pixel_5` device profile, then starts the emulator with the gRPC-Web endpoint exposed for the WebRTC bridge.
 
 NOTE: The stack defaults to native WebRTC relay mode over emulator gRPC-Web endpoints.
 
@@ -41,7 +41,7 @@ docker compose up --build
 If you must pin a different emulator container image, build with:
 
 ```bash
-EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297 \
+EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/34-google-x64-no-metrics:34.1.19 \
 EMULATOR_SYSTEM_IMAGE=system-images\;android-34\;google_apis\;x86_64 \
 EMULATOR_PLATFORM=platforms\;android-34 \
 docker compose build emulator

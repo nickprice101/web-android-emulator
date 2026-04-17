@@ -1,0 +1,241 @@
+name: Emulator Testbed
+
+on:
+  workflow_dispatch:
+    inputs:
+      emulator_image_build_arg:
+        description: Verified Google base image used for the emulator Docker build
+        required: false
+        default: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
+        type: string
+      expected_guest_api:
+        description: Expected Android guest API level after boot
+        required: false
+        default: "34"
+        type: string
+      stability_wait_seconds:
+        description: Seconds to keep watching the container after it boots
+        required: false
+        default: "30"
+        type: string
+
+jobs:
+  emulator-testbed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      EMULATOR_IMAGE_BUILD_ARG: ${{ inputs.emulator_image_build_arg || 'us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297' }}
+      EXPECTED_GUEST_API: ${{ inputs.expected_guest_api || '34' }}
+      STABILITY_WAIT_SECONDS: ${{ inputs.stability_wait_seconds || '30' }}
+      SSH_B64: ${{ secrets.SSH_B64 }}
+      SSH_IP: ${{ secrets.SSH_IP }}
+      SSH_PATH: ${{ secrets.SSH_PATH }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify configured Google base image resolves
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image="${EMULATOR_IMAGE_BUILD_ARG}"
+          image_no_registry="${image#us-docker.pkg.dev/}"
+          repo="${image_no_registry%:*}"
+          tag="${image_no_registry##*:}"
+          repo_path="${repo%/*}"
+          image_name="${repo##*/}"
+          manifest_url="https://us-docker.pkg.dev/v2/${repo_path}/${image_name}/manifests/${tag}"
+
+          echo "Checking ${manifest_url}"
+          http_code="$(curl --silent --show-error --location --head \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --header 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+            "${manifest_url}")"
+
+          if [[ "${http_code}" != "200" ]]; then
+            echo "Configured Google base image did not resolve: ${image} (HTTP ${http_code})" >&2
+            exit 1
+          fi
+
+          {
+            echo "## Emulator Base Image"
+            echo
+            echo "- Base image: \`${image}\`"
+            echo "- Manifest URL: \`${manifest_url}\`"
+            echo "- HTTP status: \`${http_code}\`"
+            echo "- Expected guest API after build: \`${EXPECTED_GUEST_API}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check remote testbed prerequisites
+        id: remote_gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for key in SSH_B64 SSH_IP SSH_PATH SSH_USER; do
+            if [[ -z "${!key:-}" ]]; then
+              missing+=("${key}")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping remote emulator testbed because required secrets are missing: ${missing[*]}"
+            {
+              echo "## Remote Emulator Testbed"
+              echo
+              echo "Skipped because required secrets are missing: \`${missing[*]}\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up SSH key and known_hosts
+        if: steps.remote_gate.outputs.enabled == 'true'
+        env:
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSH_KEY_FILE="$(mktemp)"
+          printf '%s' "${SSH_B64}" | base64 --decode > "${SSH_KEY_FILE}"
+          chmod 600 "${SSH_KEY_FILE}"
+          echo "SSH_KEY_FILE=${SSH_KEY_FILE}" >> "$GITHUB_ENV"
+
+          KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
+          mkdir -p "${HOME}/.ssh"
+          chmod 700 "${HOME}/.ssh"
+          if [[ -n "${SSH_KNOWN_HOSTS:-}" ]]; then
+            printf '%s\n' "${SSH_KNOWN_HOSTS}" >> "${KNOWN_HOSTS_FILE}"
+            echo "SSH_STRICT=yes" >> "$GITHUB_ENV"
+          else
+            echo "WARNING: SSH_KNOWN_HOSTS secret is not set; host key verification is disabled." >&2
+            echo "SSH_STRICT=no" >> "$GITHUB_ENV"
+          fi
+
+      - name: Prepare remote workspace
+        if: steps.remote_gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          REMOTE_TESTBED_DIR="${SSH_PATH}/.gha-emulator-testbed-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "REMOTE_TESTBED_DIR=${REMOTE_TESTBED_DIR}" >> "$GITHUB_ENV"
+
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            "mkdir -p '${REMOTE_TESTBED_DIR}'"
+
+          rsync -az --delete \
+            --exclude='.git/' \
+            --exclude='artifacts/' \
+            --exclude='artifacts-gh/' \
+            -e "ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=${SSH_STRICT} -o BatchMode=yes" \
+            ./ \
+            "${SSH_USER}@${SSH_IP}:${REMOTE_TESTBED_DIR}/"
+
+      - name: Verify remote Docker and KVM availability
+        if: steps.remote_gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            REMOTE_TESTBED_DIR="${REMOTE_TESTBED_DIR}" \
+            bash -l -s <<'REMOTE'
+          set -euo pipefail
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "Docker is not installed on the remote host." >&2
+            exit 1
+          fi
+          if [[ ! -e /dev/kvm ]]; then
+            echo "/dev/kvm is not available on the remote host." >&2
+            exit 1
+          fi
+          docker version
+          ls -l /dev/kvm
+          REMOTE
+
+      - name: Run emulator startup smoke test on remote host
+        if: steps.remote_gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            REMOTE_TESTBED_DIR="${REMOTE_TESTBED_DIR}" \
+            EMULATOR_IMAGE_BUILD_ARG="${EMULATOR_IMAGE_BUILD_ARG}" \
+            EXPECTED_GUEST_API="${EXPECTED_GUEST_API}" \
+            STABILITY_WAIT_SECONDS="${STABILITY_WAIT_SECONDS}" \
+            bash -l -s <<'REMOTE'
+          set -euo pipefail
+          cd "${REMOTE_TESTBED_DIR}"
+          chmod +x scripts/test-emulator-startup.sh
+          ARTIFACT_DIR="${REMOTE_TESTBED_DIR}/artifacts/emulator-startup" \
+          EMULATOR_IMAGE_TAG="google-emu-emulator:testbed-${EXPECTED_GUEST_API}" \
+          EMULATOR_IMAGE_BUILD_ARG="${EMULATOR_IMAGE_BUILD_ARG}" \
+          EXPECTED_GUEST_API="${EXPECTED_GUEST_API}" \
+          STABILITY_WAIT_SECONDS="${STABILITY_WAIT_SECONDS}" \
+          bash scripts/test-emulator-startup.sh
+          REMOTE
+
+      - name: Collect remote emulator testbed artifacts
+        if: always() && steps.remote_gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts-gh/emulator-testbed
+
+          rsync -az \
+            -e "ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=${SSH_STRICT} -o BatchMode=yes" \
+            "${SSH_USER}@${SSH_IP}:${REMOTE_TESTBED_DIR}/artifacts/" \
+            "artifacts-gh/emulator-testbed/" || true
+
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            REMOTE_TESTBED_DIR="${REMOTE_TESTBED_DIR}" \
+            bash -l -s <<'REMOTE' > artifacts-gh/emulator-testbed/remote-docker-ps.txt
+          set -euo pipefail
+          docker ps -a
+          echo
+          if command -v docker >/dev/null 2>&1; then
+            docker images | sed -n '1,20p'
+          fi
+          REMOTE
+
+      - name: Upload emulator testbed artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-testbed-artifacts
+          path: artifacts-gh/emulator-testbed/**
+          if-no-files-found: ignore
+
+      - name: Clean up remote workspace
+        if: always() && steps.remote_gate.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "${SSH_KEY_FILE}" \
+            -o StrictHostKeyChecking="${SSH_STRICT}" \
+            -o BatchMode=yes \
+            "${SSH_USER}@${SSH_IP}" \
+            "rm -rf '${REMOTE_TESTBED_DIR}'" || true
+
+      - name: Clean up SSH key
+        if: always() && steps.remote_gate.outputs.enabled == 'true'
+        shell: bash
+        run: shred -u "${SSH_KEY_FILE}" 2>/dev/null || rm -f "${SSH_KEY_FILE}"

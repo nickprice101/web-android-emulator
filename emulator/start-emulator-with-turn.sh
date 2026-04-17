@@ -457,6 +457,6 @@ done
 GUARD_EOF
 chmod +x "${_GUARD_SCRIPT}"
 setsid "${_GUARD_SCRIPT}" &
-log "ADB port guard started for port ${ADB_PORT} (interval ${ADB_PORT_GUARD_INTERVAL}s, pid $!)"
+log "ADB port guard started for port ${ADB_PORT} (interval ${ADB_PORT_GUARD_INTERVAL}s)"
 
 exec "${LAUNCHER_PATH}" "$@"

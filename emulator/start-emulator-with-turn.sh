@@ -82,10 +82,10 @@ append_param_if_missing "-no-boot-anim"
 append_param_if_missing "-camera-back none"
 append_param_if_missing "-camera-front none"
 append_param_if_missing "-no-snapshot-save"
-# Some container hosts disable IPv6 loopback inside network namespaces. When
-# that happens, recent emulator/qemu builds can fail at startup while trying to
-# bring up the modem chardev on ::1. Disable SIM/modem initialization by
-# default to avoid the IPv6-only modem bind path.
+# Disable SIM card emulation. Note: this does NOT prevent QEMU from creating
+# the modem chardev socket (which binds to ::1 and fails when the host has
+# IPv6 disabled). The real fix for that is hw.gsmModem=no in the AVD
+# config.ini, which is set at image build time in the Dockerfile.
 append_param_if_missing "-no-sim"
 # PulseAudio is often unavailable or misconfigured in headless container
 # environments. When the emulator cannot connect to the PulseAudio server it

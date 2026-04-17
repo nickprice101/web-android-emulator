@@ -98,6 +98,39 @@ export EMULATOR_PARAMS="${EMULATOR_PARAMS_VALUE}"
 ensure_ipv6_loopback_host
 ensure_ipv6_loopback_interface
 
+# Log the emulator configuration so that API level is immediately visible in
+# container logs and cannot be confused with an old running container.
+ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/android/sdk}"
+_emulator_bin="${ANDROID_SDK_ROOT}/emulator/emulator"
+_emulator_version="unknown"
+if [ -x "${_emulator_bin}" ]; then
+  _emulator_version="$(${_emulator_bin} -version 2>&1 | head -1 || true)"
+fi
+_system_image_props=""
+for _props_path in \
+    "${ANDROID_SDK_ROOT}/system-images/android-34/google_apis/x86_64/source.properties" \
+    "${ANDROID_SDK_ROOT}/system-images/android-34/google_apis/x86_64/build.prop"; do
+  if [ -f "${_props_path}" ]; then
+    _system_image_props="${_props_path}"
+    break
+  fi
+done
+log "emulator API configuration:"
+log "  EMULATOR_IMAGE (build arg) : ${EMULATOR_IMAGE:-not set}"
+log "  EMULATOR_SYSTEM_IMAGE      : ${EMULATOR_SYSTEM_IMAGE:-not set}"
+log "  EMULATOR_PLATFORM          : ${EMULATOR_PLATFORM:-not set}"
+log "  emulator binary version    : ${_emulator_version}"
+if [ -n "${_system_image_props}" ]; then
+  _api_level="$(grep 'AndroidVersion.ApiLevel' "${_system_image_props}" 2>/dev/null | head -1 || true)"
+  _pkg_revision="$(grep 'Pkg.Revision' "${_system_image_props}" 2>/dev/null | head -1 || true)"
+  log "  system image props (${_system_image_props}):"
+  log "    ${_api_level:-AndroidVersion.ApiLevel: not found}"
+  log "    ${_pkg_revision:-Pkg.Revision: not found}"
+else
+  log "  system image props: not found under ${ANDROID_SDK_ROOT}/system-images/android-34"
+fi
+unset _emulator_bin _emulator_version _system_image_props _api_level _pkg_revision _props_path
+
 is_placeholder_turn_secret() {
   case "$1" in
     PLACEHOLDER*|placeholder*|REPLACE_ME*|replace_me*|CHANGEME|changeme)

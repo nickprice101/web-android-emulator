@@ -50,4 +50,12 @@ else
   echo "[testbed] skipping TURN harness (set TURN_HOST and TURN_KEY to run it)"
 fi
 
+stage "stage 7: optional emulator container startup smoke test"
+if [[ "${RUN_EMULATOR_STARTUP_TEST:-0}" == "1" ]]; then
+  echo "[testbed] running emulator startup smoke test"
+  bash scripts/test-emulator-startup.sh
+else
+  echo "[testbed] skipping emulator startup smoke test (set RUN_EMULATOR_STARTUP_TEST=1 to run it)"
+fi
+
 echo "[testbed] all checks passed"

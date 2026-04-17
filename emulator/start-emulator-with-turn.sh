@@ -380,4 +380,27 @@ else
   log "Token watcher disabled for launcher ${LAUNCHER_PATH}"
 fi
 
+# Some emulator versions add iptables DROP rules for the ADB port during
+# initialization, causing socat to receive "Connection timed out" instead of
+# "Connection refused" when forwarding connections on loopback. Maintain an
+# iptables ACCEPT rule for the ADB port (5557) on loopback so that the socat
+# forwarder in launch-emulator.sh can always reach the emulator. The rule is
+# re-inserted every few seconds to ensure it remains at the head of the INPUT
+# chain even if the emulator re-adds a DROP rule during startup.
+ADB_PORT="${EMULATOR_ADB_PORT:-5557}"
+ADB_PORT_GUARD_INTERVAL="${ADB_PORT_GUARD_INTERVAL:-8}"
+(
+  while true; do
+    if command -v iptables >/dev/null 2>&1; then
+      if ! iptables -C INPUT -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
+        if ! iptables -I INPUT 1 -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
+          log "WARNING: iptables ACCEPT rule for ADB port ${ADB_PORT} could not be inserted (iptables not available or insufficient permissions)"
+        fi
+      fi
+    fi
+    sleep "${ADB_PORT_GUARD_INTERVAL}"
+  done
+) &
+log "ADB port guard started for port ${ADB_PORT} (interval ${ADB_PORT_GUARD_INTERVAL}s)"
+
 exec "${LAUNCHER_PATH}" "$@"

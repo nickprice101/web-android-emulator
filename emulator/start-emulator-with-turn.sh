@@ -145,6 +145,9 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   TURN_PORT="${TURN_PORT:-443}"
   TURN_PROTOCOL="${TURN_PROTOCOL:-tcp}"
   TURN_SCHEME="${TURN_SCHEME:-turns}"
+  TURN_INTERNAL_HOST="${TURN_INTERNAL_HOST:-}"
+  TURN_INTERNAL_PORT="${TURN_INTERNAL_PORT:-${TURN_PORT}}"
+  TURN_INTERNAL_SCHEME="${TURN_INTERNAL_SCHEME:-${TURN_SCHEME}}"
   TURN_TTL="${TURN_TTL:-2592000}"
   TURN_USERNAME_SUFFIX="${TURN_USERNAME_SUFFIX:-emuuser}"
   # Newer emulator builds can reject the single-string urls form and report
@@ -157,10 +160,18 @@ if [ -n "${TURN_KEY_TRIMMED}" ] && ! is_placeholder_turn_secret "${TURN_KEY_TRIM
   username="${expiry}:${TURN_USERNAME_SUFFIX}"
   credential="$(printf '%s' "${username}" | openssl dgst -binary -sha1 -hmac "${TURN_SHARED_SECRET}" | openssl base64 -A)"
 
-  turn_url="${TURN_SCHEME}:${TURN_HOST}:${TURN_PORT}?transport=${TURN_PROTOCOL}"
-  log "TURN key detected; preparing -turncfg payload for ${turn_url}"
+  public_turn_url="${TURN_SCHEME}:${TURN_HOST}:${TURN_PORT}?transport=${TURN_PROTOCOL}"
+  emulator_turn_host="${TURN_INTERNAL_HOST:-${TURN_HOST}}"
+  emulator_turn_port="${TURN_INTERNAL_PORT:-${TURN_PORT}}"
+  emulator_turn_scheme="${TURN_INTERNAL_SCHEME:-${TURN_SCHEME}}"
+  turn_url="${emulator_turn_scheme}:${emulator_turn_host}:${emulator_turn_port}?transport=${TURN_PROTOCOL}"
+  if [ "${turn_url}" = "${public_turn_url}" ]; then
+    log "TURN key detected; preparing -turncfg payload for ${turn_url}"
+  else
+    log "TURN key detected; preparing emulator-local -turncfg payload for ${turn_url} while browsers keep using ${public_turn_url}"
+  fi
   if [ "${TURN_PREFLIGHT_ON_START}" = "1" ]; then
-    run_turn_preflight "${TURN_HOST}" "${TURN_PORT}" "${TURN_SCHEME}" "${TURN_PREFLIGHT_TIMEOUT}" || true
+    run_turn_preflight "${emulator_turn_host}" "${emulator_turn_port}" "${emulator_turn_scheme}" "${TURN_PREFLIGHT_TIMEOUT}" || true
   fi
   case "${TURNCFG_URLS_FORMAT}" in
     string|array) ;;

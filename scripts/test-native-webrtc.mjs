@@ -29,8 +29,13 @@ assert.match(
 );
 assert.match(
   frontendMain,
-  /const STREAM_MODE_OPTIONS = \[\{ value: "native-webrtc", label: "WebRTC \(native emulator\)" \}\];/,
+  /value: "native-webrtc", label: "WebRTC \(native emulator\)"/,
   "frontend stream selector options must expose the native WebRTC mode"
+);
+assert.match(
+  frontendMain,
+  /value: "custom-webrtc", label: "WebRTC \(custom bridge\)"/,
+  "frontend stream selector options must expose the custom bridge recovery mode"
 );
 assert.match(
   frontendMain,

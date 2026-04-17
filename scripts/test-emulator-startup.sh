@@ -90,16 +90,23 @@ log "gRPC port 8554 is accessible."
 
 # ── 4. Verify no iptables DROP on ADB port ───────────────────────────────────
 log "Checking that iptables has no DROP rule blocking ADB port 5557..."
-if docker exec "${CONTAINER_NAME}" sh -c 'command -v iptables >/dev/null 2>&1'; then
-  if docker exec "${CONTAINER_NAME}" iptables -C INPUT -p tcp --dport 5557 -s 127.0.0.1 -j DROP 2>/dev/null; then
-    fail "iptables has a DROP rule for ADB port 5557 on loopback – ADB forwarding will timeout"
+for _ipt in iptables iptables-legacy; do
+  if docker exec "${CONTAINER_NAME}" sh -c "command -v ${_ipt} >/dev/null 2>&1"; then
+    for _chain in INPUT OUTPUT FORWARD; do
+      if docker exec "${CONTAINER_NAME}" "${_ipt}" -C "${_chain}" -p tcp --dport 5557 -j DROP 2>/dev/null; then
+        fail "${_ipt} has a DROP rule for ADB port 5557 in ${_chain} – ADB forwarding will timeout"
+      fi
+      if docker exec "${CONTAINER_NAME}" "${_ipt}" -C "${_chain}" -p tcp --dport 5557 -s 127.0.0.1 -j DROP 2>/dev/null; then
+        fail "${_ipt} has a src-127.0.0.1 DROP rule for ADB port 5557 in ${_chain} – ADB forwarding will timeout"
+      fi
+    done
+    if docker exec "${CONTAINER_NAME}" "${_ipt}" -C INPUT -p tcp --dport 5557 -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
+      log "${_ipt} ACCEPT rule for ADB port 5557 is present."
+    else
+      log "No ${_ipt} DROP rule found for ADB port 5557 (ACCEPT may still be implicit – OK)."
+    fi
   fi
-  if docker exec "${CONTAINER_NAME}" iptables -C INPUT -p tcp --dport 5557 -j ACCEPT 2>/dev/null; then
-    log "iptables ACCEPT rule for ADB port 5557 is present."
-  else
-    log "No DROP rule found for ADB port 5557 (ACCEPT may still be implicit – OK)."
-  fi
-fi
+done
 
 # ── 5. Wait for ADB socat port ──────────────────────────────────────────────
 log "Waiting up to ${ADB_READY_TIMEOUT}s for ADB socat port 5555 to accept connections..."

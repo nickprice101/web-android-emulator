@@ -388,25 +388,42 @@ fi
 # rule *exists* is therefore insufficient — we must actively remove DROP rules
 # for the port and unconditionally re-insert the ACCEPT at the head of the
 # chain on every iteration.
+#
+# We handle both iptables (iptables-nft on modern Debian/Ubuntu) and
+# iptables-legacy, since the emulator binary may use a different backend than
+# the one in PATH.  We also cover the OUTPUT and FORWARD chains because some
+# emulator builds add DROP rules there instead of (or in addition to) INPUT.
 ADB_PORT="${EMULATOR_ADB_PORT:-5557}"
 ADB_PORT_GUARD_INTERVAL="${ADB_PORT_GUARD_INTERVAL:-1}"
 
 _ensure_adb_accept() {
-  command -v iptables >/dev/null 2>&1 || return 0
-  # Remove any DROP rules for the ADB port (both src-specific and general)
-  # so that loopback connections from the socat forwarder are never blocked.
-  # Log each removal so repeated DROP insertions by the emulator are visible.
-  while iptables -D INPUT -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j DROP 2>/dev/null; do
-    log "Removed iptables DROP rule for ADB port ${ADB_PORT} src 127.0.0.1"
+  _adb_port="${ADB_PORT:-5557}"
+  _any_ipt=0
+  for _ipt in iptables iptables-legacy; do
+    command -v "${_ipt}" >/dev/null 2>&1 || continue
+    _any_ipt=1
+    # Ensure the default INPUT policy is ACCEPT so that an emulator-added DROP
+    # rule cannot outlast our removal window.
+    "${_ipt}" -P INPUT ACCEPT 2>/dev/null || true
+    # Remove DROP rules from INPUT, OUTPUT, and FORWARD chains for the ADB port
+    # (both source-specific and general variants).
+    for _chain in INPUT OUTPUT FORWARD; do
+      while "${_ipt}" -D "${_chain}" -p tcp --dport "${_adb_port}" -s 127.0.0.1 -j DROP 2>/dev/null; do
+        log "Removed ${_ipt} DROP rule in ${_chain} for ADB port ${_adb_port} src 127.0.0.1"
+      done
+      while "${_ipt}" -D "${_chain}" -p tcp --dport "${_adb_port}" -j DROP 2>/dev/null; do
+        log "Removed ${_ipt} DROP rule in ${_chain} for ADB port ${_adb_port} (all sources)"
+      done
+    done
+    # Delete any stale ACCEPT copy first to avoid duplicates, then re-insert
+    # at position 1 so it is evaluated before any future DROP rules.
+    "${_ipt}" -D INPUT -p tcp --dport "${_adb_port}" -s 127.0.0.1 -j ACCEPT 2>/dev/null || true
+    if ! "${_ipt}" -I INPUT 1 -p tcp --dport "${_adb_port}" -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
+      log "WARNING: ${_ipt} ACCEPT rule for ADB port ${_adb_port} could not be inserted"
+    fi
   done
-  while iptables -D INPUT -p tcp --dport "${ADB_PORT}" -j DROP 2>/dev/null; do
-    log "Removed iptables DROP rule for ADB port ${ADB_PORT} (all sources)"
-  done
-  # Delete any existing ACCEPT copy first to avoid duplicates, then re-insert
-  # at position 1 so it is evaluated before any future DROP rules.
-  iptables -D INPUT -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null || true
-  if ! iptables -I INPUT 1 -p tcp --dport "${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
-    log "WARNING: iptables ACCEPT rule for ADB port ${ADB_PORT} could not be inserted (iptables not available or insufficient permissions)"
+  if [ "${_any_ipt}" -eq 0 ]; then
+    log "WARNING: neither iptables nor iptables-legacy found; ADB port guard inactive"
   fi
 }
 
@@ -415,12 +432,31 @@ _ensure_adb_accept() {
 # added by launch-emulator.sh could block socat.
 _ensure_adb_accept
 
-(
-  while true; do
-    sleep "${ADB_PORT_GUARD_INTERVAL}"
-    _ensure_adb_accept || true
+# Write the guard loop to a file and run it via setsid so it is in its own
+# session and is NOT killed when the current shell process-group is replaced
+# by exec.  This is the most reliable way to keep the guard alive across the
+# exec chain: start-emulator-with-turn.sh → launch-emulator.sh → emulator.
+_GUARD_SCRIPT=/tmp/adb-port-guard.sh
+cat > "${_GUARD_SCRIPT}" << GUARD_EOF
+#!/bin/sh
+ADB_PORT="${ADB_PORT}"
+ADB_PORT_GUARD_INTERVAL="${ADB_PORT_GUARD_INTERVAL}"
+while true; do
+  sleep "\${ADB_PORT_GUARD_INTERVAL}"
+  for _ipt in iptables iptables-legacy; do
+    command -v "\${_ipt}" >/dev/null 2>&1 || continue
+    "\${_ipt}" -P INPUT ACCEPT 2>/dev/null || true
+    for _chain in INPUT OUTPUT FORWARD; do
+      while "\${_ipt}" -D "\${_chain}" -p tcp --dport "\${ADB_PORT}" -s 127.0.0.1 -j DROP 2>/dev/null; do :; done
+      while "\${_ipt}" -D "\${_chain}" -p tcp --dport "\${ADB_PORT}" -j DROP 2>/dev/null; do :; done
+    done
+    "\${_ipt}" -D INPUT -p tcp --dport "\${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null || true
+    "\${_ipt}" -I INPUT 1 -p tcp --dport "\${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null || true
   done
-) &
+done
+GUARD_EOF
+chmod +x "${_GUARD_SCRIPT}"
+setsid "${_GUARD_SCRIPT}" &
 log "ADB port guard started for port ${ADB_PORT} (interval ${ADB_PORT_GUARD_INTERVAL}s)"
 
 exec "${LAUNCHER_PATH}" "$@"

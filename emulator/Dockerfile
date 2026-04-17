@@ -74,6 +74,7 @@ RUN apt-get update \
     openssl \
     jq \
     python3 \
+    iptables \
   && rm -rf /var/lib/apt/lists/*
 RUN chmod +x /usr/local/bin/start-emulator-with-turn.sh
 

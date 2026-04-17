@@ -5,6 +5,11 @@ ARG EMULATOR_IMAGE
 ARG EMULATOR_SYSTEM_IMAGE=system-images;android-34;google_apis;x86_64
 ARG EMULATOR_PLATFORM=platforms;android-34
 
+ENV ANDROID_USER_HOME=/root/.android \
+    ANDROID_EMULATOR_HOME=/root/.android \
+    ANDROID_AVD_HOME=/root/.android/avd \
+    ANDROID_SDK_HOME=/root
+
 RUN set -eux; \
   ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/android/sdk}"; \
   export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"; \
@@ -59,14 +64,16 @@ RUN set -eux; \
     find /android /opt -maxdepth 6 -type f \( -name sdkmanager -o -name avdmanager \) 2>/dev/null || true; \
     exit 1; \
   fi; \
-  mkdir -p /root/.android; \
-  touch /root/.android/repositories.cfg; \
+  mkdir -p "${ANDROID_USER_HOME}" "${ANDROID_AVD_HOME}"; \
+  touch "${ANDROID_USER_HOME}/repositories.cfg"; \
   yes | "${SDKMANAGER_BIN}" --licenses >/dev/null; \
   "${SDKMANAGER_BIN}" --channel=0 "${EMULATOR_SYSTEM_IMAGE}" "${EMULATOR_PLATFORM}"; \
-  touch /root/.android/androidtool.cfg; \
-  printf '%s\n' 'android.settings.auto.update.check=false' >> /root/.android/androidtool.cfg; \
+  touch "${ANDROID_USER_HOME}/androidtool.cfg"; \
+  printf '%s\n' 'android.settings.auto.update.check=false' >> "${ANDROID_USER_HOME}/androidtool.cfg"; \
   echo "no" | "${AVDMANAGER_BIN}" create avd --force --name Pixel2 --package "${EMULATOR_SYSTEM_IMAGE}" --device "pixel_5"; \
-  _avd_config="${HOME}/.android/avd/Pixel2.avd/config.ini"; \
+  _avd_dir="${ANDROID_AVD_HOME}/Pixel2.avd"; \
+  _avd_ini="${ANDROID_AVD_HOME}/Pixel2.ini"; \
+  _avd_config="${_avd_dir}/config.ini"; \
   if [ -f "${_avd_config}" ]; then \
     sed -i '/^hw\.gsmModem=/d' "${_avd_config}"; \
     printf '%s\n' 'hw.gsmModem=no' >> "${_avd_config}"; \
@@ -75,16 +82,23 @@ RUN set -eux; \
     echo "WARNING: AVD config not found at ${_avd_config}" >&2; \
     exit 1; \
   fi; \
-  _base_avd_config="/Pixel2.avd/config.ini"; \
-  if [ -f "${_base_avd_config}" ]; then \
-    sed -i '/^hw\.gsmModem=/d' "${_base_avd_config}"; \
-    printf '%s\n' 'hw.gsmModem=no' >> "${_base_avd_config}"; \
-    sed -i '/^image\.sysdir\.1=/d' "${_base_avd_config}"; \
-    printf 'image.sysdir.1=%s\n' "system-images/android-34/google_apis/x86_64/" >> "${_base_avd_config}"; \
-    echo "Also patched ${_base_avd_config}: hw.gsmModem=no and image.sysdir.1 set to API 34"; \
-  else \
-    echo "Note: ${_base_avd_config} not present at build time; runtime patching will handle it"; \
-  fi
+  if [ -f "${_avd_ini}" ]; then \
+    sed -i '/^path=/d;/^path\.rel=/d' "${_avd_ini}"; \
+    printf 'path=%s\n' "${_avd_dir}" >> "${_avd_ini}"; \
+    printf 'path.rel=%s\n' "Pixel2.avd" >> "${_avd_ini}"; \
+  fi; \
+  sed -i '/^image\.sysdir\.1=/d' "${_avd_config}"; \
+  printf 'image.sysdir.1=%s\n' "system-images/android-34/google_apis/x86_64/" >> "${_avd_config}"; \
+  rm -rf /Pixel2.avd; \
+  ln -s "${_avd_dir}" /Pixel2.avd; \
+  rm -f /Pixel2.ini; \
+  ln -s "${_avd_ini}" /Pixel2.ini; \
+  mkdir -p "${ANDROID_SDK_ROOT}/avd"; \
+  rm -rf "${ANDROID_SDK_ROOT}/avd/Pixel2.avd"; \
+  ln -s "${_avd_dir}" "${ANDROID_SDK_ROOT}/avd/Pixel2.avd"; \
+  rm -f "${ANDROID_SDK_ROOT}/avd/Pixel2.ini"; \
+  ln -s "${_avd_ini}" "${ANDROID_SDK_ROOT}/avd/Pixel2.ini"; \
+  echo "Canonicalized Pixel2 AVD metadata and compatibility links for /Pixel2.avd and ${ANDROID_SDK_ROOT}/avd/Pixel2.avd"
 
 COPY start-emulator-with-turn.sh /usr/local/bin/start-emulator-with-turn.sh
 

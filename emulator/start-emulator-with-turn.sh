@@ -95,8 +95,69 @@ append_param_if_missing "-no-sim"
 append_param_if_missing "-no-audio"
 export EMULATOR_PARAMS="${EMULATOR_PARAMS_VALUE}"
 
+export ANDROID_USER_HOME="${ANDROID_USER_HOME:-${HOME}/.android}"
+export ANDROID_EMULATOR_HOME="${ANDROID_EMULATOR_HOME:-${ANDROID_USER_HOME}}"
+export ANDROID_AVD_HOME="${ANDROID_AVD_HOME:-${ANDROID_EMULATOR_HOME}/avd}"
+export ANDROID_SDK_HOME="${ANDROID_SDK_HOME:-${HOME}}"
+mkdir -p "${ANDROID_USER_HOME}" "${ANDROID_AVD_HOME}"
+
+ensure_pixel2_avd_aliases() {
+  _sdk="${ANDROID_SDK_ROOT:-/android/sdk}"
+  _canonical_avd_dir="${ANDROID_AVD_HOME}/Pixel2.avd"
+  _canonical_avd_ini="${ANDROID_AVD_HOME}/Pixel2.ini"
+
+  if [ ! -f "${_canonical_avd_dir}/config.ini" ]; then
+    for _candidate_avd_dir in \
+        "${HOME}/.android/avd/Pixel2.avd" \
+        /Pixel2.avd \
+        "${_sdk}/avd/Pixel2.avd"; do
+      if [ -f "${_candidate_avd_dir}/config.ini" ]; then
+        if [ "${_candidate_avd_dir}" != "${_canonical_avd_dir}" ]; then
+          rm -rf "${_canonical_avd_dir}"
+          cp -R "${_candidate_avd_dir}" "${_canonical_avd_dir}"
+          log "Copied Pixel2 AVD into canonical home: ${_candidate_avd_dir} -> ${_canonical_avd_dir}"
+        fi
+        break
+      fi
+    done
+  fi
+
+  if [ ! -f "${_canonical_avd_dir}/config.ini" ]; then
+    log "ERROR: canonical Pixel2 AVD config is missing at ${_canonical_avd_dir}/config.ini"
+    exit 1
+  fi
+
+  cat > "${_canonical_avd_ini}" <<EOF
+avd.ini.encoding=UTF-8
+path=${_canonical_avd_dir}
+path.rel=Pixel2.avd
+EOF
+
+  for _compat_avd_dir in /Pixel2.avd "${_sdk}/avd/Pixel2.avd"; do
+    if [ "${_compat_avd_dir}" = "${_canonical_avd_dir}" ]; then
+      continue
+    fi
+    mkdir -p "$(dirname "${_compat_avd_dir}")"
+    rm -rf "${_compat_avd_dir}"
+    ln -s "${_canonical_avd_dir}" "${_compat_avd_dir}"
+  done
+
+  for _compat_ini in /Pixel2.ini "${_sdk}/avd/Pixel2.ini"; do
+    if [ "${_compat_ini}" = "${_canonical_avd_ini}" ]; then
+      continue
+    fi
+    mkdir -p "$(dirname "${_compat_ini}")"
+    rm -f "${_compat_ini}"
+    ln -s "${_canonical_avd_ini}" "${_compat_ini}"
+  done
+
+  log "Canonical Pixel2 AVD home: ${_canonical_avd_dir}"
+  log "Pixel2 AVD metadata search path: ANDROID_AVD_HOME=${ANDROID_AVD_HOME}, ANDROID_EMULATOR_HOME=${ANDROID_EMULATOR_HOME}, ANDROID_SDK_HOME=${ANDROID_SDK_HOME}"
+}
+
 ensure_ipv6_loopback_host
 ensure_ipv6_loopback_interface
+ensure_pixel2_avd_aliases
 
 # Log the emulator configuration so that API level is immediately visible in
 # container logs and cannot be confused with an old running container.
@@ -166,6 +227,7 @@ _patch_single_avd_config() {
 log "Patching AVD config.ini files (hw.gsmModem=no + API 34 system image):"
 _avd_patched=0
 for _cfg_candidate in \
+    "${ANDROID_AVD_HOME}/Pixel2.avd/config.ini" \
     "${HOME}/.android/avd/Pixel2.avd/config.ini" \
     /Pixel2.avd/config.ini \
     "${ANDROID_SDK_ROOT:-/android/sdk}/avd/Pixel2.avd/config.ini"; do

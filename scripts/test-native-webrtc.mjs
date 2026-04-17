@@ -123,8 +123,28 @@ assert.match(
 );
 assert.match(
   emulatorTurnWrapper,
-  /iptables -[CI] INPUT.*--dport.*"\$\{ADB_PORT\}".*-j ACCEPT/,
-  "emulator wrapper must maintain an iptables ACCEPT rule for the ADB port on loopback so socat forwarding is not blocked by emulator-added DROP rules"
+  /export ANDROID_AVD_HOME="\$\{ANDROID_AVD_HOME:-\$\{ANDROID_EMULATOR_HOME\}\/avd\}"/,
+  "emulator wrapper must export a canonical ANDROID_AVD_HOME so emulator -avd Pixel2 resolves the rebuilt API 34 AVD first"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /ensure_pixel2_avd_aliases\(\)/,
+  "emulator wrapper must canonicalize legacy Pixel2 AVD paths before launch so the base image cannot silently fall back to a stale API 30 AVD"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /ln -s "\$\{_canonical_avd_dir\}" "\$\{_compat_avd_dir\}"/,
+  "emulator wrapper must alias compatibility AVD directories back to the canonical Pixel2 AVD"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /iptables-legacy|nft/,
+  "emulator wrapper must keep the ADB port guard covering both iptables and nftables backends"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /Copied Pixel2 AVD into canonical home:/,
+  "emulator wrapper must log when it has to copy a discovered Pixel2 AVD into the canonical AVD home"
 );
 assert.match(
   emulatorTurnWrapper,
@@ -137,6 +157,16 @@ assert.doesNotMatch(
   emulatorDockerfile,
   /sdkmanager.*"emulator"/,
   "emulator Dockerfile must NOT update the emulator binary via sdkmanager; the base image bundles a compatible version and newer sdkmanager builds add iptables ADB-port restrictions that break socat forwarding"
+);
+assert.match(
+  emulatorDockerfile,
+  /ENV ANDROID_USER_HOME=\/root\/\.android[\s\S]*ANDROID_AVD_HOME=\/root\/\.android\/avd/,
+  "emulator Dockerfile must pin the canonical Android user and AVD homes so the rebuilt Pixel2 AVD wins over any base-image metadata"
+);
+assert.match(
+  emulatorDockerfile,
+  /ln -s "\$\{_avd_dir\}" \/Pixel2\.avd[\s\S]*ln -s "\$\{_avd_ini\}" \/Pixel2\.ini/,
+  "emulator Dockerfile must replace legacy /Pixel2 metadata with links to the canonical rebuilt AVD"
 );
 
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

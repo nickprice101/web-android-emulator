@@ -7,7 +7,7 @@ chmod 600 /root/.android/adbkey
 adb pubkey /root/.android/adbkey > /root/.android/adbkey.pub
 
 echo "Keys written. Connecting to $ADB_TARGET..."
-MAX_ATTEMPTS="${ADB_CONNECT_MAX_ATTEMPTS:-60}"
+MAX_ATTEMPTS="${ADB_CONNECT_MAX_ATTEMPTS:-150}"
 SLEEP_SECS="${ADB_CONNECT_RETRY_SECONDS:-2}"
 ATTEMPT=1
 

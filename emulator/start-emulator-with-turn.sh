@@ -380,56 +380,65 @@ else
   log "Token watcher disabled for launcher ${LAUNCHER_PATH}"
 fi
 
-# Some emulator versions add iptables DROP rules for the ADB port during
-# initialization, causing socat to receive "Connection timed out" instead of
-# "Connection refused" when forwarding connections on loopback. The emulator
-# may insert a DROP rule at position 1, which pushes any existing ACCEPT to
-# position 2 where it loses to the DROP. Simply checking whether the ACCEPT
-# rule *exists* is therefore insufficient — we must actively remove DROP rules
-# for the port and unconditionally re-insert the ACCEPT at the head of the
-# chain on every iteration.
+# Some emulator versions add iptables or nftables DROP rules for the ADB port
+# during initialization, causing socat to receive "Connection timed out" instead
+# of "Connection refused" when forwarding connections on loopback.
 #
-# We handle both iptables (iptables-nft on modern Debian/Ubuntu) and
-# iptables-legacy, since the emulator binary may use a different backend than
-# the one in PATH.  We also cover the OUTPUT and FORWARD chains because some
-# emulator builds add DROP rules there instead of (or in addition to) INPUT.
+# Key lessons from previous fix attempts:
+# 1. iptables commands can HANG indefinitely on some host kernels (e.g. Unraid
+#    6.12 with custom modules). Every iptables call must be wrapped in timeout.
+# 2. Selective rule deletion (-D) misses rules added with match extensions
+#    like -m state, -m multiport, etc. Flushing the entire chain is safer.
+# 3. Modern emulator builds (or the base image's launch-emulator.sh) may use
+#    nftables directly rather than the legacy iptables frontend.
+# 4. Both iptables (nft backend) and iptables-legacy (legacy backend) must be
+#    cleared since the emulator and the kernel may use different backends.
 ADB_PORT="${EMULATOR_ADB_PORT:-5557}"
 ADB_PORT_GUARD_INTERVAL="${ADB_PORT_GUARD_INTERVAL:-1}"
 
 _ensure_adb_accept() {
   _adb_port="${ADB_PORT:-5557}"
-  _any_ipt=0
+  _any_filter=0
   for _ipt in iptables iptables-legacy; do
     command -v "${_ipt}" >/dev/null 2>&1 || continue
-    _any_ipt=1
-    # Ensure the default INPUT policy is ACCEPT so that an emulator-added DROP
-    # rule cannot outlast our removal window.
-    "${_ipt}" -P INPUT ACCEPT 2>/dev/null || true
-    # Remove DROP rules from INPUT, OUTPUT, and FORWARD chains for the ADB port
-    # (both source-specific and general variants).
-    for _chain in INPUT OUTPUT FORWARD; do
-      while "${_ipt}" -D "${_chain}" -p tcp --dport "${_adb_port}" -s 127.0.0.1 -j DROP 2>/dev/null; do
-        log "Removed ${_ipt} DROP rule in ${_chain} for ADB port ${_adb_port} src 127.0.0.1"
-      done
-      while "${_ipt}" -D "${_chain}" -p tcp --dport "${_adb_port}" -j DROP 2>/dev/null; do
-        log "Removed ${_ipt} DROP rule in ${_chain} for ADB port ${_adb_port} (all sources)"
-      done
-    done
-    # Delete any stale ACCEPT copy first to avoid duplicates, then re-insert
-    # at position 1 so it is evaluated before any future DROP rules.
-    "${_ipt}" -D INPUT -p tcp --dport "${_adb_port}" -s 127.0.0.1 -j ACCEPT 2>/dev/null || true
-    if ! "${_ipt}" -I INPUT 1 -p tcp --dport "${_adb_port}" -s 127.0.0.1 -j ACCEPT 2>/dev/null; then
-      log "WARNING: ${_ipt} ACCEPT rule for ADB port ${_adb_port} could not be inserted"
-    fi
+    _any_filter=1
+    # Set ACCEPT default policies so any rules that survive between iterations
+    # cannot cause a permanent block.  Wrap every call in timeout to prevent
+    # the guard from hanging if iptables blocks on a kernel lock.
+    timeout 3 "${_ipt}" -P INPUT   ACCEPT 2>/dev/null || true
+    timeout 3 "${_ipt}" -P OUTPUT  ACCEPT 2>/dev/null || true
+    timeout 3 "${_ipt}" -P FORWARD ACCEPT 2>/dev/null || true
+    # Flush entire filter chains rather than deleting specific rules.  This
+    # catches DROP rules added with any match extension (state, multiport, etc.)
+    # that a targeted -D command would not find.  It is safe here because:
+    # (a) each container has its own network namespace — Docker's bridge rules
+    #     live in the HOST namespace and are unaffected; and
+    # (b) launch-emulator.sh uses socat for ADB forwarding, not iptables.
+    timeout 3 "${_ipt}" -F INPUT   2>/dev/null || true
+    timeout 3 "${_ipt}" -F OUTPUT  2>/dev/null || true
+    timeout 3 "${_ipt}" -F FORWARD 2>/dev/null || true
+    log "${_ipt}: flushed INPUT/OUTPUT/FORWARD filter chains, policies set to ACCEPT"
   done
-  if [ "${_any_ipt}" -eq 0 ]; then
-    log "WARNING: neither iptables nor iptables-legacy found; ADB port guard inactive"
+  # Flush nftables filter-input/output chains — some emulator builds or
+  # base-image scripts add DROP rules directly via nft rather than through the
+  # iptables frontend.  We target only the input and output chains of the
+  # standard filter tables (inet and ip) rather than flushing the entire
+  # ruleset to avoid disturbing NAT or mangle rules that may be present.
+  if command -v nft >/dev/null 2>&1; then
+    _any_filter=1
+    for _nft_table in "inet filter" "ip filter"; do
+      timeout 3 nft flush chain ${_nft_table} input  2>/dev/null || true
+      timeout 3 nft flush chain ${_nft_table} output 2>/dev/null || true
+    done
+    log "nft: flushed filter input/output chains (inet and ip)"
+  fi
+  if [ "${_any_filter}" -eq 0 ]; then
+    log "WARNING: neither iptables nor nft found; ADB port guard inactive"
   fi
 }
 
-# Insert the initial ACCEPT rule synchronously before exec so there is no
-# window between process start and the first guard iteration where a DROP rule
-# added by launch-emulator.sh could block socat.
+# Run the initial flush synchronously before exec so there is no window
+# between process start and the first guard iteration.
 _ensure_adb_accept
 
 # Write the guard loop to a file and run it via setsid so it is in its own
@@ -441,18 +450,30 @@ cat > "${_GUARD_SCRIPT}" << GUARD_EOF
 #!/bin/sh
 ADB_PORT="${ADB_PORT}"
 ADB_PORT_GUARD_INTERVAL="${ADB_PORT_GUARD_INTERVAL}"
+_guard_iter=0
 while true; do
   sleep "\${ADB_PORT_GUARD_INTERVAL}"
+  _guard_iter=\$((_guard_iter + 1))
   for _ipt in iptables iptables-legacy; do
     command -v "\${_ipt}" >/dev/null 2>&1 || continue
-    "\${_ipt}" -P INPUT ACCEPT 2>/dev/null || true
-    for _chain in INPUT OUTPUT FORWARD; do
-      while "\${_ipt}" -D "\${_chain}" -p tcp --dport "\${ADB_PORT}" -s 127.0.0.1 -j DROP 2>/dev/null; do :; done
-      while "\${_ipt}" -D "\${_chain}" -p tcp --dport "\${ADB_PORT}" -j DROP 2>/dev/null; do :; done
-    done
-    "\${_ipt}" -D INPUT -p tcp --dport "\${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null || true
-    "\${_ipt}" -I INPUT 1 -p tcp --dport "\${ADB_PORT}" -s 127.0.0.1 -j ACCEPT 2>/dev/null || true
+    timeout 2 "\${_ipt}" -P INPUT   ACCEPT 2>/dev/null || true
+    timeout 2 "\${_ipt}" -P OUTPUT  ACCEPT 2>/dev/null || true
+    timeout 2 "\${_ipt}" -P FORWARD ACCEPT 2>/dev/null || true
+    timeout 2 "\${_ipt}" -F INPUT   2>/dev/null || true
+    timeout 2 "\${_ipt}" -F OUTPUT  2>/dev/null || true
+    timeout 2 "\${_ipt}" -F FORWARD 2>/dev/null || true
   done
+  if command -v nft >/dev/null 2>&1; then
+    for _nft_table in "inet filter" "ip filter"; do
+      timeout 2 nft flush chain \${_nft_table} input  2>/dev/null || true
+      timeout 2 nft flush chain \${_nft_table} output 2>/dev/null || true
+    done
+  fi
+  # Log a heartbeat every 60 iterations so the guard is visible in container
+  # logs and failures can be diagnosed without guessing whether it is running.
+  if [ \$((_guard_iter % 60)) -eq 0 ]; then
+    echo "[adb-port-guard] alive: iter=\${_guard_iter} port=\${ADB_PORT} interval=\${ADB_PORT_GUARD_INTERVAL}s" >&2
+  fi
 done
 GUARD_EOF
 chmod +x "${_GUARD_SCRIPT}"

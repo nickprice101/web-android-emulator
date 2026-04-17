@@ -75,6 +75,8 @@ RUN apt-get update \
     jq \
     python3 \
     iptables \
+    iproute2 \
+    nftables \
   && rm -rf /var/lib/apt/lists/*
 RUN chmod +x /usr/local/bin/start-emulator-with-turn.sh
 

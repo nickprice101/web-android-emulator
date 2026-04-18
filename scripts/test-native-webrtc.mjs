@@ -420,7 +420,12 @@ assert.match(
 assert.match(
   startupSmokeTest,
   /REQUIRE_ADB_BRIDGE="\$\{REQUIRE_ADB_BRIDGE:-1\}"/,
-  "startup smoke test must require the adb bridge by default so it cannot report success while emulator:5555 is still unusable"
+  "startup smoke test must require the adb bridge by default so it cannot report success while the forwarded :5555 bridge is still unusable"
+);
+assert.match(
+  startupSmokeTest,
+  /SIBLING_ADB_READY_TIMEOUT="\$\{SIBLING_ADB_READY_TIMEOUT:-90\}"/,
+  "startup smoke test must budget explicit time for a sibling-container adb proof step after the forwarded bridge is locally ready"
 );
 assert.match(
   startupSmokeTest,
@@ -440,27 +445,32 @@ assert.match(
 assert.match(
   startupSmokeTest,
   /probe_external_adb_bridge_state\(\)/,
-  "startup smoke test must verify adb connectivity from the non-loopback bridge path"
+  "startup smoke test must verify adb connectivity from the non-loopback bridge path inside the emulator container"
 );
 assert.match(
   startupSmokeTest,
-  /--add-host "emulator:\$\{container_ip\}"/,
-  "startup smoke test must simulate the sibling-container adb target name emulator:5555 during the bridge probe"
+  /probe_sibling_adb_bridge_state\(\)/,
+  "startup smoke test must also prove the forwarded adb bridge from a sibling-container client path"
 );
 assert.match(
   startupSmokeTest,
-  /adb connect emulator:5555/,
-  "startup smoke test must explicitly verify that a non-loopback adb client can connect to emulator:5555"
+  /docker exec -i "\$\{CONTAINER_NAME\}" sh -s -- "\$\{adb_target\}"/,
+  "startup smoke test must check the forwarded adb bridge from inside the emulator container over its non-loopback IP"
 );
 assert.match(
   startupSmokeTest,
-  /adb -s emulator:5555 get-state/,
-  "startup smoke test must require the external adb bridge target to report a usable device transport"
+  /docker run --rm -i[\s\S]*--network bridge[\s\S]*-s -- "\$\{adb_target\}"/,
+  "startup smoke test must launch a sibling-container adb client over Docker bridge networking for the final bridge proof"
 );
 assert.match(
   startupSmokeTest,
-  /devices 2>\/dev\/null \| awk '\\\$2 == \\"device\\" && \\\$1 ~ \/:5555\\\$\//,
-  "startup smoke test must tolerate adb normalizing the external emulator hostname to an IP-based :5555 serial"
+  /adb connect "\$\{adb_target\}"/,
+  "startup smoke test must explicitly connect adb to the forwarded bridge target before checking transport state"
+);
+assert.match(
+  startupSmokeTest,
+  /\$1 == target \{ print "device"; exit \}/,
+  "startup smoke test must require the exact forwarded bridge serial instead of relying on a hostname alias that adb may rewrite"
 );
 assert.match(
   startupSmokeTest,
@@ -469,8 +479,13 @@ assert.match(
 );
 assert.match(
   startupSmokeTest,
-  /WARNING: external adb target emulator:5555 did not report device within .* Treating startup as healthy because the emulator runtime is still up\./,
-  "startup smoke test must explicitly describe passive failures in terms of the real external adb bridge target"
+  /WARNING: forwarded adb bridge target \$\{CONTAINER_IP\}:5555 did not report device within .* Treating startup as healthy because the emulator runtime is still up\./,
+  "startup smoke test must explicitly describe passive failures on the forwarded bridge target"
+);
+assert.match(
+  startupSmokeTest,
+  /WARNING: sibling-container adb client did not reach the forwarded bridge target \$\{CONTAINER_IP\}:5555 within \$\{SIBLING_ADB_READY_TIMEOUT\}s\./,
+  "startup smoke test must surface when only the sibling-container proof is still pending"
 );
 assert.match(
   startupSmokeTest,
@@ -484,8 +499,13 @@ assert.match(
 );
 assert.match(
   startupSmokeTest,
-  /Waiting up to .* for external adb target emulator:5555 to report device/,
-  "startup smoke test must wait for a usable adb transport on the non-loopback bridge path"
+  /Waiting up to .* for the forwarded adb bridge target \$\{CONTAINER_IP\}:5555 to report device from inside the container/,
+  "startup smoke test must wait for a usable adb transport on the forwarded non-loopback bridge path"
+);
+assert.match(
+  startupSmokeTest,
+  /Verifying that a sibling-container adb client can connect to the forwarded bridge target \$\{CONTAINER_IP\}:5555/,
+  "startup smoke test must explicitly prove sibling-container adb connectivity after the forwarded bridge becomes locally ready"
 );
 assert.match(
   startupSmokeTest,
@@ -511,6 +531,11 @@ assert.match(
   startupSmokeTest,
   /Container health status is healthy\./,
   "startup smoke test must report a healthy container once the custom healthcheck succeeds"
+);
+assert.match(
+  startupSmokeTest,
+  /Sibling-container adb bridge \$\{CONTAINER_IP\}:5555: \$\( \[ "\$\{sibling_adb_ok\}" -eq 1 \]/,
+  "startup smoke test summary must report the sibling-container adb bridge result explicitly"
 );
 assert.match(
   startupSmokeTest,

@@ -5,11 +5,13 @@
 # privileges, and verifies that:
 #   1. The emulator gRPC server starts and binds port 8554.
 #   2. The emulator ADB bridge is reachable on port 5555.
-#   3. A non-loopback ADB client path can connect to emulator:5555 and reach
-#      a usable adb transport.
-#   4. The Android guest can optionally be probed over ADB without blocking
+#   3. A non-loopback ADB client path can connect to the forwarded bridge target
+#      on <container-ip>:5555 and report a usable adb transport.
+#   4. A sibling-container adb client can also connect to that forwarded bridge
+#      target over Docker bridge networking.
+#   5. The Android guest can optionally be probed over ADB without blocking
 #      startup classification when guest boot is merely slow.
-#   5. The container remains running and becomes healthy after validation.
+#   6. The container remains running and becomes healthy after validation.
 #
 # Usage:
 #   bash scripts/test-emulator-startup.sh
@@ -27,6 +29,10 @@
 #   GRPC_READY_TIMEOUT       Seconds to wait for gRPC port 8554.
 #   ADB_READY_TIMEOUT        Seconds to wait for the external ADB bridge target
 #                            to report a usable adb transport.
+#   SIBLING_ADB_READY_TIMEOUT
+#                            Seconds to spend proving that a sibling-container
+#                            adb client can connect to the forwarded bridge
+#                            target after the bridge is locally ready.
 #   REQUIRE_ADB_BRIDGE       Set to 0 to leave the external ADB bridge probe in
 #                            passive mode.
 #   API_READY_TIMEOUT        Seconds to spend on best-effort guest ADB probes.
@@ -53,6 +59,7 @@ EXPECTED_GUEST_API="${EXPECTED_GUEST_API:-34}"
 EXPECTED_RADIO_OVERRIDE_MODE="${EXPECTED_RADIO_OVERRIDE_MODE:-disabled}"
 GRPC_READY_TIMEOUT="${GRPC_READY_TIMEOUT:-300}"
 ADB_READY_TIMEOUT="${ADB_READY_TIMEOUT:-180}"
+SIBLING_ADB_READY_TIMEOUT="${SIBLING_ADB_READY_TIMEOUT:-90}"
 REQUIRE_ADB_BRIDGE="${REQUIRE_ADB_BRIDGE:-1}"
 API_READY_TIMEOUT="${API_READY_TIMEOUT:-300}"
 PASSIVE_API_PROBE_TIMEOUT="${PASSIVE_API_PROBE_TIMEOUT:-60}"
@@ -117,12 +124,56 @@ container_ipv4() {
 
 probe_external_adb_bridge_state() {
   local container_ip="$1"
-  timeout 40 docker run --rm \
+  local adb_target="${container_ip}:5555"
+  timeout 40 docker exec -i "${CONTAINER_NAME}" sh -s -- "${adb_target}" <<'EOF' 2>/dev/null || true
+adb_target="$1"
+adb start-server >/dev/null 2>&1 || true
+_probe_iter=0
+while [ "${_probe_iter}" -lt 10 ]; do
+  _probe_iter=$((_probe_iter + 1))
+  adb connect "${adb_target}" >/tmp/adb-connect.log 2>&1 || true
+  _state="$(adb -s "${adb_target}" get-state 2>/dev/null | tr -d '\r' || true)"
+  if [ "${_state}" = "device" ]; then
+    printf '%s' device
+    exit 0
+  fi
+  _state="$(adb devices 2>/dev/null | awk '$2 == "device" && $1 == target { print "device"; exit }' target="${adb_target}" | tr -d '\r' || true)"
+  if [ "${_state}" = "device" ]; then
+    printf '%s' device
+    exit 0
+  fi
+  sleep 2
+done
+EOF
+}
+
+probe_sibling_adb_bridge_state() {
+  local container_ip="$1"
+  local adb_target="${container_ip}:5555"
+  timeout "${SIBLING_ADB_READY_TIMEOUT}" docker run --rm -i \
     --network bridge \
-    --add-host "emulator:${container_ip}" \
     --entrypoint sh \
     "${EMULATOR_IMAGE_TAG}" \
-    -lc "adb start-server >/dev/null 2>&1 || true; adb connect emulator:5555 >/tmp/adb-connect.log 2>&1 || true; _probe_iter=0; while [ \${_probe_iter} -lt 5 ]; do _probe_iter=\$((\${_probe_iter} + 1)); _state=\$(adb -s emulator:5555 get-state 2>/dev/null | tr -d '\r' || true); if [ \"\${_state}\" = device ]; then printf '%s' device; exit 0; fi; _state=\$(adb devices 2>/dev/null | awk '\$2 == \"device\" && \$1 ~ /:5555\$/ { print \"device\"; exit }' | tr -d '\r' || true); if [ \"\${_state}\" = device ]; then printf '%s' device; exit 0; fi; sleep 1; done" 2>/dev/null || true
+    -s -- "${adb_target}" <<'EOF' 2>/dev/null || true
+adb_target="$1"
+adb start-server >/dev/null 2>&1 || true
+_probe_iter=0
+while [ "${_probe_iter}" -lt 20 ]; do
+  _probe_iter=$((_probe_iter + 1))
+  adb connect "${adb_target}" >/tmp/adb-connect.log 2>&1 || true
+  _state="$(adb -s "${adb_target}" get-state 2>/dev/null | tr -d '\r' || true)"
+  if [ "${_state}" = "device" ]; then
+    printf '%s' device
+    exit 0
+  fi
+  _state="$(adb devices 2>/dev/null | awk '$2 == "device" && $1 == target { print "device"; exit }' target="${adb_target}" | tr -d '\r' || true)"
+  if [ "${_state}" = "device" ]; then
+    printf '%s' device
+    exit 0
+  fi
+  sleep 2
+done
+EOF
 }
 
 probe_guest_property() {
@@ -144,7 +195,8 @@ capture_diagnostics() {
     docker exec "${CONTAINER_NAME}" sh -c 'if command -v adb >/dev/null 2>&1; then adb devices -l || true; fi' > "${ARTIFACT_DIR}/adb-devices.txt" 2>&1 || true
     docker exec "${CONTAINER_NAME}" sh -c "if command -v adb >/dev/null 2>&1; then adb -s ${EMULATOR_ADB_SERIAL} shell getprop ro.build.version.sdk || true; adb -s ${EMULATOR_ADB_SERIAL} shell getprop sys.boot_completed || true; fi" > "${ARTIFACT_DIR}/guest-state.txt" 2>&1 || true
     if [ -n "${CONTAINER_IP}" ]; then
-      probe_external_adb_bridge_state "${CONTAINER_IP}" > "${ARTIFACT_DIR}/bridge-state.txt" 2>&1 || true
+      probe_external_adb_bridge_state "${CONTAINER_IP}" > "${ARTIFACT_DIR}/internal-bridge-state.txt" 2>&1 || true
+      probe_sibling_adb_bridge_state "${CONTAINER_IP}" > "${ARTIFACT_DIR}/bridge-state.txt" 2>&1 || true
     fi
   fi
 }
@@ -227,9 +279,9 @@ for _ipt in iptables iptables-legacy; do
 done
 
 if [ "${REQUIRE_ADB_BRIDGE}" = "1" ]; then
-  log "Waiting up to ${ADB_READY_TIMEOUT}s for external adb target emulator:5555 to report device..."
+  log "Waiting up to ${ADB_READY_TIMEOUT}s for the forwarded adb bridge target ${CONTAINER_IP}:5555 to report device from inside the container..."
 else
-  log "Probing external adb target emulator:5555 for up to ${ADB_READY_TIMEOUT}s without blocking startup classification..."
+  log "Probing the forwarded adb bridge target ${CONTAINER_IP}:5555 for up to ${ADB_READY_TIMEOUT}s without blocking startup classification..."
 fi
 adb_deadline=$(( $(date +%s) + ADB_READY_TIMEOUT ))
 adb_ok=0
@@ -255,13 +307,37 @@ if [ "${REQUIRE_ADB_BRIDGE}" = "1" ]; then
   if [ "${adb_ok}" -ne 1 ]; then
     log "=== Container logs ==="
     docker logs "${CONTAINER_NAME}" 2>&1 | tail -80
-    fail "Timed out waiting for external adb target emulator:5555 to report device after ${ADB_READY_TIMEOUT}s"
+    fail "Timed out waiting for the forwarded adb bridge target ${CONTAINER_IP}:5555 to report device after ${ADB_READY_TIMEOUT}s"
   fi
-  log "External adb target emulator:5555 reported device."
+  log "Forwarded adb bridge target ${CONTAINER_IP}:5555 reported device from inside the container."
 elif [ "${adb_ok}" -eq 1 ]; then
-  log "External adb target emulator:5555 reported device during passive probing."
+  log "Forwarded adb bridge target ${CONTAINER_IP}:5555 reported device during passive probing."
 else
-  log "WARNING: external adb target emulator:5555 did not report device within ${ADB_READY_TIMEOUT}s. Treating startup as healthy because the emulator runtime is still up."
+  log "WARNING: forwarded adb bridge target ${CONTAINER_IP}:5555 did not report device within ${ADB_READY_TIMEOUT}s. Treating startup as healthy because the emulator runtime is still up."
+fi
+
+if [ "${REQUIRE_ADB_BRIDGE}" = "1" ]; then
+  log "Verifying that a sibling-container adb client can connect to the forwarded bridge target ${CONTAINER_IP}:5555..."
+else
+  log "Probing sibling-container connectivity to the forwarded bridge target ${CONTAINER_IP}:5555 without blocking startup classification..."
+fi
+sibling_adb_ok=0
+sibling_adb_state="$(probe_sibling_adb_bridge_state "${CONTAINER_IP}")"
+if [ "${sibling_adb_state}" = "device" ]; then
+  sibling_adb_ok=1
+fi
+
+if [ "${REQUIRE_ADB_BRIDGE}" = "1" ]; then
+  if [ "${sibling_adb_ok}" -ne 1 ]; then
+    log "=== Container logs ==="
+    docker logs "${CONTAINER_NAME}" 2>&1 | tail -80
+    fail "Sibling-container adb client could not reach the forwarded bridge target ${CONTAINER_IP}:5555 within ${SIBLING_ADB_READY_TIMEOUT}s"
+  fi
+  log "Sibling-container adb client reached the forwarded bridge target ${CONTAINER_IP}:5555."
+elif [ "${sibling_adb_ok}" -eq 1 ]; then
+  log "Sibling-container adb client reached the forwarded bridge target ${CONTAINER_IP}:5555 during passive probing."
+else
+  log "WARNING: sibling-container adb client did not reach the forwarded bridge target ${CONTAINER_IP}:5555 within ${SIBLING_ADB_READY_TIMEOUT}s. Treating startup as healthy because the emulator runtime is still up."
 fi
 
 if [ "${REQUIRE_GUEST_BOOT_COMPLETED}" = "1" ]; then
@@ -422,7 +498,8 @@ log ""
 log "Emulator startup test PASSED"
 log "  - gRPC port 8554: reachable"
 log "  - ADB bridge probe mode: $( [ "${REQUIRE_ADB_BRIDGE}" = "1" ] && printf '%s' 'strict' || printf '%s' 'passive' )"
-log "  - ADB bridge target emulator:5555: $( [ "${adb_ok}" -eq 1 ] && printf '%s' 'device' || printf '%s' 'pending' )"
+log "  - Forwarded adb bridge target ${CONTAINER_IP}:5555: $( [ "${adb_ok}" -eq 1 ] && printf '%s' 'device' || printf '%s' 'pending' )"
+log "  - Sibling-container adb bridge ${CONTAINER_IP}:5555: $( [ "${sibling_adb_ok}" -eq 1 ] && printf '%s' 'device' || printf '%s' 'pending' )"
 log "  - Guest ADB probe mode: $( [ "${REQUIRE_GUEST_BOOT_COMPLETED}" = "1" ] && printf '%s' 'strict' || printf '%s' 'passive' )"
 log "  - Android guest API: ${guest_api:-pending}"
 log "  - Guest boot_completed: ${boot_completed:-pending}"

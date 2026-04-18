@@ -297,6 +297,16 @@ assert.match(
 const logAnalyzer = readRepoFile("scripts/analyze-emulator-log.mjs");
 assert.match(
   logAnalyzer,
+  /likelyHealthyLongRunningRuntime/,
+  "emulator log analyzer must surface when a log shows a stable long-running runtime rather than a restart loop"
+);
+assert.match(
+  logAnalyzer,
+  /adbPortGuardHeartbeatCount/,
+  "emulator log analyzer must count adb-port-guard heartbeats so long-running startup logs can be recognized as healthy"
+);
+assert.match(
+  logAnalyzer,
   /legacy-launcher-overrode-patched-avd/,
   "emulator log analyzer must still classify the known legacy-launcher restart loop"
 );

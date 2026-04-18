@@ -41,6 +41,8 @@ const findings = {
   shellUnsetVariableCrash: /start-emulator-with-turn\.sh:\s*\d+:\s*_emulator_version: parameter not set/.test(logText),
   modemIpv6Failure: /qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1/.test(logText),
   invalidRadioOption: /qemu-system-x86_64-headless: -radio: invalid option/.test(logText),
+  grpcServerStarted: /Started GRPC server at 0\.0\.0\.0:8554/.test(logText),
+  adbPortGuardHeartbeatCount: (logText.match(/\[adb-port-guard\] alive: iter=/g) || []).length,
   repeatedRestartLoop:
     (logText.match(/Using direct emulator launch: \/android\/sdk\/emulator\/emulator/g) || []).length > 1 ||
     (logText.match(/COMMAND: exec emulator\/emulator -avd Pixel2/g) || []).length > 1,
@@ -115,6 +117,15 @@ const summary = {
   file: basename(absolutePath),
   rootCause,
   explanation,
+  likelyHealthyLongRunningRuntime:
+    findings.grpcServerStarted &&
+    findings.adbPortGuardHeartbeatCount >= 5 &&
+    !findings.modemIpv6Failure &&
+    !findings.invalidRadioOption &&
+    !findings.shellUnsetVariableCrash &&
+    !findings.adbHostServerFailure &&
+    !findings.missingAdbBinary &&
+    !findings.repeatedRestartLoop,
   findings,
 };
 

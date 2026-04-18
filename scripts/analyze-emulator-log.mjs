@@ -24,6 +24,9 @@ const findings = {
   directLaunchLoggedRadioNull:
     /\[start-emulator-with-turn\] Direct emulator radio device: null/.test(logText) ||
     /-radio null/.test(logText),
+  missingAdbBinary:
+    /\[start-emulator-with-turn\] (WARNING|ERROR): adb binary unavailable/.test(logText) ||
+    /\[start-emulator-with-turn\] WARNING: adb command unavailable/.test(logText),
   adbHostServerFailure: /AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 5037/.test(logText),
   modemIpv6Failure: /qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1/.test(logText),
   repeatedRestartLoop:
@@ -53,6 +56,17 @@ if (
   rootCause = "direct-launch-left-internal-modem-enabled";
   explanation =
     "Direct launch reached API 34, but the wrapper still left the internal modem backend enabled, so QEMU created id=modem on ::1 and the container restarted.";
+} else if (
+  findings.directWrapperPatchedApi34 &&
+  findings.directModeEnabled &&
+  findings.directLaunchReportedApi34 &&
+  findings.directLaunchLoggedRadioNull &&
+  findings.adbHostServerFailure &&
+  findings.missingAdbBinary
+) {
+  rootCause = "direct-launch-missing-adb-host-server";
+  explanation =
+    "Direct launch reached API 34 and disabled the modem backend, but the runtime lacked a usable adb binary, so the emulator could not connect to the host adb server on port 5037 and the container restarted.";
 }
 
 const summary = {
@@ -69,7 +83,7 @@ if (rootCause !== "unclassified") {
   process.exit(1);
 }
 
-if (findings.modemIpv6Failure || findings.repeatedRestartLoop) {
+if (findings.modemIpv6Failure || findings.adbHostServerFailure || findings.repeatedRestartLoop) {
   console.error("Detected an emulator restart loop, but the exact signature was not classified.");
   process.exit(1);
 }

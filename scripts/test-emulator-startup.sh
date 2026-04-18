@@ -195,6 +195,12 @@ fi
 if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq "[start-emulator-with-turn] Direct emulator radio device: ${EXPECTED_RADIO_DEVICE}"; then
   fail "Container logs do not show the expected direct-launch radio backend (${EXPECTED_RADIO_DEVICE})"
 fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'adb binary unavailable for direct launch|WARNING: adb command unavailable'; then
+  fail "Container logs show that adb is unavailable in the runtime image"
+fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 5037'; then
+  fail "Container logs still show the emulator failing to reach the host adb server on port 5037"
+fi
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1'; then
   fail "Container logs still show the fatal QEMU modem ::1 resolution failure"
 fi

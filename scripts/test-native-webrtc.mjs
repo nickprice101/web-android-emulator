@@ -173,8 +173,18 @@ assert.match(
 );
 assert.match(
   emulatorTurnWrapper,
+  /DIRECT_EMULATOR_VERSION="\$\{_emulator_version\}"/,
+  "emulator wrapper must persist the detected emulator version for later direct-launch decisions instead of unsetting it"
+);
+assert.match(
+  emulatorTurnWrapper,
   /supports_direct_radio_override\(\)/,
   "emulator wrapper must decide whether a radio override is safe for the bundled emulator version"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /_emulator_version_for_launch="\$\{DIRECT_EMULATOR_VERSION:-unknown\}"/,
+  "emulator wrapper must read the cached emulator version through a safe default inside the radio-override gate"
 );
 assert.match(
   emulatorTurnWrapper,
@@ -193,7 +203,7 @@ assert.match(
 );
 assert.match(
   emulatorTurnWrapper,
-  /Direct emulator radio override: disabled for emulator/,
+  /Direct emulator radio override: disabled for emulator '\$\{DIRECT_EMULATOR_VERSION:-unknown\}'/,
   "emulator wrapper must log when it skips the radio override for unsupported emulator builds"
 );
 assert.match(
@@ -267,6 +277,11 @@ assert.match(
 );
 assert.match(
   logAnalyzer,
+  /direct-launch-unset-version-variable/,
+  "emulator log analyzer must classify wrapper crashes caused by unsetting the cached emulator version too early"
+);
+assert.match(
+  logAnalyzer,
   /direct-launch-missing-adb-host-server/,
   "emulator log analyzer must still classify the direct-launch restart loop caused by a missing adb host server"
 );
@@ -274,6 +289,11 @@ assert.match(
   logAnalyzer,
   /Direct launch attempted to force a radio override, but the bundled emulator build rejected -radio entirely/i,
   "emulator log analyzer must explain the unsupported-radio restart loop clearly"
+);
+assert.match(
+  logAnalyzer,
+  /wrapper unset the cached emulator version before the radio-override gate referenced it under set -u/i,
+  "emulator log analyzer must explain the unset-version shell crash clearly"
 );
 
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

@@ -298,6 +298,16 @@ const logAnalyzer = readRepoFile("scripts/analyze-emulator-log.mjs");
 const startupSmokeTest = readRepoFile("scripts/test-emulator-startup.sh");
 assert.match(
   startupSmokeTest,
+  /probe_local_tcp_port\(\)/,
+  "startup smoke test must use an internal TCP probe helper rather than assuming netcat is installed in the runtime image"
+);
+assert.match(
+  startupSmokeTest,
+  /socket\.socket\(socket\.AF_INET, socket\.SOCK_STREAM\)/,
+  "startup smoke test must use a Python socket probe for container-local readiness checks"
+);
+assert.match(
+  startupSmokeTest,
   /REQUIRE_ADB_BRIDGE="\$\{REQUIRE_ADB_BRIDGE:-0\}"/,
   "startup smoke test must default the ADB bridge probe to passive mode so slow adb forwarding does not look like a boot failure"
 );

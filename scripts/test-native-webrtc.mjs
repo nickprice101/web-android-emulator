@@ -303,6 +303,11 @@ assert.match(
 );
 assert.match(
   startupSmokeTest,
+  /timeout 15 docker exec "\$\{CONTAINER_NAME\}" python3 - "\$port"/,
+  "startup smoke test must bound the host-side gRPC\/ADB port probe so docker exec cannot hang indefinitely"
+);
+assert.match(
+  startupSmokeTest,
   /socket\.socket\(socket\.AF_INET, socket\.SOCK_STREAM\)/,
   "startup smoke test must use a Python socket probe for container-local readiness checks"
 );
@@ -313,6 +318,11 @@ assert.match(
 );
 assert.match(
   startupSmokeTest,
+  /PASSIVE_API_PROBE_TIMEOUT="\$\{PASSIVE_API_PROBE_TIMEOUT:-60\}"/,
+  "startup smoke test must keep passive guest-state probing short enough that slow adb responses do not stall the whole remote testbed"
+);
+assert.match(
+  startupSmokeTest,
   /WARNING: ADB socat port 5555 did not become reachable within .* Treating startup as healthy because the emulator runtime is still up\./,
   "startup smoke test must explicitly treat slow ADB bridge readiness as non-fatal in passive mode"
 );
@@ -320,6 +330,11 @@ assert.match(
   startupSmokeTest,
   /ADB bridge probe mode:/,
   "startup smoke test output must report whether the ADB bridge check ran in strict or passive mode"
+);
+assert.match(
+  startupSmokeTest,
+  /Guest probe pending:/,
+  "startup smoke test must emit periodic guest-probe progress so remote workflow runs do not look hung"
 );
 assert.doesNotMatch(
   startupSmokeTest,

@@ -50,6 +50,7 @@ GRPC_READY_TIMEOUT="${GRPC_READY_TIMEOUT:-300}"
 ADB_READY_TIMEOUT="${ADB_READY_TIMEOUT:-180}"
 REQUIRE_ADB_BRIDGE="${REQUIRE_ADB_BRIDGE:-0}"
 API_READY_TIMEOUT="${API_READY_TIMEOUT:-300}"
+PASSIVE_API_PROBE_TIMEOUT="${PASSIVE_API_PROBE_TIMEOUT:-60}"
 REQUIRE_GUEST_BOOT_COMPLETED="${REQUIRE_GUEST_BOOT_COMPLETED:-0}"
 STABILITY_WAIT_SECONDS="${STABILITY_WAIT_SECONDS:-30}"
 CONTAINER_NAME="${CONTAINER_NAME:-emu-smoke-test}"
@@ -62,7 +63,7 @@ fail() { echo "[test-emulator-startup] FAIL: $*" >&2; exit 1; }
 
 probe_local_tcp_port() {
   local port="$1"
-  docker exec "${CONTAINER_NAME}" python3 - "$port" <<'PY' >/dev/null 2>&1
+  timeout 15 docker exec "${CONTAINER_NAME}" python3 - "$port" <<'PY' >/dev/null 2>&1
 import socket
 import sys
 
@@ -80,7 +81,7 @@ PY
 
 probe_guest_property() {
   local prop="$1"
-  docker exec "${CONTAINER_NAME}" sh -c "timeout 10 adb -s 127.0.0.1:5555 shell getprop ${prop} 2>/dev/null | tr -d '\r'" 2>/dev/null || true
+  timeout 20 docker exec "${CONTAINER_NAME}" sh -c "timeout 10 adb -s 127.0.0.1:5555 shell getprop ${prop} 2>/dev/null | tr -d '\r'" 2>/dev/null || true
 }
 
 mkdir -p "${ARTIFACT_DIR}"
@@ -194,20 +195,28 @@ fi
 
 if [ "${REQUIRE_GUEST_BOOT_COMPLETED}" = "1" ]; then
   log "Waiting up to ${API_READY_TIMEOUT}s for the Android guest to report API ${EXPECTED_GUEST_API} and boot_completed=1..."
+  guest_probe_timeout="${API_READY_TIMEOUT}"
 else
-  log "Probing guest ADB state for up to ${API_READY_TIMEOUT}s without blocking startup classification..."
+  log "Probing guest ADB state for up to ${PASSIVE_API_PROBE_TIMEOUT}s without blocking startup classification..."
+  guest_probe_timeout="${PASSIVE_API_PROBE_TIMEOUT}"
 fi
-api_deadline=$(( $(date +%s) + API_READY_TIMEOUT ))
+api_deadline=$(( $(date +%s) + guest_probe_timeout ))
 guest_api=""
 boot_completed=""
+guest_probe_iter=0
 while [ "$(date +%s)" -lt "${api_deadline}" ]; do
-  docker exec "${CONTAINER_NAME}" sh -c 'timeout 10 adb connect 127.0.0.1:5555 >/tmp/adb-connect.log 2>&1 || true' >/dev/null 2>&1 || true
+  timeout 20 docker exec "${CONTAINER_NAME}" sh -c 'timeout 10 adb connect 127.0.0.1:5555 >/tmp/adb-connect.log 2>&1 || true' >/dev/null 2>&1 || true
 
   guest_api="$(probe_guest_property ro.build.version.sdk)"
   boot_completed="$(probe_guest_property sys.boot_completed)"
+  guest_probe_iter=$((guest_probe_iter + 1))
 
   if [ "${guest_api}" = "${EXPECTED_GUEST_API}" ] && [ "${boot_completed}" = "1" ]; then
     break
+  fi
+
+  if [ $((guest_probe_iter % 6)) -eq 0 ]; then
+    log "Guest probe pending: api='${guest_api:-<empty>}' boot_completed='${boot_completed:-<empty>}' elapsed=$((guest_probe_iter * 5))s"
   fi
 
   if ! docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" 2>/dev/null | grep -q true; then

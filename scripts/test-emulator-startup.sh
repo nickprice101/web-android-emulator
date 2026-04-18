@@ -287,11 +287,7 @@ adb_deadline=$(( $(date +%s) + ADB_READY_TIMEOUT ))
 adb_ok=0
 adb_bridge_state=""
 while [ "$(date +%s)" -lt "${adb_deadline}" ]; do
-  if ! probe_tcp_port "${CONTAINER_IP}" 5555; then
-    adb_bridge_state=""
-  else
-    adb_bridge_state="$(probe_external_adb_bridge_state "${CONTAINER_IP}")"
-  fi
+  adb_bridge_state="$(probe_external_adb_bridge_state "${CONTAINER_IP}")"
 
   if [ "${adb_bridge_state}" = "device" ]; then
     adb_ok=1
@@ -303,7 +299,7 @@ while [ "$(date +%s)" -lt "${adb_deadline}" ]; do
   sleep 5
 done
 
-if [ "${adb_ok}" -ne 1 ] && probe_tcp_port "${CONTAINER_IP}" 5555; then
+if [ "${adb_ok}" -ne 1 ]; then
   log "Running one final forwarded adb bridge probe after the polling deadline to catch late-ready transports..."
   adb_bridge_state="$(probe_external_adb_bridge_state "${CONTAINER_IP}")"
   if [ "${adb_bridge_state}" = "device" ]; then

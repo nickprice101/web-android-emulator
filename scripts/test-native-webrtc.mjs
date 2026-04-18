@@ -452,6 +452,11 @@ assert.match(
   /probe_external_adb_bridge_state\(\)/,
   "startup smoke test must verify adb connectivity from the non-loopback bridge path inside the emulator container"
 );
+assert.doesNotMatch(
+  startupSmokeTest,
+  /if ! probe_tcp_port "\$\{CONTAINER_IP\}" 5555; then[\s\S]*probe_external_adb_bridge_state/,
+  "startup smoke test must not gate adb bridge readiness on a host-side TCP probe because the authoritative proof path is the container or sibling adb client itself"
+);
 assert.match(
   startupSmokeTest,
   /probe_sibling_adb_bridge_state\(\)/,

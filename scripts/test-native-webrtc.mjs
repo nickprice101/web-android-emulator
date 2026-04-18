@@ -266,8 +266,28 @@ const emulatorDockerfile = readRepoFile("emulator/Dockerfile");
 const emulatorHealthcheck = readRepoFile("emulator/healthcheck-adb-bridge.sh");
 assert.match(
   emulatorDockerfile,
-  /"\$\{SDKMANAGER_BIN\}" --channel=0 "platform-tools" "emulator" "\$\{EMULATOR_SYSTEM_IMAGE\}" "\$\{EMULATOR_PLATFORM\}"/,
-  "emulator Dockerfile must install a current emulator binary because the API 34 system image declares a newer emulator dependency than the public API 30 base image provides"
+  /ARG EMULATOR_PACKAGE_VERSION=36\.5\.10[\s\S]*ARG EMULATOR_PACKAGE_URL=https:\/\/dl\.google\.com\/android\/repository\/emulator-linux_x64-15081367\.zip[\s\S]*ARG EMULATOR_PACKAGE_SHA1=9f03296214df837c608d0d101e5e03ebcebb4343/m,
+  "emulator Dockerfile must pin the official stable emulator archive metadata so the stale base-image emulator binary is replaced deterministically"
+);
+assert.match(
+  emulatorDockerfile,
+  /"\$\{SDKMANAGER_BIN\}" --channel=0 "platform-tools" "\$\{EMULATOR_SYSTEM_IMAGE\}" "\$\{EMULATOR_PLATFORM\}"/,
+  "emulator Dockerfile must still install platform-tools and the API 34 guest packages through sdkmanager"
+);
+assert.match(
+  emulatorDockerfile,
+  /curl -fsSL "\$\{EMULATOR_PACKAGE_URL\}" -o "\$\{TMP_ZIP\}"[\s\S]*sha1sum -c -[\s\S]*mv "\$\{TMP_DIR\}\/emulator" "\$\{ANDROID_SDK_ROOT\}\/emulator"/,
+  "emulator Dockerfile must manually install the pinned emulator archive into /android/sdk/emulator so the stale base-image binary is fully replaced"
+);
+assert.match(
+  emulatorDockerfile,
+  /Installed emulator binary version:[\s\S]*Expected manual emulator archive install to replace the stale 30\.x base-image emulator binary/,
+  "emulator Dockerfile must verify during build that the manual emulator install replaced the stale 30.x binary"
+);
+assert.match(
+  emulatorDockerfile,
+  /cp "\$\{_emulator_pkg_xml_old\}" "\$\{TMP_DIR\}\/emulator\/package\.xml"[\s\S]*<major>36<\/major>[\s\S]*<minor>5<\/minor>[\s\S]*<micro>10<\/micro>/,
+  "emulator Dockerfile must preserve package.xml metadata while updating it to the pinned manual emulator version"
 );
 assert.match(
   emulatorDockerfile,
@@ -426,6 +446,11 @@ assert.match(
   startupSmokeTest,
   /stale emulator 30\.x binary with the API 34 guest image/,
   "startup smoke test must reject the stale emulator 30.x binary when validating the API 34 guest path"
+);
+assert.match(
+  startupSmokeTest,
+  /emulator binary is still outdated for the installed guest image/,
+  "startup smoke test must also reject the emulator's own out-of-date warning when validating the API 34 guest path"
 );
 assert.match(
   startupSmokeTest,

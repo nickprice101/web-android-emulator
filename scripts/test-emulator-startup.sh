@@ -319,6 +319,9 @@ fi
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq '\[start-emulator-with-turn\]\s+emulator binary version\s+: Android emulator version 30\.'; then
   fail "Container logs still show the stale emulator 30.x binary with the API 34 guest image"
 fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq 'Your emulator is out of date, please update by launching Android Studio:'; then
+  fail "Container logs show the emulator binary is still outdated for the installed guest image"
+fi
 if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq '[start-emulator-with-turn] Using direct emulator mode; legacy launcher bypassed.'; then
   fail "Container logs do not show the expected direct emulator launch mode"
 fi

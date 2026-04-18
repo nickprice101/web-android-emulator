@@ -122,7 +122,7 @@ probe_external_adb_bridge_state() {
     --add-host "emulator:${container_ip}" \
     --entrypoint sh \
     "${EMULATOR_IMAGE_TAG}" \
-    -lc "adb start-server >/dev/null 2>&1 || true; adb connect emulator:5555 >/tmp/adb-connect.log 2>&1 || true; adb -s emulator:5555 get-state 2>/dev/null | tr -d '\r'" 2>/dev/null || true
+    -lc "adb start-server >/dev/null 2>&1 || true; adb connect emulator:5555 >/tmp/adb-connect.log 2>&1 || true; _probe_iter=0; while [ \${_probe_iter} -lt 5 ]; do _probe_iter=\$((\${_probe_iter} + 1)); _state=\$(adb -s emulator:5555 get-state 2>/dev/null | tr -d '\r' || true); if [ \"\${_state}\" = device ]; then printf '%s' device; exit 0; fi; _state=\$(adb devices 2>/dev/null | awk '\$2 == \"device\" && \$1 ~ /:5555\$/ { print \"device\"; exit }' | tr -d '\r' || true); if [ \"\${_state}\" = device ]; then printf '%s' device; exit 0; fi; sleep 1; done" 2>/dev/null || true
 }
 
 probe_guest_property() {

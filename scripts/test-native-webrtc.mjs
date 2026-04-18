@@ -375,6 +375,11 @@ assert.match(
   "emulator adb-bridge healthcheck must check a specific adb serial so it cannot fail with 'more than one device/emulator'"
 );
 assert.match(
+  emulatorHealthcheck,
+  /devices 2>\/dev\/null \| awk '\$2 == "device" && \$1 ~ \/:5555\$\//,
+  "emulator adb-bridge healthcheck must also accept adb's normalized :5555 serial when the requested hostname is rewritten to an IP"
+);
+assert.match(
   emulatorDockerfile,
   /ln -s "\$\{_avd_dir\}" \/Pixel2\.avd[\s\S]*ln -s "\$\{_avd_ini\}" \/Pixel2\.ini/,
   "emulator Dockerfile must replace legacy /Pixel2 metadata with links to the canonical rebuilt AVD"
@@ -451,6 +456,11 @@ assert.match(
   startupSmokeTest,
   /adb -s emulator:5555 get-state/,
   "startup smoke test must require the external adb bridge target to report a usable device transport"
+);
+assert.match(
+  startupSmokeTest,
+  /devices 2>\/dev\/null \| awk '\\\$2 == \\"device\\" && \\\$1 ~ \/:5555\\\$\//,
+  "startup smoke test must tolerate adb normalizing the external emulator hostname to an IP-based :5555 serial"
 );
 assert.match(
   startupSmokeTest,

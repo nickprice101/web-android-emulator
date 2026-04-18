@@ -30,15 +30,33 @@ fi
 "${ADB_BIN}" start-server >/dev/null 2>&1 || true
 
 if [ -n "${adb_target}" ]; then
-  case "${adb_target}" in
-    *:*)
-      "${ADB_BIN}" connect "${adb_target}" >/dev/null 2>&1 || true
-      ;;
-  esac
+  _bridge_ready=1
+  _probe_iter=0
+  while [ "${_probe_iter}" -lt 5 ]; do
+    _probe_iter=$((_probe_iter + 1))
 
-  bridge_state="$("${ADB_BIN}" -s "${adb_target}" get-state 2>/dev/null | tr -d '\r' || true)"
-  [ "${bridge_state}" = "device" ]
-  exit $?
+    case "${adb_target}" in
+      *:*)
+        "${ADB_BIN}" connect "${adb_target}" >/dev/null 2>&1 || true
+        ;;
+    esac
+
+    bridge_state="$("${ADB_BIN}" -s "${adb_target}" get-state 2>/dev/null | tr -d '\r' || true)"
+    if [ "${bridge_state}" = "device" ]; then
+      _bridge_ready=0
+      break
+    fi
+
+    bridge_state="$("${ADB_BIN}" devices 2>/dev/null | awk '$2 == "device" && $1 ~ /:5555$/ { print "device"; exit }' | tr -d '\r' || true)"
+    if [ "${bridge_state}" = "device" ]; then
+      _bridge_ready=0
+      break
+    fi
+
+    sleep 1
+  done
+
+  exit "${_bridge_ready}"
 fi
 
 emulator_state="$("${ADB_BIN}" -e get-state 2>/dev/null | tr -d '\r' || true)"

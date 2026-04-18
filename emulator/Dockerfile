@@ -137,6 +137,7 @@ RUN apt-get update \
     openssl \
     jq \
     python3 \
+    libxkbfile1 \
     iptables \
     iproute2 \
     nftables \

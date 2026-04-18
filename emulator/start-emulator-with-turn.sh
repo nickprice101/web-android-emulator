@@ -156,6 +156,7 @@ ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/android/sdk}"
 export PATH="${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/emulator:${PATH}"
 EMULATOR_LAUNCH_MODE="${EMULATOR_LAUNCH_MODE:-direct}"
 EMULATOR_RADIO_DEVICE="${EMULATOR_RADIO_DEVICE:-null}"
+EMULATOR_USE_RADIO_OVERRIDE="${EMULATOR_USE_RADIO_OVERRIDE:-0}"
 mkdir -p "${ANDROID_USER_HOME}" "${ANDROID_AVD_HOME}"
 
 ensure_pixel2_avd_aliases() {
@@ -582,23 +583,14 @@ ensure_adb_server() {
 }
 
 supports_direct_radio_override() {
-  _emulator_version_for_launch="${DIRECT_EMULATOR_VERSION:-unknown}"
-  case "${EMULATOR_USE_RADIO_OVERRIDE:-auto}" in
+  case "${EMULATOR_USE_RADIO_OVERRIDE}" in
     1|true|TRUE|yes|YES)
       return 0
       ;;
-    0|false|FALSE|no|NO)
+    0|false|FALSE|no|NO|'')
       return 1
       ;;
-    auto|'')
-      case "${_emulator_version_for_launch}" in
-        "Android emulator version 30."*|"Android emulator version 29."*|"Android emulator version 28."*)
-          return 1
-          ;;
-      esac
-      if [ -x "${DIRECT_EMULATOR_BIN}" ] && "${DIRECT_EMULATOR_BIN}" -help-all 2>/dev/null | grep -Eq '(^|[[:space:]])-radio([[:space:]]|$)'; then
-        return 0
-      fi
+    auto)
       return 1
       ;;
     *)

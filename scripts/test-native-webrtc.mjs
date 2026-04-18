@@ -218,13 +218,13 @@ assert.match(
 );
 assert.match(
   emulatorTurnWrapper,
-  /_emulator_version_for_launch="\$\{DIRECT_EMULATOR_VERSION:-unknown\}"/,
-  "emulator wrapper must read the cached emulator version through a safe default inside the radio-override gate"
+  /case "\$\{EMULATOR_USE_RADIO_OVERRIDE\}" in[\s\S]*0\|false\|FALSE\|no\|NO\|''\)/,
+  "emulator wrapper must default the radio override gate to disabled unless a caller explicitly opts in"
 );
 assert.match(
   emulatorTurnWrapper,
-  /Android emulator version 30\./,
-  "emulator wrapper must explicitly treat emulator 30.x as not supporting the direct-launch radio override"
+  /EMULATOR_USE_RADIO_OVERRIDE="\$\{EMULATOR_USE_RADIO_OVERRIDE:-0\}"/,
+  "emulator wrapper must default the direct-launch radio override to disabled so newer emulator binaries are not forced down an unsupported -radio path"
 );
 assert.match(
   emulatorTurnWrapper,
@@ -233,13 +233,13 @@ assert.match(
 );
 assert.match(
   emulatorTurnWrapper,
-  /set -- "\$@" -radio "\$\{EMULATOR_RADIO_DEVICE\}"/,
-  "emulator wrapper must still be able to pass -radio when the emulator version supports it"
+  /Direct emulator radio override: disabled for emulator '\$\{DIRECT_EMULATOR_VERSION:-unknown\}'/,
+  "emulator wrapper must log when the radio override stays disabled by default"
 );
 assert.match(
   emulatorTurnWrapper,
-  /Direct emulator radio override: disabled for emulator '\$\{DIRECT_EMULATOR_VERSION:-unknown\}'/,
-  "emulator wrapper must log when it skips the radio override for unsupported emulator builds"
+  /set -- "\$@" -radio "\$\{EMULATOR_RADIO_DEVICE\}"/,
+  "emulator wrapper must still be able to pass -radio when a caller explicitly opts in"
 );
 assert.match(
   emulatorTurnWrapper,
@@ -298,6 +298,11 @@ assert.match(
   emulatorDockerfile,
   /PATH=\/android\/sdk\/platform-tools:\/android\/sdk\/emulator:\$\{PATH\}/,
   "emulator Dockerfile must expose platform-tools and emulator binaries on PATH at runtime"
+);
+assert.match(
+  emulatorDockerfile,
+  /libxkbfile1/,
+  "emulator Dockerfile must install libxkbfile1 so the manually installed emulator package can report its version cleanly at runtime"
 );
 assert.match(
   emulatorDockerfile,
@@ -451,6 +456,11 @@ assert.match(
   startupSmokeTest,
   /emulator binary is still outdated for the installed guest image/,
   "startup smoke test must also reject the emulator's own out-of-date warning when validating the API 34 guest path"
+);
+assert.match(
+  startupSmokeTest,
+  /libxkbfile\.so\.1: cannot open shared object file/,
+  "startup smoke test must reject a manually installed emulator binary that is still missing libxkbfile at runtime"
 );
 assert.match(
   startupSmokeTest,

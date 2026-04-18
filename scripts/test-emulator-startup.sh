@@ -322,6 +322,9 @@ fi
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq 'Your emulator is out of date, please update by launching Android Studio:'; then
   fail "Container logs show the emulator binary is still outdated for the installed guest image"
 fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq 'libxkbfile.so.1: cannot open shared object file'; then
+  fail "Container logs show the manually installed emulator binary still misses libxkbfile.so.1 at runtime"
+fi
 if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq '[start-emulator-with-turn] Using direct emulator mode; legacy launcher bypassed.'; then
   fail "Container logs do not show the expected direct emulator launch mode"
 fi

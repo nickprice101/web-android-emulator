@@ -23,12 +23,16 @@ const findings = {
     /\[start-emulator-with-turn\]\s+AndroidVersion\.ApiLevel=34/.test(logText),
   directLaunchLoggedRadioNull:
     /\[start-emulator-with-turn\] Direct emulator radio device: null/.test(logText) ||
+    /\[start-emulator-with-turn\] Direct emulator radio override: null/.test(logText) ||
     /-radio null/.test(logText),
+  directLaunchRadioOverrideDisabled:
+    /\[start-emulator-with-turn\] Direct emulator radio override: disabled/.test(logText),
   missingAdbBinary:
     /\[start-emulator-with-turn\] (WARNING|ERROR): adb binary unavailable/.test(logText) ||
     /\[start-emulator-with-turn\] WARNING: adb command unavailable/.test(logText),
   adbHostServerFailure: /AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 5037/.test(logText),
   modemIpv6Failure: /qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1/.test(logText),
+  invalidRadioOption: /qemu-system-x86_64-headless: -radio: invalid option/.test(logText),
   repeatedRestartLoop:
     (logText.match(/Using direct emulator launch: \/android\/sdk\/emulator\/emulator/g) || []).length > 1 ||
     (logText.match(/COMMAND: exec emulator\/emulator -avd Pixel2/g) || []).length > 1,
@@ -61,6 +65,16 @@ if (
   findings.directModeEnabled &&
   findings.directLaunchReportedApi34 &&
   findings.directLaunchLoggedRadioNull &&
+  findings.invalidRadioOption
+) {
+  rootCause = "unsupported-radio-override";
+  explanation =
+    "Direct launch attempted to force a radio override, but the bundled emulator build rejected -radio entirely, so QEMU exited before the guest could boot.";
+} else if (
+  findings.directWrapperPatchedApi34 &&
+  findings.directModeEnabled &&
+  findings.directLaunchReportedApi34 &&
+  findings.directLaunchLoggedRadioNull &&
   findings.adbHostServerFailure &&
   findings.missingAdbBinary
 ) {
@@ -83,7 +97,7 @@ if (rootCause !== "unclassified") {
   process.exit(1);
 }
 
-if (findings.modemIpv6Failure || findings.adbHostServerFailure || findings.repeatedRestartLoop) {
+if (findings.modemIpv6Failure || findings.invalidRadioOption || findings.repeatedRestartLoop) {
   console.error("Detected an emulator restart loop, but the exact signature was not classified.");
   process.exit(1);
 }

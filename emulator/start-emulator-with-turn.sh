@@ -469,7 +469,7 @@ else
   log "TURN_KEY not set (or placeholder); skipping -turncfg setup"
 fi
 
-DIRECT_EMULATOR_BIN="${ANDROID_SDK_ROOT:-/android/sdk}/emulator/emulator"
+DIRECT_EMULATOR_BIN="${ANDROID_SDK_ROOT}/emulator/emulator"
 resolve_adb_bin() {
   if [ -n "${ADB_BIN:-}" ] && [ -x "${ADB_BIN}" ]; then
     printf '%s\n' "${ADB_BIN}"
@@ -527,12 +527,40 @@ ensure_adb_server() {
   fi
 }
 
+supports_direct_radio_override() {
+  case "${EMULATOR_USE_RADIO_OVERRIDE:-auto}" in
+    1|true|TRUE|yes|YES)
+      return 0
+      ;;
+    0|false|FALSE|no|NO)
+      return 1
+      ;;
+    auto|'')
+      case "${_emulator_version}" in
+        "Android emulator version 30."*|"Android emulator version 29."*|"Android emulator version 28."*)
+          return 1
+          ;;
+      esac
+      if [ -x "${DIRECT_EMULATOR_BIN}" ] && "${DIRECT_EMULATOR_BIN}" -help-all 2>/dev/null | grep -Eq '(^|[[:space:]])-radio([[:space:]]|$)'; then
+        return 0
+      fi
+      return 1
+      ;;
+    *)
+      log "Unsupported EMULATOR_USE_RADIO_OVERRIDE='${EMULATOR_USE_RADIO_OVERRIDE}'; expected auto/true/false."
+      return 1
+      ;;
+  esac
+}
+
 launch_direct_emulator() {
   _ports="${EMULATOR_PORTS:-5554,5555}"
   _grpc_port="${EMULATOR_GRPC_PORT:-8554}"
-  _kernel_log="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}/kernel.log"
-  _logcat_log="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}/logcat.log"
+  _runtime_dir="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}"
+  _kernel_log="${_runtime_dir}/kernel.log"
+  _logcat_log="${_runtime_dir}/logcat.log"
   _qemu_append="${EMULATOR_QEMU_APPEND:-panic=1}"
+  _radio_override_applied=0
 
   if [ ! -x "${DIRECT_EMULATOR_BIN}" ]; then
     echo "Direct emulator binary is not executable: ${DIRECT_EMULATOR_BIN}" >&2
@@ -553,97 +581,9 @@ launch_direct_emulator() {
     -logcat-output "${_logcat_log}" \
     -feature AllowSnapshotMigration
 
-  if [ -n "${EMULATOR_RADIO_DEVICE}" ]; then
+  if [ -n "${EMULATOR_RADIO_DEVICE}" ] && supports_direct_radio_override; then
     set -- "$@" -radio "${EMULATOR_RADIO_DEVICE}"
-  fi
-
-  if [ -n "${TURN:-}" ]; then
-    set -- "$@" -turncfg "${TURN}"
-  fi
-
-  if [ -n "${EMULATOR_PARAMS_VALUE}" ]; then
-    # EMULATOR_PARAMS is a user-controlled shell-style flag string.
-    # Split it once here so direct mode preserves current compose behavior.
-    eval "set -- \"\$@\" ${EMULATOR_PARAMS_VALUE}"
-  fi
-
-  if [ -n "${_qemu_append}" ]; then
-    set -- "$@" -qemu -append "${_qemu_append}"
-  fi
-
-  log "Using direct emulator launch: ${DIRECT_EMULATOR_BIN}"
-  log "Direct emulator ports: ${_ports} (grpc=${_grpc_port})"
-  log "Direct emulator radio device: ${EMULATOR_RADIO_DEVICE}"
-  exec "$@"
-}
-
-LAUNCHER_PATH="${EMULATOR_LAUNCHER:-}"
-if [ -n "${LAUNCHER_PATH}" ] && [ ! -x "${LAUNCHER_PATH}" ]; then
-  echo "Configured EMULATOR_LAUNCHER is not executable: ${LAUNCHER_PATH}" >&2
-  exit 1
-fi
-
-DIRECT_EMULATOR_BIN="${ANDROID_SDK_ROOT:-/android/sdk}/emulator/emulator"
-prepare_direct_emulator_logs() {
-  _runtime_dir="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}"
-  _kernel_log="${_runtime_dir}/kernel.log"
-  _logcat_log="${_runtime_dir}/logcat.log"
-
-  mkdir -p "${_runtime_dir}"
-  : > "${_kernel_log}"
-  : > "${_logcat_log}"
-
-  (
-    tail -n +1 -F "${_kernel_log}" 2>/dev/null | sed 's/^/[kernel] /' >&2
-  ) &
-  (
-    tail -n +1 -F "${_logcat_log}" 2>/dev/null | sed 's/^/[logcat] /' >&2
-  ) &
-}
-
-ensure_adb_server() {
-  if ! command -v adb >/dev/null 2>&1; then
-    log "WARNING: adb command unavailable; cannot pre-start adb server for direct launch."
-    return 0
-  fi
-
-  if adb start-server >/tmp/adb-start.log 2>&1; then
-    log "ADB server is running on port 5037 for direct emulator launch."
-  else
-    log "WARNING: adb start-server failed before direct launch."
-    sed 's/^/[start-emulator-with-turn] adb-start /' /tmp/adb-start.log >&2 || true
-  fi
-}
-
-launch_direct_emulator() {
-  _ports="${EMULATOR_PORTS:-5554,5555}"
-  _grpc_port="${EMULATOR_GRPC_PORT:-8554}"
-  _runtime_dir="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}"
-  _kernel_log="${_runtime_dir}/kernel.log"
-  _logcat_log="${_runtime_dir}/logcat.log"
-  _qemu_append="${EMULATOR_QEMU_APPEND:-panic=1}"
-
-  if [ ! -x "${DIRECT_EMULATOR_BIN}" ]; then
-    echo "Direct emulator binary is not executable: ${DIRECT_EMULATOR_BIN}" >&2
-    exit 1
-  fi
-
-  ensure_adb_server
-  prepare_direct_emulator_logs
-
-  set -- \
-    "${DIRECT_EMULATOR_BIN}" \
-    -avd Pixel2 \
-    -ports "${_ports}" \
-    -grpc "${_grpc_port}" \
-    -no-window \
-    -skip-adb-auth \
-    -shell-serial "file:${_kernel_log}" \
-    -logcat-output "${_logcat_log}" \
-    -feature AllowSnapshotMigration
-
-  if [ -n "${EMULATOR_RADIO_DEVICE}" ]; then
-    set -- "$@" -radio "${EMULATOR_RADIO_DEVICE}"
+    _radio_override_applied=1
   fi
 
   if [ -n "${TURN:-}" ]; then
@@ -663,9 +603,19 @@ launch_direct_emulator() {
   log "Using direct emulator mode; legacy launcher bypassed."
   log "Using direct emulator launch: ${DIRECT_EMULATOR_BIN}"
   log "Direct emulator ports: ${_ports} (grpc=${_grpc_port})"
-  log "Direct emulator radio device: ${EMULATOR_RADIO_DEVICE}"
+  if [ "${_radio_override_applied}" -eq 1 ]; then
+    log "Direct emulator radio override: ${EMULATOR_RADIO_DEVICE}"
+  else
+    log "Direct emulator radio override: disabled for emulator '${_emulator_version}'"
+  fi
   exec "$@"
 }
+
+LAUNCHER_PATH="${EMULATOR_LAUNCHER:-}"
+if [ -n "${LAUNCHER_PATH}" ] && [ ! -x "${LAUNCHER_PATH}" ]; then
+  echo "Configured EMULATOR_LAUNCHER is not executable: ${LAUNCHER_PATH}" >&2
+  exit 1
+fi
 
 if [ "${EMULATOR_LAUNCH_MODE}" = "legacy" ]; then
   if [ -z "${LAUNCHER_PATH}" ] && [ -x /android/sdk/launch-emulator.sh ]; then

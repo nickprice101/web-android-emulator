@@ -58,7 +58,7 @@ EMULATOR_PLATFORM="${EMULATOR_PLATFORM:-platforms;android-34}"
 EXPECTED_GUEST_API="${EXPECTED_GUEST_API:-34}"
 EXPECTED_RADIO_OVERRIDE_MODE="${EXPECTED_RADIO_OVERRIDE_MODE:-disabled}"
 GRPC_READY_TIMEOUT="${GRPC_READY_TIMEOUT:-300}"
-ADB_READY_TIMEOUT="${ADB_READY_TIMEOUT:-180}"
+ADB_READY_TIMEOUT="${ADB_READY_TIMEOUT:-240}"
 SIBLING_ADB_READY_TIMEOUT="${SIBLING_ADB_READY_TIMEOUT:-90}"
 REQUIRE_ADB_BRIDGE="${REQUIRE_ADB_BRIDGE:-1}"
 API_READY_TIMEOUT="${API_READY_TIMEOUT:-300}"
@@ -302,6 +302,14 @@ while [ "$(date +%s)" -lt "${adb_deadline}" ]; do
   fi
   sleep 5
 done
+
+if [ "${adb_ok}" -ne 1 ] && probe_tcp_port "${CONTAINER_IP}" 5555; then
+  log "Running one final forwarded adb bridge probe after the polling deadline to catch late-ready transports..."
+  adb_bridge_state="$(probe_external_adb_bridge_state "${CONTAINER_IP}")"
+  if [ "${adb_bridge_state}" = "device" ]; then
+    adb_ok=1
+  fi
+fi
 
 if [ "${REQUIRE_ADB_BRIDGE}" = "1" ]; then
   if [ "${adb_ok}" -ne 1 ]; then

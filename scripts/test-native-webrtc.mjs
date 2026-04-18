@@ -429,6 +429,11 @@ assert.match(
 );
 assert.match(
   startupSmokeTest,
+  /ADB_READY_TIMEOUT="\$\{ADB_READY_TIMEOUT:-240\}"/,
+  "startup smoke test must give the forwarded adb bridge enough time to become reachable on slower cold boots"
+);
+assert.match(
+  startupSmokeTest,
   /REQUIRE_HEALTHY_CONTAINER="\$\{REQUIRE_HEALTHY_CONTAINER:-1\}"/,
   "startup smoke test must require Docker health to become healthy by default"
 );
@@ -506,6 +511,11 @@ assert.match(
   startupSmokeTest,
   /Verifying that a sibling-container adb client can connect to the forwarded bridge target \$\{CONTAINER_IP\}:5555/,
   "startup smoke test must explicitly prove sibling-container adb connectivity after the forwarded bridge becomes locally ready"
+);
+assert.match(
+  startupSmokeTest,
+  /Running one final forwarded adb bridge probe after the polling deadline to catch late-ready transports/,
+  "startup smoke test must perform one final strict bridge probe before declaring a timeout so it cannot miss transports that become ready right at the deadline"
 );
 assert.match(
   startupSmokeTest,

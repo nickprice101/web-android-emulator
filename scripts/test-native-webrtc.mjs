@@ -509,6 +509,11 @@ assert.match(
 );
 assert.match(
   startupSmokeTest,
+  /RUNTIME_LOG_PATH="\$\{ARTIFACT_DIR\}\/container\.log"[\s\S]*docker logs "\$\{CONTAINER_NAME\}" > "\$\{RUNTIME_LOG_PATH\}"/,
+  "startup smoke test must capture docker logs to a file before grep-based validation so pipefail cannot turn successful matches into false negatives"
+);
+assert.match(
+  startupSmokeTest,
   /Waiting up to .* for the forwarded adb bridge target \$\{CONTAINER_IP\}:5555 to report device from inside the container/,
   "startup smoke test must wait for a usable adb transport on the forwarded non-loopback bridge path"
 );

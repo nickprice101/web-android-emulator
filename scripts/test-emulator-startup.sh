@@ -393,72 +393,67 @@ else
 fi
 
 log "Checking container logs for stale API 30 fallback or fatal modem startup errors..."
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'version: AndroidVersion\.ApiLevel=30|Pkg\.Dependencies=emulator#30\.0\.4'; then
+RUNTIME_LOG_PATH="${ARTIFACT_DIR}/container.log"
+docker logs "${CONTAINER_NAME}" > "${RUNTIME_LOG_PATH}" 2>&1 || true
+if grep -Eq 'version: AndroidVersion\.ApiLevel=30|Pkg\.Dependencies=emulator#30\.0\.4' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the base launcher resolving an API 30 guest"
 fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq '\[start-emulator-with-turn\]\s+emulator binary version\s+: Android emulator version 30\.'; then
+if grep -Eq '\[start-emulator-with-turn\]\s+emulator binary version\s+: Android emulator version 30\.' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the stale emulator 30.x binary with the API 34 guest image"
 fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq 'Your emulator is out of date, please update by launching Android Studio:'; then
+if grep -Fq 'Your emulator is out of date, please update by launching Android Studio:' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the emulator binary is still outdated for the installed guest image"
 fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq 'libxkbfile.so.1: cannot open shared object file'; then
+if grep -Fq 'libxkbfile.so.1: cannot open shared object file' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the manually installed emulator binary still misses libxkbfile.so.1 at runtime"
 fi
-if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq '[start-emulator-with-turn] Using direct emulator mode; legacy launcher bypassed.'; then
+if ! grep -Fq '[start-emulator-with-turn] Using direct emulator mode; legacy launcher bypassed.' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs do not show the expected direct emulator launch mode"
 fi
-if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq '[start-emulator-with-turn] Started direct adb bridge forwarder on '; then
+if ! grep -Fq '[start-emulator-with-turn] Started direct adb bridge forwarder on ' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs do not show the expected direct-mode adb bridge forwarder startup"
 fi
-if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq '\[start-emulator-with-turn\] (Verified IPv6 literal ::1 resolves for qemu modem sockets\.|Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution\.)'; then
+if ! grep -Eq '\[start-emulator-with-turn\] (Verified IPv6 literal ::1 resolves for qemu modem sockets\.|Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution\.)' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs do not show the expected IPv6 modem-resolution preflight succeeding"
 fi
 if [ "${EXPECTED_RADIO_OVERRIDE_MODE}" = "disabled" ]; then
-  if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq '[start-emulator-with-turn] Direct emulator radio override: disabled'; then
+  if ! grep -Fq '[start-emulator-with-turn] Direct emulator radio override: disabled' "${RUNTIME_LOG_PATH}"; then
     fail "Container logs do not show the expected radio-override-disabled path for this emulator build"
   fi
 else
-  if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq "[start-emulator-with-turn] Direct emulator radio override: ${EXPECTED_RADIO_OVERRIDE_MODE}"; then
+  if ! grep -Fq "[start-emulator-with-turn] Direct emulator radio override: ${EXPECTED_RADIO_OVERRIDE_MODE}" "${RUNTIME_LOG_PATH}"; then
     fail "Container logs do not show the expected direct-launch radio override (${EXPECTED_RADIO_OVERRIDE_MODE})"
   fi
 fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'adb binary unavailable for direct launch|WARNING: adb command unavailable'; then
+if grep -Eq 'adb binary unavailable for direct launch|WARNING: adb command unavailable' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show that adb is unavailable in the runtime image"
 fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 5037'; then
+if grep -Eq 'AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 5037' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the emulator failing to reach the host adb server on port 5037"
 fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'qemu-system-x86_64-headless: -radio: invalid option'; then
+if grep -Eq 'qemu-system-x86_64-headless: -radio: invalid option' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the unsupported -radio option crash"
 fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'WARNING: IPv6 literal ::1 still does not resolve after provisioning dummy IPv6 interface'; then
+if grep -Eq 'WARNING: IPv6 literal ::1 still does not resolve after provisioning dummy IPv6 interface' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the IPv6 modem-resolution preflight still failing"
 fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'start-emulator-with-turn\.sh: [0-9]+: _emulator_version: parameter not set'; then
+if grep -Eq 'start-emulator-with-turn\.sh: [0-9]+: _emulator_version: parameter not set' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the direct-launch wrapper crashing on an unset emulator-version variable"
 fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'adb binary unavailable for direct launch|WARNING: adb command unavailable'; then
-  fail "Container logs show that adb is unavailable in the runtime image"
-fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 5037'; then
-  fail "Container logs still show the emulator failing to reach the host adb server on port 5037"
-fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1'; then
+if grep -Eq 'qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the fatal QEMU modem ::1 resolution failure"
 fi
-if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq '\[start-emulator-with-turn\] Using emulator launcher: /android/sdk/launch-emulator\.sh'; then
+if grep -Eq '\[start-emulator-with-turn\] Using emulator launcher: /android/sdk/launch-emulator\.sh' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the wrapper falling back to the legacy Google launcher"
 fi
 
 log "Analyzing captured container logs for known restart-loop signatures..."
-docker logs "${CONTAINER_NAME}" > "${ARTIFACT_DIR}/container.log" 2>&1 || true
-if ! node "${ROOT_DIR}/scripts/analyze-emulator-log.mjs" "${ARTIFACT_DIR}/container.log"; then
+if ! node "${ROOT_DIR}/scripts/analyze-emulator-log.mjs" "${RUNTIME_LOG_PATH}"; then
   fail "Log analyzer found a known emulator restart-loop signature"
 fi
 
 log "Scanning container logs for persistent socat timeout errors..."
-timeout_count=$(docker logs "${CONTAINER_NAME}" 2>&1 | grep -c "Connection timed out" || true)
+timeout_count=$(grep -c "Connection timed out" "${RUNTIME_LOG_PATH}" || true)
 if [ "${timeout_count}" -gt "${MAX_ACCEPTABLE_TIMEOUTS}" ]; then
   log "WARNING: Found ${timeout_count} 'Connection timed out' lines in container logs (threshold: ${MAX_ACCEPTABLE_TIMEOUTS})."
 else

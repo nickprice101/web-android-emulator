@@ -60,6 +60,24 @@ EMULATOR_INTERNAL_ADB_PORT="${EMULATOR_INTERNAL_ADB_PORT:-5555}"
 log() { echo "[test-emulator-startup] $*"; }
 fail() { echo "[test-emulator-startup] FAIL: $*" >&2; exit 1; }
 
+probe_local_tcp_port() {
+  local port="$1"
+  docker exec "${CONTAINER_NAME}" python3 - "$port" <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+port = int(sys.argv[1])
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.settimeout(2)
+try:
+    sock.connect(("127.0.0.1", port))
+except OSError:
+    sys.exit(1)
+finally:
+    sock.close()
+PY
+}
+
 probe_guest_property() {
   local prop="$1"
   docker exec "${CONTAINER_NAME}" sh -c "timeout 10 adb -s 127.0.0.1:5555 shell getprop ${prop} 2>/dev/null | tr -d '\r'" 2>/dev/null || true
@@ -112,7 +130,7 @@ log "Waiting up to ${GRPC_READY_TIMEOUT}s for emulator gRPC port 8554..."
 grpc_deadline=$(( $(date +%s) + GRPC_READY_TIMEOUT ))
 grpc_ok=0
 while [ "$(date +%s)" -lt "${grpc_deadline}" ]; do
-  if docker exec "${CONTAINER_NAME}" sh -c 'nc -z -w2 127.0.0.1 8554' 2>/dev/null; then
+  if probe_local_tcp_port 8554; then
     grpc_ok=1
     break
   fi
@@ -151,7 +169,7 @@ fi
 adb_deadline=$(( $(date +%s) + ADB_READY_TIMEOUT ))
 adb_ok=0
 while [ "$(date +%s)" -lt "${adb_deadline}" ]; do
-  if docker exec "${CONTAINER_NAME}" sh -c 'nc -z -w2 127.0.0.1 5555' 2>/dev/null; then
+  if probe_local_tcp_port 5555; then
     adb_ok=1
     break
   fi

@@ -83,6 +83,41 @@ assert.match(
 );
 assert.match(
   emulatorTurnWrapper,
+  /ipv6_literal_resolution_works\(\)/,
+  "emulator wrapper must probe whether literal ::1 resolution actually works for qemu instead of assuming loopback alone is enough"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /ensure_ipv6_addrconfig_interface\(\)/,
+  "emulator wrapper must provide an IPv6 addrconfig helper path for namespaces where ::1 still fails to resolve"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /ip link add dummy0 type dummy/,
+  "emulator wrapper must be able to provision a dummy interface when AI_ADDRCONFIG still rejects the ::1 modem socket address"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /ip -6 addr add fd00::1\/128 dev dummy0/,
+  "emulator wrapper must add a non-loopback IPv6 address so ::1 can resolve in IPv6-restricted namespaces"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /Verified IPv6 literal ::1 resolves for qemu modem sockets\./,
+  "emulator wrapper must log when the IPv6 modem-resolution preflight succeeds"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution\./,
+  "emulator wrapper must log when it had to provision an IPv6 addrconfig helper interface"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /WARNING: IPv6 literal ::1 still does not resolve after provisioning dummy IPv6 interface/,
+  "emulator wrapper must log a clear warning if the IPv6 addrconfig helper still fails"
+);
+assert.match(
+  emulatorTurnWrapper,
   /ensure_ipv6_loopback_interface\(\)/,
   "emulator wrapper must proactively restore IPv6 loopback so qemu modem chardev host=::1 can resolve in restricted container namespaces"
 );
@@ -267,8 +302,18 @@ assert.match(
 );
 assert.match(
   logAnalyzer,
+  /direct-launch-ipv6-addrconfig-unavailable/,
+  "emulator log analyzer must classify direct-launch restart loops caused by literal ::1 resolution still failing in the container namespace"
+);
+assert.match(
+  logAnalyzer,
   /direct-launch-left-internal-modem-enabled/,
   "emulator log analyzer must classify the direct-launch restart loop caused by the internal modem backend"
+);
+assert.match(
+  logAnalyzer,
+  /container namespace still could not resolve the literal ::1 modem socket address for QEMU/i,
+  "emulator log analyzer must explain the IPv6 addrconfig restart loop clearly"
 );
 assert.match(
   logAnalyzer,

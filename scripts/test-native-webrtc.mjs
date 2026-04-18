@@ -263,6 +263,7 @@ assert.match(
 );
 
 const emulatorDockerfile = readRepoFile("emulator/Dockerfile");
+const emulatorHealthcheck = readRepoFile("emulator/healthcheck-adb-bridge.sh");
 assert.doesNotMatch(
   emulatorDockerfile,
   /sdkmanager.*"emulator"/,
@@ -287,6 +288,41 @@ assert.match(
   emulatorDockerfile,
   /Expected adb at \$\{ANDROID_SDK_ROOT\}\/platform-tools\/adb after installing platform-tools/,
   "emulator Dockerfile must fail the build if adb is still missing after installing platform-tools"
+);
+assert.match(
+  emulatorDockerfile,
+  /COPY healthcheck-adb-bridge\.sh \/usr\/local\/bin\/healthcheck-adb-bridge\.sh/,
+  "emulator Dockerfile must install the custom adb-bridge healthcheck instead of inheriting the stale base-image healthcheck"
+);
+assert.match(
+  emulatorDockerfile,
+  /HEALTHCHECK --interval=30s --timeout=30s --start-period=180s --retries=10 CMD \["\/usr\/local\/bin\/healthcheck-adb-bridge\.sh"\]/,
+  "emulator Dockerfile must override the inherited healthcheck with the adb-bridge-aware healthcheck script"
+);
+assert.match(
+  emulatorHealthcheck,
+  /resolve_container_ipv4\(\)/,
+  "emulator adb-bridge healthcheck must derive a non-loopback container IPv4 for the bridge probe"
+);
+assert.match(
+  emulatorHealthcheck,
+  /adb_target="\$\{EMULATOR_HEALTHCHECK_ADB_TARGET:-\}"/,
+  "emulator adb-bridge healthcheck must allow an explicit ADB target override"
+);
+assert.match(
+  emulatorHealthcheck,
+  /adb_target="\$\{container_ipv4\}:5555"/,
+  "emulator adb-bridge healthcheck must default to probing the non-loopback adb bridge target on port 5555"
+);
+assert.match(
+  emulatorHealthcheck,
+  /"\$\{ADB_BIN\}" connect "\$\{adb_target\}"/,
+  "emulator adb-bridge healthcheck must explicitly connect to the selected adb bridge target before checking state"
+);
+assert.match(
+  emulatorHealthcheck,
+  /"\$\{ADB_BIN\}" -s "\$\{adb_target\}" get-state/,
+  "emulator adb-bridge healthcheck must check a specific adb serial so it cannot fail with 'more than one device/emulator'"
 );
 assert.match(
   emulatorDockerfile,
@@ -318,13 +354,53 @@ assert.match(
 );
 assert.match(
   startupSmokeTest,
+  /timeout 15 python3 - "\$host" "\$port"/,
+  "startup smoke test must also support non-loopback TCP probes from the host for the exported adb bridge path"
+);
+assert.match(
+  startupSmokeTest,
   /socket\.socket\(socket\.AF_INET, socket\.SOCK_STREAM\)/,
   "startup smoke test must use a Python socket probe for container-local readiness checks"
 );
 assert.match(
   startupSmokeTest,
-  /REQUIRE_ADB_BRIDGE="\$\{REQUIRE_ADB_BRIDGE:-0\}"/,
-  "startup smoke test must default the ADB bridge probe to passive mode so slow adb forwarding does not look like a boot failure"
+  /REQUIRE_ADB_BRIDGE="\$\{REQUIRE_ADB_BRIDGE:-1\}"/,
+  "startup smoke test must require the adb bridge by default so it cannot report success while emulator:5555 is still unusable"
+);
+assert.match(
+  startupSmokeTest,
+  /REQUIRE_HEALTHY_CONTAINER="\$\{REQUIRE_HEALTHY_CONTAINER:-1\}"/,
+  "startup smoke test must require Docker health to become healthy by default"
+);
+assert.match(
+  startupSmokeTest,
+  /HEALTH_READY_TIMEOUT="\$\{HEALTH_READY_TIMEOUT:-240\}"/,
+  "startup smoke test must wait for the container healthcheck to turn healthy after bridge validation"
+);
+assert.match(
+  startupSmokeTest,
+  /EMULATOR_ADB_SERIAL="\$\{EMULATOR_ADB_SERIAL:-emulator-\$\{EMULATOR_CONSOLE_PORT\}\}"/,
+  "startup smoke test must probe the internal emulator transport by explicit serial instead of creating duplicate localhost adb transports"
+);
+assert.match(
+  startupSmokeTest,
+  /probe_external_adb_bridge_state\(\)/,
+  "startup smoke test must verify adb connectivity from the non-loopback bridge path"
+);
+assert.match(
+  startupSmokeTest,
+  /--add-host "emulator:\$\{container_ip\}"/,
+  "startup smoke test must simulate the sibling-container adb target name emulator:5555 during the bridge probe"
+);
+assert.match(
+  startupSmokeTest,
+  /adb connect emulator:5555/,
+  "startup smoke test must explicitly verify that a non-loopback adb client can connect to emulator:5555"
+);
+assert.match(
+  startupSmokeTest,
+  /adb -s emulator:5555 get-state/,
+  "startup smoke test must require the external adb bridge target to report a usable device transport"
 );
 assert.match(
   startupSmokeTest,
@@ -333,13 +409,28 @@ assert.match(
 );
 assert.match(
   startupSmokeTest,
-  /WARNING: ADB socat port 5555 did not become reachable within .* Treating startup as healthy because the emulator runtime is still up\./,
-  "startup smoke test must explicitly treat slow ADB bridge readiness as non-fatal in passive mode"
+  /WARNING: external adb target emulator:5555 did not report device within .* Treating startup as healthy because the emulator runtime is still up\./,
+  "startup smoke test must explicitly describe passive failures in terms of the real external adb bridge target"
 );
 assert.match(
   startupSmokeTest,
   /ADB bridge probe mode:/,
   "startup smoke test output must report whether the ADB bridge check ran in strict or passive mode"
+);
+assert.match(
+  startupSmokeTest,
+  /Waiting up to .* for external adb target emulator:5555 to report device/,
+  "startup smoke test must wait for a usable adb transport on the non-loopback bridge path"
+);
+assert.match(
+  startupSmokeTest,
+  /Waiting up to \$\{HEALTH_READY_TIMEOUT\}s for container health status to become healthy/,
+  "startup smoke test must explicitly wait for Docker health status after bridge validation"
+);
+assert.match(
+  startupSmokeTest,
+  /Container health status is healthy\./,
+  "startup smoke test must report a healthy container once the custom healthcheck succeeds"
 );
 assert.match(
   startupSmokeTest,
@@ -355,6 +446,11 @@ assert.doesNotMatch(
   startupSmokeTest,
   /-p 18554:8554[\s\S]*-p 15555:5555/,
   "startup smoke test must not bind fixed host ports because the remote testbed can already have the production emulator stack using those ports"
+);
+assert.doesNotMatch(
+  startupSmokeTest,
+  /adb connect 127\.0\.0\.1:5555/,
+  "startup smoke test must not create duplicate localhost network transports inside the emulator container while probing guest state"
 );
 assert.match(
   logAnalyzer,

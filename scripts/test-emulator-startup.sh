@@ -45,6 +45,7 @@ STABILITY_WAIT_SECONDS="${STABILITY_WAIT_SECONDS:-30}"
 CONTAINER_NAME="${CONTAINER_NAME:-emu-smoke-test}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-${ROOT_DIR}/artifacts/emulator-startup}"
 MAX_ACCEPTABLE_TIMEOUTS="${MAX_ACCEPTABLE_TIMEOUTS:-20}"
+EMULATOR_ADB_PORT="${EMULATOR_ADB_PORT:-5555}"
 
 log() { echo "[test-emulator-startup] $*"; }
 fail() { echo "[test-emulator-startup] FAIL: $*" >&2; exit 1; }
@@ -119,11 +120,11 @@ log "Checking that iptables has no DROP rule blocking ADB port 5557..."
 for _ipt in iptables iptables-legacy; do
   if docker exec "${CONTAINER_NAME}" sh -c "command -v ${_ipt} >/dev/null 2>&1"; then
     for _chain in INPUT OUTPUT FORWARD; do
-      if docker exec "${CONTAINER_NAME}" "${_ipt}" -C "${_chain}" -p tcp --dport 5557 -j DROP 2>/dev/null; then
-        fail "${_ipt} has a DROP rule for ADB port 5557 in ${_chain}"
+      if docker exec "${CONTAINER_NAME}" "${_ipt}" -C "${_chain}" -p tcp --dport "${EMULATOR_ADB_PORT}" -j DROP 2>/dev/null; then
+        fail "${_ipt} has a DROP rule for ADB port ${EMULATOR_ADB_PORT} in ${_chain}"
       fi
-      if docker exec "${CONTAINER_NAME}" "${_ipt}" -C "${_chain}" -p tcp --dport 5557 -s 127.0.0.1 -j DROP 2>/dev/null; then
-        fail "${_ipt} has a src-127.0.0.1 DROP rule for ADB port 5557 in ${_chain}"
+      if docker exec "${CONTAINER_NAME}" "${_ipt}" -C "${_chain}" -p tcp --dport "${EMULATOR_ADB_PORT}" -s 127.0.0.1 -j DROP 2>/dev/null; then
+        fail "${_ipt} has a src-127.0.0.1 DROP rule for ADB port ${EMULATOR_ADB_PORT} in ${_chain}"
       fi
     done
   fi
@@ -189,6 +190,9 @@ if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'version: AndroidVersion\.Api
 fi
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1'; then
   fail "Container logs still show the fatal QEMU modem ::1 resolution failure"
+fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq '\[start-emulator-with-turn\] Using emulator launcher: /android/sdk/launch-emulator\.sh'; then
+  fail "Container logs show the wrapper falling back to the legacy Google launcher"
 fi
 
 log "Scanning container logs for persistent socat timeout errors..."

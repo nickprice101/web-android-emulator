@@ -148,6 +148,21 @@ assert.match(
 );
 assert.match(
   emulatorTurnWrapper,
+  /EMULATOR_LAUNCH_MODE="\$\{EMULATOR_LAUNCH_MODE:-direct\}"/,
+  "emulator wrapper must default to direct launch mode so the legacy Google launcher cannot override the patched API 34 AVD"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /launch_direct_emulator\(\)/,
+  "emulator wrapper must provide a direct emulator launch path under our control"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /Using direct emulator mode; legacy launcher bypassed\./,
+  "emulator wrapper must log when it bypasses the legacy launcher"
+);
+assert.match(
+  emulatorTurnWrapper,
   /ADB_PORT_GUARD_INTERVAL/,
   "emulator wrapper must expose ADB_PORT_GUARD_INTERVAL so the iptables polling cadence is configurable"
 );
@@ -167,6 +182,18 @@ assert.match(
   emulatorDockerfile,
   /ln -s "\$\{_avd_dir\}" \/Pixel2\.avd[\s\S]*ln -s "\$\{_avd_ini\}" \/Pixel2\.ini/,
   "emulator Dockerfile must replace legacy /Pixel2 metadata with links to the canonical rebuilt AVD"
+);
+
+const logAnalyzer = readRepoFile("scripts/analyze-emulator-log.mjs");
+assert.match(
+  logAnalyzer,
+  /legacy-launcher-overrode-patched-avd/,
+  "emulator log analyzer must classify the known legacy-launcher restart loop"
+);
+assert.match(
+  logAnalyzer,
+  /wrapper patched API 34 AVD configs, then \/android\/sdk\/launch-emulator\.sh still resolved API 30 and hit the modem ::1 crash/i,
+  "emulator log analyzer must explain the launcher override failure clearly"
 );
 
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

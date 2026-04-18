@@ -99,6 +99,7 @@ export ANDROID_USER_HOME="${ANDROID_USER_HOME:-${HOME}/.android}"
 export ANDROID_EMULATOR_HOME="${ANDROID_EMULATOR_HOME:-${ANDROID_USER_HOME}}"
 export ANDROID_AVD_HOME="${ANDROID_AVD_HOME:-${ANDROID_EMULATOR_HOME}/avd}"
 export ANDROID_SDK_HOME="${ANDROID_SDK_HOME:-${HOME}}"
+EMULATOR_LAUNCH_MODE="${EMULATOR_LAUNCH_MODE:-direct}"
 mkdir -p "${ANDROID_USER_HOME}" "${ANDROID_AVD_HOME}"
 
 ensure_pixel2_avd_aliases() {
@@ -466,38 +467,104 @@ else
   log "TURN_KEY not set (or placeholder); skipping -turncfg setup"
 fi
 
+DIRECT_EMULATOR_BIN="${ANDROID_SDK_ROOT:-/android/sdk}/emulator/emulator"
+prepare_direct_emulator_logs() {
+  _runtime_dir="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}"
+  _kernel_log="${_runtime_dir}/kernel.log"
+  _logcat_log="${_runtime_dir}/logcat.log"
+
+  mkdir -p "${_runtime_dir}"
+  : > "${_kernel_log}"
+  : > "${_logcat_log}"
+
+  (
+    tail -n +1 -F "${_kernel_log}" 2>/dev/null | sed 's/^/[kernel] /' >&2
+  ) &
+  (
+    tail -n +1 -F "${_logcat_log}" 2>/dev/null | sed 's/^/[logcat] /' >&2
+  ) &
+}
+
+launch_direct_emulator() {
+  _ports="${EMULATOR_PORTS:-5554,5555}"
+  _grpc_port="${EMULATOR_GRPC_PORT:-8554}"
+  _kernel_log="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}/kernel.log"
+  _logcat_log="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}/logcat.log"
+  _qemu_append="${EMULATOR_QEMU_APPEND:-panic=1}"
+
+  if [ ! -x "${DIRECT_EMULATOR_BIN}" ]; then
+    echo "Direct emulator binary is not executable: ${DIRECT_EMULATOR_BIN}" >&2
+    exit 1
+  fi
+
+  prepare_direct_emulator_logs
+
+  set -- \
+    "${DIRECT_EMULATOR_BIN}" \
+    -avd Pixel2 \
+    -ports "${_ports}" \
+    -grpc "${_grpc_port}" \
+    -no-window \
+    -skip-adb-auth \
+    -shell-serial "file:${_kernel_log}" \
+    -logcat-output "${_logcat_log}" \
+    -feature AllowSnapshotMigration
+
+  if [ -n "${TURN:-}" ]; then
+    set -- "$@" -turncfg "${TURN}"
+  fi
+
+  if [ -n "${EMULATOR_PARAMS_VALUE}" ]; then
+    # EMULATOR_PARAMS is a user-controlled shell-style flag string.
+    # Split it once here so direct mode preserves current compose behavior.
+    eval "set -- \"\$@\" ${EMULATOR_PARAMS_VALUE}"
+  fi
+
+  if [ -n "${_qemu_append}" ]; then
+    set -- "$@" -qemu -append "${_qemu_append}"
+  fi
+
+  log "Using direct emulator launch: ${DIRECT_EMULATOR_BIN}"
+  log "Direct emulator ports: ${_ports} (grpc=${_grpc_port})"
+  exec "$@"
+}
+
 LAUNCHER_PATH="${EMULATOR_LAUNCHER:-}"
 if [ -n "${LAUNCHER_PATH}" ] && [ ! -x "${LAUNCHER_PATH}" ]; then
   echo "Configured EMULATOR_LAUNCHER is not executable: ${LAUNCHER_PATH}" >&2
   exit 1
 fi
 
-if [ -z "${LAUNCHER_PATH}" ] && [ -x /android/sdk/launch-emulator.sh ]; then
-  LAUNCHER_PATH="/android/sdk/launch-emulator.sh"
-fi
+if [ "${EMULATOR_LAUNCH_MODE}" = "legacy" ]; then
+  if [ -z "${LAUNCHER_PATH}" ] && [ -x /android/sdk/launch-emulator.sh ]; then
+    LAUNCHER_PATH="/android/sdk/launch-emulator.sh"
+  fi
 
-if [ -z "${LAUNCHER_PATH}" ] && [ -n "${APP_PATH:-}" ] && [ -x "${APP_PATH}/mixins/scripts/run.sh" ]; then
-  LAUNCHER_PATH="${APP_PATH}/mixins/scripts/run.sh"
-fi
+  if [ -z "${LAUNCHER_PATH}" ] && [ -n "${APP_PATH:-}" ] && [ -x "${APP_PATH}/mixins/scripts/run.sh" ]; then
+    LAUNCHER_PATH="${APP_PATH}/mixins/scripts/run.sh"
+  fi
 
-if [ -z "${LAUNCHER_PATH}" ] && [ -x /home/androidusr/docker-android/mixins/scripts/run.sh ]; then
-  LAUNCHER_PATH="/home/androidusr/docker-android/mixins/scripts/run.sh"
-fi
+  if [ -z "${LAUNCHER_PATH}" ] && [ -x /home/androidusr/docker-android/mixins/scripts/run.sh ]; then
+    LAUNCHER_PATH="/home/androidusr/docker-android/mixins/scripts/run.sh"
+  fi
 
-if [ -z "${LAUNCHER_PATH}" ]; then
-  echo "No compatible emulator launcher found. Checked /android/sdk/launch-emulator.sh and docker-android run.sh." >&2
-  exit 1
-fi
+  if [ -z "${LAUNCHER_PATH}" ]; then
+    echo "No compatible emulator launcher found. Checked /android/sdk/launch-emulator.sh and docker-android run.sh." >&2
+    exit 1
+  fi
 
-log "Using emulator launcher: ${LAUNCHER_PATH}"
+  log "Using emulator launcher: ${LAUNCHER_PATH}"
+else
+  log "Using direct emulator mode; legacy launcher bypassed."
+fi
 
 # Copy the emulator's gRPC JWT token to the shared volume so that the
 # bridge-webrtc service can authenticate its gRPC-Web requests.
 # The watcher runs in the background so that exec below can still replace
-# this shell process with launch-emulator.sh.
+# this shell process with the final emulator process.
 TOKEN_WATCHER_MODE="${EMULATOR_TOKEN_WATCHER:-auto}"
 if [ "${TOKEN_WATCHER_MODE}" = "auto" ]; then
-  if [ "${LAUNCHER_PATH}" = "/android/sdk/launch-emulator.sh" ]; then
+  if [ "${EMULATOR_LAUNCH_MODE}" = "direct" ] || [ "${LAUNCHER_PATH}" = "/android/sdk/launch-emulator.sh" ]; then
     TOKEN_WATCHER_MODE="enabled"
   else
     TOKEN_WATCHER_MODE="disabled"
@@ -536,7 +603,7 @@ fi
 #    nftables directly rather than the legacy iptables frontend.
 # 4. Both iptables (nft backend) and iptables-legacy (legacy backend) must be
 #    cleared since the emulator and the kernel may use different backends.
-ADB_PORT="${EMULATOR_ADB_PORT:-5557}"
+ADB_PORT="${EMULATOR_ADB_PORT:-5555}"
 ADB_PORT_GUARD_INTERVAL="${ADB_PORT_GUARD_INTERVAL:-1}"
 
 _ensure_adb_accept() {
@@ -587,7 +654,7 @@ _ensure_adb_accept
 # Write the guard loop to a file and run it via setsid so it is in its own
 # session and is NOT killed when the current shell process-group is replaced
 # by exec.  This is the most reliable way to keep the guard alive across the
-# exec chain: start-emulator-with-turn.sh → launch-emulator.sh → emulator.
+# exec chain: start-emulator-with-turn.sh -> launcher/direct mode -> emulator.
 _GUARD_SCRIPT=/tmp/adb-port-guard.sh
 cat > "${_GUARD_SCRIPT}" << GUARD_EOF
 #!/bin/sh
@@ -623,4 +690,8 @@ chmod +x "${_GUARD_SCRIPT}"
 setsid "${_GUARD_SCRIPT}" &
 log "ADB port guard started for port ${ADB_PORT} (interval ${ADB_PORT_GUARD_INTERVAL}s)"
 
-exec "${LAUNCHER_PATH}" "$@"
+if [ "${EMULATOR_LAUNCH_MODE}" = "legacy" ]; then
+  exec "${LAUNCHER_PATH}" "$@"
+fi
+
+launch_direct_emulator

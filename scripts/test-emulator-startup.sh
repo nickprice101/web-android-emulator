@@ -2,7 +2,7 @@
 # test-emulator-startup.sh - integration smoke test for the emulator container.
 #
 # Builds the emulator image from the local Dockerfile, runs it with minimal
-# privileges, and verifies that:
+# privileges, and verifies from inside the container network namespace that:
 #   1. The emulator gRPC server starts and binds port 8554.
 #   2. The ADB-forward socat bridge on port 5555 can optionally be probed
 #      without blocking startup classification when that path is merely slow.
@@ -106,8 +106,6 @@ docker run -d \
   -e EMULATOR_PARAMS="-no-audio -grpc 8554 -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save" \
   -e TURN_KEY="" \
   -e ADBKEY="PLACEHOLDER_ADB_KEY" \
-  -p 18554:8554 \
-  -p 15555:5555 \
   "${EMULATOR_IMAGE_TAG}" 2>&1 | head -1
 
 log "Waiting up to ${GRPC_READY_TIMEOUT}s for emulator gRPC port 8554..."

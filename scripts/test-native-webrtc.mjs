@@ -311,6 +311,11 @@ assert.match(
   /ADB bridge probe mode:/,
   "startup smoke test output must report whether the ADB bridge check ran in strict or passive mode"
 );
+assert.doesNotMatch(
+  startupSmokeTest,
+  /-p 18554:8554[\s\S]*-p 15555:5555/,
+  "startup smoke test must not bind fixed host ports because the remote testbed can already have the production emulator stack using those ports"
+);
 assert.match(
   logAnalyzer,
   /likelyHealthyLongRunningRuntime/,

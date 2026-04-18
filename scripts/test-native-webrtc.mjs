@@ -149,7 +149,7 @@ assert.match(
 assert.match(
   emulatorTurnWrapper,
   /EMULATOR_LAUNCH_MODE="\$\{EMULATOR_LAUNCH_MODE:-direct\}"/,
-  "emulator wrapper must default to direct launch mode so the legacy Google launcher cannot override the patched API 34 AVD"
+  "emulator wrapper must default to direct launch mode so the wrapper controls the final emulator argv"
 );
 assert.match(
   emulatorTurnWrapper,
@@ -158,8 +158,28 @@ assert.match(
 );
 assert.match(
   emulatorTurnWrapper,
-  /Using direct emulator mode; legacy launcher bypassed\./,
-  "emulator wrapper must log when it bypasses the legacy launcher"
+  /EMULATOR_RADIO_DEVICE="\$\{EMULATOR_RADIO_DEVICE:-null\}"/,
+  "emulator wrapper must default the emulator radio backend to null so QEMU does not create the crashing internal modem socket"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /set -- "\$@" -radio "\$\{EMULATOR_RADIO_DEVICE\}"/,
+  "emulator wrapper must pass -radio with the configured backend during direct launch"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /Direct emulator radio device: \$\{EMULATOR_RADIO_DEVICE\}/,
+  "emulator wrapper must log the radio backend used during direct launch for restart-loop diagnostics"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /adb start-server >/,
+  "emulator wrapper must pre-start adb in direct mode so the emulator does not race a missing adb daemon on port 5037"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /elif \[ "\$\{EMULATOR_LAUNCH_MODE\}" = "legacy" \]; then[\s\S]*ADB_PORT="5557"[\s\S]*ADB_PORT="5555"/,
+  "emulator wrapper must guard the correct internal ADB port for both legacy and direct launch modes"
 );
 assert.match(
   emulatorTurnWrapper,
@@ -188,12 +208,17 @@ const logAnalyzer = readRepoFile("scripts/analyze-emulator-log.mjs");
 assert.match(
   logAnalyzer,
   /legacy-launcher-overrode-patched-avd/,
-  "emulator log analyzer must classify the known legacy-launcher restart loop"
+  "emulator log analyzer must still classify the known legacy-launcher restart loop"
 );
 assert.match(
   logAnalyzer,
-  /wrapper patched API 34 AVD configs, then \/android\/sdk\/launch-emulator\.sh still resolved API 30 and hit the modem ::1 crash/i,
-  "emulator log analyzer must explain the launcher override failure clearly"
+  /direct-launch-left-internal-modem-enabled/,
+  "emulator log analyzer must classify the direct-launch restart loop caused by the internal modem backend"
+);
+assert.match(
+  logAnalyzer,
+  /Direct launch reached API 34, but the wrapper still left the internal modem backend enabled,/,
+  "emulator log analyzer must explain the new direct-launch modem crash clearly"
 );
 
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

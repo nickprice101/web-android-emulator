@@ -298,6 +298,16 @@ const logAnalyzer = readRepoFile("scripts/analyze-emulator-log.mjs");
 const startupSmokeTest = readRepoFile("scripts/test-emulator-startup.sh");
 assert.match(
   startupSmokeTest,
+  /DEFAULT_CONTAINER_NAME="emu-smoke-test-\$\(date \+%s\)-\$\$"/,
+  "startup smoke test must default to a unique container name so repeated remote runs cannot collide with stale containers"
+);
+assert.match(
+  startupSmokeTest,
+  /if docker inspect "\$\{CONTAINER_NAME\}" >\/dev\/null 2>&1; then[\s\S]*Removing stale test container \${CONTAINER_NAME} before startup[\s\S]*docker rm -f "\$\{CONTAINER_NAME\}"/,
+  "startup smoke test must pre-clean a reused container name before docker run so reruns cannot fail on stale containers"
+);
+assert.match(
+  startupSmokeTest,
   /probe_local_tcp_port\(\)/,
   "startup smoke test must use an internal TCP probe helper rather than assuming netcat is installed in the runtime image"
 );
@@ -330,6 +340,11 @@ assert.match(
   startupSmokeTest,
   /ADB bridge probe mode:/,
   "startup smoke test output must report whether the ADB bridge check ran in strict or passive mode"
+);
+assert.match(
+  startupSmokeTest,
+  /WARNING: guest ADB state is still pending after \$\{guest_probe_timeout\}s/,
+  "startup smoke test must report the actual passive guest-probe timeout instead of the strict timeout when guest ADB stays pending"
 );
 assert.match(
   startupSmokeTest,

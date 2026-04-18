@@ -53,7 +53,8 @@ API_READY_TIMEOUT="${API_READY_TIMEOUT:-300}"
 PASSIVE_API_PROBE_TIMEOUT="${PASSIVE_API_PROBE_TIMEOUT:-60}"
 REQUIRE_GUEST_BOOT_COMPLETED="${REQUIRE_GUEST_BOOT_COMPLETED:-0}"
 STABILITY_WAIT_SECONDS="${STABILITY_WAIT_SECONDS:-30}"
-CONTAINER_NAME="${CONTAINER_NAME:-emu-smoke-test}"
+DEFAULT_CONTAINER_NAME="emu-smoke-test-$(date +%s)-$$"
+CONTAINER_NAME="${CONTAINER_NAME:-${DEFAULT_CONTAINER_NAME}}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-${ROOT_DIR}/artifacts/emulator-startup}"
 MAX_ACCEPTABLE_TIMEOUTS="${MAX_ACCEPTABLE_TIMEOUTS:-20}"
 EMULATOR_INTERNAL_ADB_PORT="${EMULATOR_INTERNAL_ADB_PORT:-5555}"
@@ -114,6 +115,11 @@ if [ "${BUILD_IMAGE}" = "1" ]; then
   log "Build complete."
 else
   log "Skipping build - using existing image ${EMULATOR_IMAGE_TAG}."
+fi
+
+if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+  log "Removing stale test container ${CONTAINER_NAME} before startup..."
+  docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
 fi
 
 log "Starting container ${CONTAINER_NAME}..."
@@ -240,7 +246,7 @@ if [ "${REQUIRE_GUEST_BOOT_COMPLETED}" = "1" ]; then
 elif [ "${guest_api}" = "${EXPECTED_GUEST_API}" ] && [ "${boot_completed}" = "1" ]; then
   log "Observed Android guest API level ${guest_api} and boot_completed=${boot_completed} during passive ADB probing."
 else
-  log "WARNING: guest ADB state is still pending after ${API_READY_TIMEOUT}s (api='${guest_api:-<empty>}', boot_completed='${boot_completed:-<empty>}'). Treating startup as healthy because gRPC is up and the container is stable."
+  log "WARNING: guest ADB state is still pending after ${guest_probe_timeout}s (api='${guest_api:-<empty>}', boot_completed='${boot_completed:-<empty>}'). Treating startup as healthy because gRPC is up and the container is stable."
 fi
 
 log "Checking container logs for stale API 30 fallback or fatal modem startup errors..."

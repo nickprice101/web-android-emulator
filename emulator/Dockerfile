@@ -4,6 +4,9 @@ ARG EMULATOR_IMAGE
 
 ARG EMULATOR_SYSTEM_IMAGE=system-images;android-34;google_apis;x86_64
 ARG EMULATOR_PLATFORM=platforms;android-34
+ARG EMULATOR_PACKAGE_VERSION=36.5.10
+ARG EMULATOR_PACKAGE_URL=https://dl.google.com/android/repository/emulator-linux_x64-15081367.zip
+ARG EMULATOR_PACKAGE_SHA1=9f03296214df837c608d0d101e5e03ebcebb4343
 
 ENV ANDROID_USER_HOME=/root/.android \
     ANDROID_EMULATOR_HOME=/root/.android \
@@ -69,6 +72,27 @@ RUN set -eux; \
   touch "${ANDROID_USER_HOME}/repositories.cfg"; \
   yes | "${SDKMANAGER_BIN}" --licenses >/dev/null; \
   "${SDKMANAGER_BIN}" --channel=0 "platform-tools" "${EMULATOR_SYSTEM_IMAGE}" "${EMULATOR_PLATFORM}"; \
+  TMP_ZIP="$(mktemp)"; \
+  TMP_DIR="$(mktemp -d)"; \
+  curl -fsSL "${EMULATOR_PACKAGE_URL}" -o "${TMP_ZIP}"; \
+  printf '%s  %s\n' "${EMULATOR_PACKAGE_SHA1}" "${TMP_ZIP}" | sha1sum -c -; \
+  unzip -q "${TMP_ZIP}" -d "${TMP_DIR}"; \
+  _emulator_pkg_xml_old="${ANDROID_SDK_ROOT}/emulator/package.xml"; \
+  if [ -f "${_emulator_pkg_xml_old}" ]; then \
+    cp "${_emulator_pkg_xml_old}" "${TMP_DIR}/emulator/package.xml"; \
+    sed -i '/<revision>/,/<\/revision>/c\    <revision>\n      <major>36</major>\n      <minor>5</minor>\n      <micro>10</micro>\n    </revision>' "${TMP_DIR}/emulator/package.xml"; \
+  fi; \
+  rm -rf "${ANDROID_SDK_ROOT}/emulator"; \
+  mv "${TMP_DIR}/emulator" "${ANDROID_SDK_ROOT}/emulator"; \
+  rm -rf "${TMP_ZIP}" "${TMP_DIR}"; \
+  _emulator_version="$("${ANDROID_SDK_ROOT}/emulator/emulator" -version | head -1 || true)"; \
+  echo "Installed emulator binary version: ${_emulator_version}"; \
+  case "${_emulator_version}" in \
+    *"Android emulator version 30."*) \
+      echo "Expected manual emulator archive install to replace the stale 30.x base-image emulator binary" >&2; \
+      exit 1; \
+      ;; \
+  esac; \
   if [ ! -x "${ANDROID_SDK_ROOT}/platform-tools/adb" ]; then \
     echo "Expected adb at ${ANDROID_SDK_ROOT}/platform-tools/adb after installing platform-tools" >&2; \
     exit 1; \
@@ -106,16 +130,21 @@ RUN set -eux; \
   echo "Canonicalized Pixel2 AVD metadata and compatibility links for /Pixel2.avd and ${ANDROID_SDK_ROOT}/avd/Pixel2.avd"
 
 COPY start-emulator-with-turn.sh /usr/local/bin/start-emulator-with-turn.sh
+COPY healthcheck-adb-bridge.sh /usr/local/bin/healthcheck-adb-bridge.sh
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     openssl \
     jq \
     python3 \
+    libxkbfile1 \
+    socat \
     iptables \
     iproute2 \
     nftables \
   && rm -rf /var/lib/apt/lists/*
-RUN chmod +x /usr/local/bin/start-emulator-with-turn.sh
+RUN chmod +x /usr/local/bin/start-emulator-with-turn.sh /usr/local/bin/healthcheck-adb-bridge.sh
+
+HEALTHCHECK --interval=30s --timeout=30s --start-period=180s --retries=10 CMD ["/usr/local/bin/healthcheck-adb-bridge.sh"]
 
 ENTRYPOINT ["/usr/local/bin/start-emulator-with-turn.sh"]

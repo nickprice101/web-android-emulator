@@ -29,11 +29,62 @@ ensure_ipv6_loopback_host() {
   log "Added missing ::1 localhost mapping to /etc/hosts for qemu modem socket resolution."
 }
 
-ensure_ipv6_loopback_interface() {
-  if command -v ip >/dev/null 2>&1 && ip -6 addr show dev lo 2>/dev/null | grep -q '::1/128'; then
+ipv6_literal_resolution_works() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+try:
+    flags = getattr(socket, "AI_ADDRCONFIG", 0)
+    socket.getaddrinfo("::1", 0, socket.AF_INET6, socket.SOCK_STREAM, 0, flags)
+except OSError:
+    sys.exit(1)
+
+sys.exit(0)
+PY
+    return $?
+  fi
+
+  if command -v getent >/dev/null 2>&1; then
+    getent ahostsv6 ::1 >/dev/null 2>&1
+    return $?
+  fi
+
+  return 1
+}
+
+ensure_ipv6_addrconfig_interface() {
+  if ipv6_literal_resolution_works; then
+    log "Verified IPv6 literal ::1 resolves for qemu modem sockets."
     return 0
   fi
 
+  if ! command -v ip >/dev/null 2>&1; then
+    log "WARNING: ip command unavailable; cannot provision an IPv6 addrconfig helper interface."
+    return 1
+  fi
+
+  if ! ip link show dev dummy0 >/dev/null 2>&1; then
+    ip link add dummy0 type dummy >/dev/null 2>&1 || true
+  fi
+  if ip link show dev dummy0 >/dev/null 2>&1; then
+    ip link set dummy0 up >/dev/null 2>&1 || true
+    if ! ip -6 addr show dev dummy0 2>/dev/null | grep -q 'fd00::1/128'; then
+      ip -6 addr add fd00::1/128 dev dummy0 >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if ipv6_literal_resolution_works; then
+    log "Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution."
+    return 0
+  fi
+
+  log "WARNING: IPv6 literal ::1 still does not resolve after provisioning dummy IPv6 interface; qemu modem socket may still fail."
+  return 1
+}
+
+ensure_ipv6_loopback_interface() {
   # qemu's modem chardev binds to ::1. Some container hosts boot with IPv6
   # disabled in the namespace, which makes getaddrinfo(::1) fail with
   # "Name or service not known". Re-enable IPv6 and restore ::1 on loopback.
@@ -58,6 +109,8 @@ ensure_ipv6_loopback_interface() {
   else
     log "WARNING: unable to provision ::1 on loopback; qemu modem socket may still fail."
   fi
+
+  ensure_ipv6_addrconfig_interface || true
 }
 
 append_param_if_missing() {

@@ -192,6 +192,9 @@ fi
 if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq '[start-emulator-with-turn] Using direct emulator mode; legacy launcher bypassed.'; then
   fail "Container logs do not show the expected direct emulator launch mode"
 fi
+if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq '\[start-emulator-with-turn\] (Verified IPv6 literal ::1 resolves for qemu modem sockets\.|Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution\.)'; then
+  fail "Container logs do not show the expected IPv6 modem-resolution preflight succeeding"
+fi
 if [ "${EXPECTED_RADIO_OVERRIDE_MODE}" = "disabled" ]; then
   if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq '[start-emulator-with-turn] Direct emulator radio override: disabled'; then
     fail "Container logs do not show the expected radio-override-disabled path for this emulator build"
@@ -209,6 +212,9 @@ if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'AdbHostServer\.cpp:102: Unab
 fi
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'qemu-system-x86_64-headless: -radio: invalid option'; then
   fail "Container logs still show the unsupported -radio option crash"
+fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'WARNING: IPv6 literal ::1 still does not resolve after provisioning dummy IPv6 interface'; then
+  fail "Container logs show the IPv6 modem-resolution preflight still failing"
 fi
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'start-emulator-with-turn\.sh: [0-9]+: _emulator_version: parameter not set'; then
   fail "Container logs show the direct-launch wrapper crashing on an unset emulator-version variable"

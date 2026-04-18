@@ -29,6 +29,11 @@ const findings = {
     /\[start-emulator-with-turn\] Direct emulator radio override: disabled/.test(logText),
   directLaunchAdbServerStarted:
     /\[start-emulator-with-turn\] ADB server is running on port 5037 for direct emulator launch/.test(logText),
+  ipv6LiteralResolutionVerified:
+    /\[start-emulator-with-turn\] Verified IPv6 literal ::1 resolves for qemu modem sockets\./.test(logText) ||
+    /\[start-emulator-with-turn\] Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution\./.test(logText),
+  ipv6LiteralResolutionFailed:
+    /\[start-emulator-with-turn\] WARNING: IPv6 literal ::1 still does not resolve after provisioning dummy IPv6 interface/.test(logText),
   missingAdbBinary:
     /\[start-emulator-with-turn\] (WARNING|ERROR): adb binary unavailable/.test(logText) ||
     /\[start-emulator-with-turn\] WARNING: adb command unavailable/.test(logText),
@@ -53,6 +58,17 @@ if (
   rootCause = "legacy-launcher-overrode-patched-avd";
   explanation =
     "The wrapper patched API 34 AVD configs, then /android/sdk/launch-emulator.sh still resolved API 30 and hit the modem ::1 crash.";
+} else if (
+  findings.directWrapperPatchedApi34 &&
+  findings.directModeEnabled &&
+  findings.directLaunchReportedApi34 &&
+  findings.directLaunchRadioOverrideDisabled &&
+  findings.modemIpv6Failure &&
+  !findings.ipv6LiteralResolutionVerified
+) {
+  rootCause = "direct-launch-ipv6-addrconfig-unavailable";
+  explanation =
+    "Direct launch was configured correctly, but the container namespace still could not resolve the literal ::1 modem socket address for QEMU, so the emulator crashed in the IPv6 addrconfig path and restarted.";
 } else if (
   findings.directWrapperPatchedApi34 &&
   findings.directModeEnabled &&
@@ -109,7 +125,7 @@ if (rootCause !== "unclassified") {
   process.exit(1);
 }
 
-if (findings.modemIpv6Failure || findings.invalidRadioOption || findings.shellUnsetVariableCrash || findings.repeatedRestartLoop) {
+if (findings.modemIpv6Failure || findings.invalidRadioOption || findings.shellUnsetVariableCrash || findings.ipv6LiteralResolutionFailed || findings.repeatedRestartLoop) {
   console.error("Detected an emulator restart loop, but the exact signature was not classified.");
   process.exit(1);
 }

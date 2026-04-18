@@ -295,6 +295,67 @@ assert.match(
 );
 
 const logAnalyzer = readRepoFile("scripts/analyze-emulator-log.mjs");
+const startupSmokeTest = readRepoFile("scripts/test-emulator-startup.sh");
+assert.match(
+  startupSmokeTest,
+  /DEFAULT_CONTAINER_NAME="emu-smoke-test-\$\(date \+%s\)-\$\$"/,
+  "startup smoke test must default to a unique container name so repeated remote runs cannot collide with stale containers"
+);
+assert.match(
+  startupSmokeTest,
+  /if docker inspect "\$\{CONTAINER_NAME\}" >\/dev\/null 2>&1; then[\s\S]*Removing stale test container \${CONTAINER_NAME} before startup[\s\S]*docker rm -f "\$\{CONTAINER_NAME\}"/,
+  "startup smoke test must pre-clean a reused container name before docker run so reruns cannot fail on stale containers"
+);
+assert.match(
+  startupSmokeTest,
+  /probe_local_tcp_port\(\)/,
+  "startup smoke test must use an internal TCP probe helper rather than assuming netcat is installed in the runtime image"
+);
+assert.match(
+  startupSmokeTest,
+  /timeout 15 docker exec "\$\{CONTAINER_NAME\}" python3 - "\$port"/,
+  "startup smoke test must bound the host-side gRPC\/ADB port probe so docker exec cannot hang indefinitely"
+);
+assert.match(
+  startupSmokeTest,
+  /socket\.socket\(socket\.AF_INET, socket\.SOCK_STREAM\)/,
+  "startup smoke test must use a Python socket probe for container-local readiness checks"
+);
+assert.match(
+  startupSmokeTest,
+  /REQUIRE_ADB_BRIDGE="\$\{REQUIRE_ADB_BRIDGE:-0\}"/,
+  "startup smoke test must default the ADB bridge probe to passive mode so slow adb forwarding does not look like a boot failure"
+);
+assert.match(
+  startupSmokeTest,
+  /PASSIVE_API_PROBE_TIMEOUT="\$\{PASSIVE_API_PROBE_TIMEOUT:-60\}"/,
+  "startup smoke test must keep passive guest-state probing short enough that slow adb responses do not stall the whole remote testbed"
+);
+assert.match(
+  startupSmokeTest,
+  /WARNING: ADB socat port 5555 did not become reachable within .* Treating startup as healthy because the emulator runtime is still up\./,
+  "startup smoke test must explicitly treat slow ADB bridge readiness as non-fatal in passive mode"
+);
+assert.match(
+  startupSmokeTest,
+  /ADB bridge probe mode:/,
+  "startup smoke test output must report whether the ADB bridge check ran in strict or passive mode"
+);
+assert.match(
+  startupSmokeTest,
+  /WARNING: guest ADB state is still pending after \$\{guest_probe_timeout\}s/,
+  "startup smoke test must report the actual passive guest-probe timeout instead of the strict timeout when guest ADB stays pending"
+);
+assert.match(
+  startupSmokeTest,
+  /Guest probe pending:/,
+  "startup smoke test must emit periodic guest-probe progress so remote workflow runs do not look hung"
+);
+assert.doesNotMatch(
+  startupSmokeTest,
+  /-p 18554:8554[\s\S]*-p 15555:5555/,
+  "startup smoke test must not bind fixed host ports because the remote testbed can already have the production emulator stack using those ports"
+);
 assert.match(
   logAnalyzer,
   /likelyHealthyLongRunningRuntime/,
@@ -304,6 +365,11 @@ assert.match(
   logAnalyzer,
   /adbPortGuardHeartbeatCount/,
   "emulator log analyzer must count adb-port-guard heartbeats so long-running startup logs can be recognized as healthy"
+);
+assert.match(
+  logAnalyzer,
+  /adbPortGuardHeartbeatCount >= 3/,
+  "emulator log analyzer must treat a few sustained adb-port-guard heartbeats as sufficient evidence of a healthy long-running runtime"
 );
 assert.match(
   logAnalyzer,

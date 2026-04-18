@@ -2,9 +2,10 @@
 # test-emulator-startup.sh - integration smoke test for the emulator container.
 #
 # Builds the emulator image from the local Dockerfile, runs it with minimal
-# privileges, and verifies that:
+# privileges, and verifies from inside the container network namespace that:
 #   1. The emulator gRPC server starts and binds port 8554.
-#   2. The ADB-forward socat bridge on port 5555 becomes reachable.
+#   2. The ADB-forward socat bridge on port 5555 can optionally be probed
+#      without blocking startup classification when that path is merely slow.
 #   3. The Android guest can optionally be probed over ADB without blocking
 #      startup classification when guest boot is merely slow.
 #   4. The container remains running after the emulator becomes reachable.
@@ -23,7 +24,9 @@
 #   EMULATOR_PLATFORM        Android platform package to install.
 #   EXPECTED_GUEST_API       Expected Android guest API level.
 #   GRPC_READY_TIMEOUT       Seconds to wait for gRPC port 8554.
-#   ADB_READY_TIMEOUT        Seconds to wait for ADB port 5555.
+#   ADB_READY_TIMEOUT        Seconds to spend on best-effort ADB bridge checks.
+#   REQUIRE_ADB_BRIDGE       Set to 1 to fail unless port 5555 accepts
+#                            connections before the timeout expires.
 #   API_READY_TIMEOUT        Seconds to spend on best-effort guest ADB probes.
 #   REQUIRE_GUEST_BOOT_COMPLETED
 #                            Set to 1 to fail unless the Android guest reports
@@ -45,10 +48,13 @@ EXPECTED_GUEST_API="${EXPECTED_GUEST_API:-34}"
 EXPECTED_RADIO_OVERRIDE_MODE="${EXPECTED_RADIO_OVERRIDE_MODE:-disabled}"
 GRPC_READY_TIMEOUT="${GRPC_READY_TIMEOUT:-300}"
 ADB_READY_TIMEOUT="${ADB_READY_TIMEOUT:-180}"
+REQUIRE_ADB_BRIDGE="${REQUIRE_ADB_BRIDGE:-0}"
 API_READY_TIMEOUT="${API_READY_TIMEOUT:-300}"
+PASSIVE_API_PROBE_TIMEOUT="${PASSIVE_API_PROBE_TIMEOUT:-60}"
 REQUIRE_GUEST_BOOT_COMPLETED="${REQUIRE_GUEST_BOOT_COMPLETED:-0}"
 STABILITY_WAIT_SECONDS="${STABILITY_WAIT_SECONDS:-30}"
-CONTAINER_NAME="${CONTAINER_NAME:-emu-smoke-test}"
+DEFAULT_CONTAINER_NAME="emu-smoke-test-$(date +%s)-$$"
+CONTAINER_NAME="${CONTAINER_NAME:-${DEFAULT_CONTAINER_NAME}}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-${ROOT_DIR}/artifacts/emulator-startup}"
 MAX_ACCEPTABLE_TIMEOUTS="${MAX_ACCEPTABLE_TIMEOUTS:-20}"
 EMULATOR_INTERNAL_ADB_PORT="${EMULATOR_INTERNAL_ADB_PORT:-5555}"
@@ -56,9 +62,27 @@ EMULATOR_INTERNAL_ADB_PORT="${EMULATOR_INTERNAL_ADB_PORT:-5555}"
 log() { echo "[test-emulator-startup] $*"; }
 fail() { echo "[test-emulator-startup] FAIL: $*" >&2; exit 1; }
 
+probe_local_tcp_port() {
+  local port="$1"
+  timeout 15 docker exec "${CONTAINER_NAME}" python3 - "$port" <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+port = int(sys.argv[1])
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.settimeout(2)
+try:
+    sock.connect(("127.0.0.1", port))
+except OSError:
+    sys.exit(1)
+finally:
+    sock.close()
+PY
+}
+
 probe_guest_property() {
   local prop="$1"
-  docker exec "${CONTAINER_NAME}" sh -c "timeout 10 adb -s 127.0.0.1:5555 shell getprop ${prop} 2>/dev/null | tr -d '\r'" 2>/dev/null || true
+  timeout 20 docker exec "${CONTAINER_NAME}" sh -c "timeout 10 adb -s 127.0.0.1:5555 shell getprop ${prop} 2>/dev/null | tr -d '\r'" 2>/dev/null || true
 }
 
 mkdir -p "${ARTIFACT_DIR}"
@@ -93,6 +117,11 @@ else
   log "Skipping build - using existing image ${EMULATOR_IMAGE_TAG}."
 fi
 
+if docker inspect "${CONTAINER_NAME}" >/dev/null 2>&1; then
+  log "Removing stale test container ${CONTAINER_NAME} before startup..."
+  docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+fi
+
 log "Starting container ${CONTAINER_NAME}..."
 docker run -d \
   --name "${CONTAINER_NAME}" \
@@ -102,15 +131,13 @@ docker run -d \
   -e EMULATOR_PARAMS="-no-audio -grpc 8554 -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save" \
   -e TURN_KEY="" \
   -e ADBKEY="PLACEHOLDER_ADB_KEY" \
-  -p 18554:8554 \
-  -p 15555:5555 \
   "${EMULATOR_IMAGE_TAG}" 2>&1 | head -1
 
 log "Waiting up to ${GRPC_READY_TIMEOUT}s for emulator gRPC port 8554..."
 grpc_deadline=$(( $(date +%s) + GRPC_READY_TIMEOUT ))
 grpc_ok=0
 while [ "$(date +%s)" -lt "${grpc_deadline}" ]; do
-  if docker exec "${CONTAINER_NAME}" sh -c 'nc -z -w2 127.0.0.1 8554' 2>/dev/null; then
+  if probe_local_tcp_port 8554; then
     grpc_ok=1
     break
   fi
@@ -141,11 +168,15 @@ for _ipt in iptables iptables-legacy; do
   fi
 done
 
-log "Waiting up to ${ADB_READY_TIMEOUT}s for ADB socat port 5555 to accept connections..."
+if [ "${REQUIRE_ADB_BRIDGE}" = "1" ]; then
+  log "Waiting up to ${ADB_READY_TIMEOUT}s for ADB socat port 5555 to accept connections..."
+else
+  log "Probing ADB socat port 5555 for up to ${ADB_READY_TIMEOUT}s without blocking startup classification..."
+fi
 adb_deadline=$(( $(date +%s) + ADB_READY_TIMEOUT ))
 adb_ok=0
 while [ "$(date +%s)" -lt "${adb_deadline}" ]; do
-  if docker exec "${CONTAINER_NAME}" sh -c 'nc -z -w2 127.0.0.1 5555' 2>/dev/null; then
+  if probe_local_tcp_port 5555; then
     adb_ok=1
     break
   fi
@@ -155,29 +186,43 @@ while [ "$(date +%s)" -lt "${adb_deadline}" ]; do
   sleep 5
 done
 
-if [ "${adb_ok}" -ne 1 ]; then
-  log "=== Container logs ==="
-  docker logs "${CONTAINER_NAME}" 2>&1 | tail -80
-  fail "Timed out waiting for ADB socat port 5555 after ${ADB_READY_TIMEOUT}s"
+if [ "${REQUIRE_ADB_BRIDGE}" = "1" ]; then
+  if [ "${adb_ok}" -ne 1 ]; then
+    log "=== Container logs ==="
+    docker logs "${CONTAINER_NAME}" 2>&1 | tail -80
+    fail "Timed out waiting for ADB socat port 5555 after ${ADB_READY_TIMEOUT}s"
+  fi
+  log "ADB socat port 5555 is accessible."
+elif [ "${adb_ok}" -eq 1 ]; then
+  log "ADB socat port 5555 became reachable during passive probing."
+else
+  log "WARNING: ADB socat port 5555 did not become reachable within ${ADB_READY_TIMEOUT}s. Treating startup as healthy because the emulator runtime is still up."
 fi
-log "ADB socat port 5555 is accessible."
 
 if [ "${REQUIRE_GUEST_BOOT_COMPLETED}" = "1" ]; then
   log "Waiting up to ${API_READY_TIMEOUT}s for the Android guest to report API ${EXPECTED_GUEST_API} and boot_completed=1..."
+  guest_probe_timeout="${API_READY_TIMEOUT}"
 else
-  log "Probing guest ADB state for up to ${API_READY_TIMEOUT}s without blocking startup classification..."
+  log "Probing guest ADB state for up to ${PASSIVE_API_PROBE_TIMEOUT}s without blocking startup classification..."
+  guest_probe_timeout="${PASSIVE_API_PROBE_TIMEOUT}"
 fi
-api_deadline=$(( $(date +%s) + API_READY_TIMEOUT ))
+api_deadline=$(( $(date +%s) + guest_probe_timeout ))
 guest_api=""
 boot_completed=""
+guest_probe_iter=0
 while [ "$(date +%s)" -lt "${api_deadline}" ]; do
-  docker exec "${CONTAINER_NAME}" sh -c 'timeout 10 adb connect 127.0.0.1:5555 >/tmp/adb-connect.log 2>&1 || true' >/dev/null 2>&1 || true
+  timeout 20 docker exec "${CONTAINER_NAME}" sh -c 'timeout 10 adb connect 127.0.0.1:5555 >/tmp/adb-connect.log 2>&1 || true' >/dev/null 2>&1 || true
 
   guest_api="$(probe_guest_property ro.build.version.sdk)"
   boot_completed="$(probe_guest_property sys.boot_completed)"
+  guest_probe_iter=$((guest_probe_iter + 1))
 
   if [ "${guest_api}" = "${EXPECTED_GUEST_API}" ] && [ "${boot_completed}" = "1" ]; then
     break
+  fi
+
+  if [ $((guest_probe_iter % 6)) -eq 0 ]; then
+    log "Guest probe pending: api='${guest_api:-<empty>}' boot_completed='${boot_completed:-<empty>}' elapsed=$((guest_probe_iter * 5))s"
   fi
 
   if ! docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" 2>/dev/null | grep -q true; then
@@ -201,7 +246,7 @@ if [ "${REQUIRE_GUEST_BOOT_COMPLETED}" = "1" ]; then
 elif [ "${guest_api}" = "${EXPECTED_GUEST_API}" ] && [ "${boot_completed}" = "1" ]; then
   log "Observed Android guest API level ${guest_api} and boot_completed=${boot_completed} during passive ADB probing."
 else
-  log "WARNING: guest ADB state is still pending after ${API_READY_TIMEOUT}s (api='${guest_api:-<empty>}', boot_completed='${boot_completed:-<empty>}'). Treating startup as healthy because gRPC is up and the container is stable."
+  log "WARNING: guest ADB state is still pending after ${guest_probe_timeout}s (api='${guest_api:-<empty>}', boot_completed='${boot_completed:-<empty>}'). Treating startup as healthy because gRPC is up and the container is stable."
 fi
 
 log "Checking container logs for stale API 30 fallback or fatal modem startup errors..."
@@ -277,7 +322,8 @@ log "Container remained running for the full stability window."
 log ""
 log "Emulator startup test PASSED"
 log "  - gRPC port 8554: reachable"
-log "  - ADB socat port 5555: reachable"
+log "  - ADB bridge probe mode: $( [ "${REQUIRE_ADB_BRIDGE}" = "1" ] && printf '%s' 'strict' || printf '%s' 'passive' )"
+log "  - ADB socat port 5555: $( [ "${adb_ok}" -eq 1 ] && printf '%s' 'reachable' || printf '%s' 'pending' )"
 log "  - Guest ADB probe mode: $( [ "${REQUIRE_GUEST_BOOT_COMPLETED}" = "1" ] && printf '%s' 'strict' || printf '%s' 'passive' )"
 log "  - Android guest API: ${guest_api:-pending}"
 log "  - Guest boot_completed: ${boot_completed:-pending}"

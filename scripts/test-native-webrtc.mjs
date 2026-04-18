@@ -264,10 +264,10 @@ assert.match(
 
 const emulatorDockerfile = readRepoFile("emulator/Dockerfile");
 const emulatorHealthcheck = readRepoFile("emulator/healthcheck-adb-bridge.sh");
-assert.doesNotMatch(
+assert.match(
   emulatorDockerfile,
-  /sdkmanager.*"emulator"/,
-  "emulator Dockerfile must NOT update the emulator binary via sdkmanager; the base image bundles a compatible version and newer sdkmanager builds add iptables ADB-port restrictions that break socat forwarding"
+  /"\$\{SDKMANAGER_BIN\}" --channel=0 "platform-tools" "emulator" "\$\{EMULATOR_SYSTEM_IMAGE\}" "\$\{EMULATOR_PLATFORM\}"/,
+  "emulator Dockerfile must install a current emulator binary because the API 34 system image declares a newer emulator dependency than the public API 30 base image provides"
 );
 assert.match(
   emulatorDockerfile,
@@ -421,6 +421,11 @@ assert.match(
   startupSmokeTest,
   /Waiting up to .* for external adb target emulator:5555 to report device/,
   "startup smoke test must wait for a usable adb transport on the non-loopback bridge path"
+);
+assert.match(
+  startupSmokeTest,
+  /stale emulator 30\.x binary with the API 34 guest image/,
+  "startup smoke test must reject the stale emulator 30.x binary when validating the API 34 guest path"
 );
 assert.match(
   startupSmokeTest,

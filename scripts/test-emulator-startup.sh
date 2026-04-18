@@ -316,6 +316,9 @@ log "Checking container logs for stale API 30 fallback or fatal modem startup er
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'version: AndroidVersion\.ApiLevel=30|Pkg\.Dependencies=emulator#30\.0\.4'; then
   fail "Container logs still show the base launcher resolving an API 30 guest"
 fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq '\[start-emulator-with-turn\]\s+emulator binary version\s+: Android emulator version 30\.'; then
+  fail "Container logs still show the stale emulator 30.x binary with the API 34 guest image"
+fi
 if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq '[start-emulator-with-turn] Using direct emulator mode; legacy launcher bypassed.'; then
   fail "Container logs do not show the expected direct emulator launch mode"
 fi

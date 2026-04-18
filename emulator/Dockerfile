@@ -68,7 +68,7 @@ RUN set -eux; \
   mkdir -p "${ANDROID_USER_HOME}" "${ANDROID_AVD_HOME}"; \
   touch "${ANDROID_USER_HOME}/repositories.cfg"; \
   yes | "${SDKMANAGER_BIN}" --licenses >/dev/null; \
-  "${SDKMANAGER_BIN}" --channel=0 "platform-tools" "${EMULATOR_SYSTEM_IMAGE}" "${EMULATOR_PLATFORM}"; \
+  "${SDKMANAGER_BIN}" --channel=0 "platform-tools" "emulator" "${EMULATOR_SYSTEM_IMAGE}" "${EMULATOR_PLATFORM}"; \
   if [ ! -x "${ANDROID_SDK_ROOT}/platform-tools/adb" ]; then \
     echo "Expected adb at ${ANDROID_SDK_ROOT}/platform-tools/adb after installing platform-tools" >&2; \
     exit 1; \

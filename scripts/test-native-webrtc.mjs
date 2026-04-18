@@ -149,7 +149,7 @@ assert.match(
 assert.match(
   emulatorTurnWrapper,
   /EMULATOR_LAUNCH_MODE="\$\{EMULATOR_LAUNCH_MODE:-direct\}"/,
-  "emulator wrapper must default to direct launch mode so the legacy Google launcher cannot override the patched API 34 AVD"
+  "emulator wrapper must default to direct launch mode so the wrapper controls the final emulator argv"
 );
 assert.match(
   emulatorTurnWrapper,
@@ -233,7 +233,12 @@ const logAnalyzer = readRepoFile("scripts/analyze-emulator-log.mjs");
 assert.match(
   logAnalyzer,
   /legacy-launcher-overrode-patched-avd/,
-  "emulator log analyzer must classify the known legacy-launcher restart loop"
+  "emulator log analyzer must still classify the known legacy-launcher restart loop"
+);
+assert.match(
+  logAnalyzer,
+  /direct-launch-left-internal-modem-enabled/,
+  "emulator log analyzer must classify the direct-launch restart loop caused by the internal modem backend"
 );
 assert.match(
   logAnalyzer,

@@ -46,7 +46,7 @@ STABILITY_WAIT_SECONDS="${STABILITY_WAIT_SECONDS:-30}"
 CONTAINER_NAME="${CONTAINER_NAME:-emu-smoke-test}"
 ARTIFACT_DIR="${ARTIFACT_DIR:-${ROOT_DIR}/artifacts/emulator-startup}"
 MAX_ACCEPTABLE_TIMEOUTS="${MAX_ACCEPTABLE_TIMEOUTS:-20}"
-EMULATOR_ADB_PORT="${EMULATOR_ADB_PORT:-5555}"
+EMULATOR_INTERNAL_ADB_PORT="${EMULATOR_INTERNAL_ADB_PORT:-5555}"
 
 log() { echo "[test-emulator-startup] $*"; }
 fail() { echo "[test-emulator-startup] FAIL: $*" >&2; exit 1; }
@@ -117,15 +117,15 @@ if [ "${grpc_ok}" -ne 1 ]; then
 fi
 log "gRPC port 8554 is accessible."
 
-log "Checking that iptables has no DROP rule blocking ADB port 5557..."
+log "Checking that iptables has no DROP rule blocking internal ADB port ${EMULATOR_INTERNAL_ADB_PORT}..."
 for _ipt in iptables iptables-legacy; do
   if docker exec "${CONTAINER_NAME}" sh -c "command -v ${_ipt} >/dev/null 2>&1"; then
     for _chain in INPUT OUTPUT FORWARD; do
-      if docker exec "${CONTAINER_NAME}" "${_ipt}" -C "${_chain}" -p tcp --dport "${EMULATOR_ADB_PORT}" -j DROP 2>/dev/null; then
-        fail "${_ipt} has a DROP rule for ADB port ${EMULATOR_ADB_PORT} in ${_chain}"
+      if docker exec "${CONTAINER_NAME}" "${_ipt}" -C "${_chain}" -p tcp --dport "${EMULATOR_INTERNAL_ADB_PORT}" -j DROP 2>/dev/null; then
+        fail "${_ipt} has a DROP rule for ADB port ${EMULATOR_INTERNAL_ADB_PORT} in ${_chain}"
       fi
-      if docker exec "${CONTAINER_NAME}" "${_ipt}" -C "${_chain}" -p tcp --dport "${EMULATOR_ADB_PORT}" -s 127.0.0.1 -j DROP 2>/dev/null; then
-        fail "${_ipt} has a src-127.0.0.1 DROP rule for ADB port ${EMULATOR_ADB_PORT} in ${_chain}"
+      if docker exec "${CONTAINER_NAME}" "${_ipt}" -C "${_chain}" -p tcp --dport "${EMULATOR_INTERNAL_ADB_PORT}" -s 127.0.0.1 -j DROP 2>/dev/null; then
+        fail "${_ipt} has a src-127.0.0.1 DROP rule for ADB port ${EMULATOR_INTERNAL_ADB_PORT} in ${_chain}"
       fi
     done
   fi

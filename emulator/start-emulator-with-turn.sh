@@ -583,6 +583,90 @@ if [ -n "${LAUNCHER_PATH}" ] && [ ! -x "${LAUNCHER_PATH}" ]; then
   exit 1
 fi
 
+DIRECT_EMULATOR_BIN="${ANDROID_SDK_ROOT:-/android/sdk}/emulator/emulator"
+prepare_direct_emulator_logs() {
+  _runtime_dir="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}"
+  _kernel_log="${_runtime_dir}/kernel.log"
+  _logcat_log="${_runtime_dir}/logcat.log"
+
+  mkdir -p "${_runtime_dir}"
+  : > "${_kernel_log}"
+  : > "${_logcat_log}"
+
+  (
+    tail -n +1 -F "${_kernel_log}" 2>/dev/null | sed 's/^/[kernel] /' >&2
+  ) &
+  (
+    tail -n +1 -F "${_logcat_log}" 2>/dev/null | sed 's/^/[logcat] /' >&2
+  ) &
+}
+
+ensure_adb_server() {
+  if ! command -v adb >/dev/null 2>&1; then
+    log "WARNING: adb command unavailable; cannot pre-start adb server for direct launch."
+    return 0
+  fi
+
+  if adb start-server >/tmp/adb-start.log 2>&1; then
+    log "ADB server is running on port 5037 for direct emulator launch."
+  else
+    log "WARNING: adb start-server failed before direct launch."
+    sed 's/^/[start-emulator-with-turn] adb-start /' /tmp/adb-start.log >&2 || true
+  fi
+}
+
+launch_direct_emulator() {
+  _ports="${EMULATOR_PORTS:-5554,5555}"
+  _grpc_port="${EMULATOR_GRPC_PORT:-8554}"
+  _runtime_dir="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}"
+  _kernel_log="${_runtime_dir}/kernel.log"
+  _logcat_log="${_runtime_dir}/logcat.log"
+  _qemu_append="${EMULATOR_QEMU_APPEND:-panic=1}"
+
+  if [ ! -x "${DIRECT_EMULATOR_BIN}" ]; then
+    echo "Direct emulator binary is not executable: ${DIRECT_EMULATOR_BIN}" >&2
+    exit 1
+  fi
+
+  ensure_adb_server
+  prepare_direct_emulator_logs
+
+  set -- \
+    "${DIRECT_EMULATOR_BIN}" \
+    -avd Pixel2 \
+    -ports "${_ports}" \
+    -grpc "${_grpc_port}" \
+    -no-window \
+    -skip-adb-auth \
+    -shell-serial "file:${_kernel_log}" \
+    -logcat-output "${_logcat_log}" \
+    -feature AllowSnapshotMigration
+
+  if [ -n "${EMULATOR_RADIO_DEVICE}" ]; then
+    set -- "$@" -radio "${EMULATOR_RADIO_DEVICE}"
+  fi
+
+  if [ -n "${TURN:-}" ]; then
+    set -- "$@" -turncfg "${TURN}"
+  fi
+
+  if [ -n "${EMULATOR_PARAMS_VALUE}" ]; then
+    # EMULATOR_PARAMS is a user-controlled shell-style flag string.
+    # Split it once here so direct mode preserves current compose behavior.
+    eval "set -- \"\$@\" ${EMULATOR_PARAMS_VALUE}"
+  fi
+
+  if [ -n "${_qemu_append}" ]; then
+    set -- "$@" -qemu -append "${_qemu_append}"
+  fi
+
+  log "Using direct emulator mode; legacy launcher bypassed."
+  log "Using direct emulator launch: ${DIRECT_EMULATOR_BIN}"
+  log "Direct emulator ports: ${_ports} (grpc=${_grpc_port})"
+  log "Direct emulator radio device: ${EMULATOR_RADIO_DEVICE}"
+  exec "$@"
+}
+
 if [ "${EMULATOR_LAUNCH_MODE}" = "legacy" ]; then
   if [ -z "${LAUNCHER_PATH}" ] && [ -x /android/sdk/launch-emulator.sh ]; then
     LAUNCHER_PATH="/android/sdk/launch-emulator.sh"
@@ -602,8 +686,6 @@ if [ "${EMULATOR_LAUNCH_MODE}" = "legacy" ]; then
   fi
 
   log "Using emulator launcher: ${LAUNCHER_PATH}"
-else
-  log "Using direct emulator mode; legacy launcher bypassed."
 fi
 
 # Copy the emulator's gRPC JWT token to the shared volume so that the
@@ -651,7 +733,13 @@ fi
 #    nftables directly rather than the legacy iptables frontend.
 # 4. Both iptables (nft backend) and iptables-legacy (legacy backend) must be
 #    cleared since the emulator and the kernel may use different backends.
-ADB_PORT="${EMULATOR_ADB_PORT:-5555}"
+if [ -n "${EMULATOR_ADB_PORT:-}" ]; then
+  ADB_PORT="${EMULATOR_ADB_PORT}"
+elif [ "${EMULATOR_LAUNCH_MODE}" = "legacy" ]; then
+  ADB_PORT="5557"
+else
+  ADB_PORT="5555"
+fi
 ADB_PORT_GUARD_INTERVAL="${ADB_PORT_GUARD_INTERVAL:-1}"
 
 _ensure_adb_accept() {
@@ -738,8 +826,8 @@ chmod +x "${_GUARD_SCRIPT}"
 setsid "${_GUARD_SCRIPT}" &
 log "ADB port guard started for port ${ADB_PORT} (interval ${ADB_PORT_GUARD_INTERVAL}s)"
 
-if [ "${EMULATOR_LAUNCH_MODE}" = "legacy" ]; then
-  exec "${LAUNCHER_PATH}" "$@"
+if [ "${EMULATOR_LAUNCH_MODE}" = "direct" ]; then
+  launch_direct_emulator
 fi
 
-launch_direct_emulator
+exec "${LAUNCHER_PATH}" "$@"

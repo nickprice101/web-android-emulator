@@ -8,7 +8,8 @@ ARG EMULATOR_PLATFORM=platforms;android-34
 ENV ANDROID_USER_HOME=/root/.android \
     ANDROID_EMULATOR_HOME=/root/.android \
     ANDROID_AVD_HOME=/root/.android/avd \
-    ANDROID_SDK_HOME=/root
+    ANDROID_SDK_HOME=/root \
+    PATH=/android/sdk/platform-tools:/android/sdk/emulator:${PATH}
 
 RUN set -eux; \
   ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/android/sdk}"; \
@@ -67,7 +68,11 @@ RUN set -eux; \
   mkdir -p "${ANDROID_USER_HOME}" "${ANDROID_AVD_HOME}"; \
   touch "${ANDROID_USER_HOME}/repositories.cfg"; \
   yes | "${SDKMANAGER_BIN}" --licenses >/dev/null; \
-  "${SDKMANAGER_BIN}" --channel=0 "${EMULATOR_SYSTEM_IMAGE}" "${EMULATOR_PLATFORM}"; \
+  "${SDKMANAGER_BIN}" --channel=0 "platform-tools" "${EMULATOR_SYSTEM_IMAGE}" "${EMULATOR_PLATFORM}"; \
+  if [ ! -x "${ANDROID_SDK_ROOT}/platform-tools/adb" ]; then \
+    echo "Expected adb at ${ANDROID_SDK_ROOT}/platform-tools/adb after installing platform-tools" >&2; \
+    exit 1; \
+  fi; \
   touch "${ANDROID_USER_HOME}/androidtool.cfg"; \
   printf '%s\n' 'android.settings.auto.update.check=false' >> "${ANDROID_USER_HOME}/androidtool.cfg"; \
   echo "no" | "${AVDMANAGER_BIN}" create avd --force --name Pixel2 --package "${EMULATOR_SYSTEM_IMAGE}" --device "pixel_5"; \

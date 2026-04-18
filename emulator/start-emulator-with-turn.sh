@@ -84,8 +84,8 @@ append_param_if_missing "-camera-front none"
 append_param_if_missing "-no-snapshot-save"
 # Disable SIM card emulation. Note: this does NOT prevent QEMU from creating
 # the modem chardev socket (which binds to ::1 and fails when the host has
-# IPv6 disabled). The real fix for that is hw.gsmModem=no in the AVD
-# config.ini, which is set at image build time in the Dockerfile.
+# IPv6 disabled). The direct-launch fix is an explicit -radio override, while
+# hw.gsmModem=no remains as a compatibility guard in the AVD config.ini.
 append_param_if_missing "-no-sim"
 # PulseAudio is often unavailable or misconfigured in headless container
 # environments. When the emulator cannot connect to the PulseAudio server it
@@ -99,7 +99,10 @@ export ANDROID_USER_HOME="${ANDROID_USER_HOME:-${HOME}/.android}"
 export ANDROID_EMULATOR_HOME="${ANDROID_EMULATOR_HOME:-${ANDROID_USER_HOME}}"
 export ANDROID_AVD_HOME="${ANDROID_AVD_HOME:-${ANDROID_EMULATOR_HOME}/avd}"
 export ANDROID_SDK_HOME="${ANDROID_SDK_HOME:-${HOME}}"
+ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/android/sdk}"
+export PATH="${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/emulator:${PATH}"
 EMULATOR_LAUNCH_MODE="${EMULATOR_LAUNCH_MODE:-direct}"
+EMULATOR_RADIO_DEVICE="${EMULATOR_RADIO_DEVICE:-null}"
 mkdir -p "${ANDROID_USER_HOME}" "${ANDROID_AVD_HOME}"
 
 ensure_pixel2_avd_aliases() {
@@ -162,7 +165,6 @@ ensure_pixel2_avd_aliases
 
 # Log the emulator configuration so that API level is immediately visible in
 # container logs and cannot be confused with an old running container.
-ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/android/sdk}"
 _emulator_bin="${ANDROID_SDK_ROOT}/emulator/emulator"
 _emulator_version="unknown"
 if [ -x "${_emulator_bin}" ]; then
@@ -468,6 +470,30 @@ else
 fi
 
 DIRECT_EMULATOR_BIN="${ANDROID_SDK_ROOT:-/android/sdk}/emulator/emulator"
+resolve_adb_bin() {
+  if [ -n "${ADB_BIN:-}" ] && [ -x "${ADB_BIN}" ]; then
+    printf '%s\n' "${ADB_BIN}"
+    return 0
+  fi
+
+  if command -v adb >/dev/null 2>&1; then
+    command -v adb
+    return 0
+  fi
+
+  for _adb_candidate in \
+      "${ANDROID_SDK_ROOT}/platform-tools/adb" \
+      /android/sdk/platform-tools/adb \
+      /opt/android-sdk/platform-tools/adb; do
+    if [ -x "${_adb_candidate}" ]; then
+      printf '%s\n' "${_adb_candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 prepare_direct_emulator_logs() {
   _runtime_dir="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}"
   _kernel_log="${_runtime_dir}/kernel.log"
@@ -485,6 +511,22 @@ prepare_direct_emulator_logs() {
   ) &
 }
 
+ensure_adb_server() {
+  _adb_bin="$(resolve_adb_bin || true)"
+  if [ -z "${_adb_bin}" ]; then
+    log "ERROR: adb binary unavailable for direct launch. Install Android SDK Platform-Tools or set ADB_BIN."
+    exit 1
+  fi
+
+  if "${_adb_bin}" start-server >/tmp/adb-start.log 2>&1; then
+    log "ADB server is running on port 5037 for direct emulator launch (${_adb_bin})."
+  else
+    log "ERROR: adb start-server failed before direct launch (${_adb_bin})."
+    sed 's/^/[start-emulator-with-turn] adb-start /' /tmp/adb-start.log >&2 || true
+    exit 1
+  fi
+}
+
 launch_direct_emulator() {
   _ports="${EMULATOR_PORTS:-5554,5555}"
   _grpc_port="${EMULATOR_GRPC_PORT:-8554}"
@@ -497,6 +539,7 @@ launch_direct_emulator() {
     exit 1
   fi
 
+  ensure_adb_server
   prepare_direct_emulator_logs
 
   set -- \
@@ -509,6 +552,10 @@ launch_direct_emulator() {
     -shell-serial "file:${_kernel_log}" \
     -logcat-output "${_logcat_log}" \
     -feature AllowSnapshotMigration
+
+  if [ -n "${EMULATOR_RADIO_DEVICE}" ]; then
+    set -- "$@" -radio "${EMULATOR_RADIO_DEVICE}"
+  fi
 
   if [ -n "${TURN:-}" ]; then
     set -- "$@" -turncfg "${TURN}"
@@ -526,6 +573,7 @@ launch_direct_emulator() {
 
   log "Using direct emulator launch: ${DIRECT_EMULATOR_BIN}"
   log "Direct emulator ports: ${_ports} (grpc=${_grpc_port})"
+  log "Direct emulator radio device: ${EMULATOR_RADIO_DEVICE}"
   exec "$@"
 }
 

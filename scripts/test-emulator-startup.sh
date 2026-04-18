@@ -38,6 +38,7 @@ EMULATOR_IMAGE_BUILD_ARG="${EMULATOR_IMAGE_BUILD_ARG:-us-docker.pkg.dev/android-
 EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64}"
 EMULATOR_PLATFORM="${EMULATOR_PLATFORM:-platforms;android-34}"
 EXPECTED_GUEST_API="${EXPECTED_GUEST_API:-34}"
+EXPECTED_RADIO_DEVICE="${EXPECTED_RADIO_DEVICE:-null}"
 GRPC_READY_TIMEOUT="${GRPC_READY_TIMEOUT:-300}"
 ADB_READY_TIMEOUT="${ADB_READY_TIMEOUT:-180}"
 API_READY_TIMEOUT="${API_READY_TIMEOUT:-300}"
@@ -188,11 +189,29 @@ log "Checking container logs for stale API 30 fallback or fatal modem startup er
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'version: AndroidVersion\.ApiLevel=30|Pkg\.Dependencies=emulator#30\.0\.4'; then
   fail "Container logs still show the base launcher resolving an API 30 guest"
 fi
+if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq '[start-emulator-with-turn] Using direct emulator mode; legacy launcher bypassed.'; then
+  fail "Container logs do not show the expected direct emulator launch mode"
+fi
+if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq "[start-emulator-with-turn] Direct emulator radio device: ${EXPECTED_RADIO_DEVICE}"; then
+  fail "Container logs do not show the expected direct-launch radio backend (${EXPECTED_RADIO_DEVICE})"
+fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'adb binary unavailable for direct launch|WARNING: adb command unavailable'; then
+  fail "Container logs show that adb is unavailable in the runtime image"
+fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 5037'; then
+  fail "Container logs still show the emulator failing to reach the host adb server on port 5037"
+fi
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1'; then
   fail "Container logs still show the fatal QEMU modem ::1 resolution failure"
 fi
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq '\[start-emulator-with-turn\] Using emulator launcher: /android/sdk/launch-emulator\.sh'; then
   fail "Container logs show the wrapper falling back to the legacy Google launcher"
+fi
+
+log "Analyzing captured container logs for known restart-loop signatures..."
+docker logs "${CONTAINER_NAME}" > "${ARTIFACT_DIR}/container.log" 2>&1 || true
+if ! node "${ROOT_DIR}/scripts/analyze-emulator-log.mjs" "${ARTIFACT_DIR}/container.log"; then
+  fail "Log analyzer found a known emulator restart-loop signature"
 fi
 
 log "Scanning container logs for persistent socat timeout errors..."

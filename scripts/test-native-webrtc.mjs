@@ -169,27 +169,47 @@ assert.match(
 assert.match(
   emulatorTurnWrapper,
   /ERROR: adb binary unavailable for direct launch/,
-  "emulator wrapper must fail fast with an explicit message if platform-tools/adb is missing"
+  "emulator wrapper must fail fast with an explicit message if platform-tools\/adb is missing"
 );
 assert.match(
   emulatorTurnWrapper,
-  /ADB server is running on port 5037 for direct emulator launch/,
-  "emulator wrapper must start the host adb server before launching the emulator directly"
+  /supports_direct_radio_override\(\)/,
+  "emulator wrapper must decide whether a radio override is safe for the bundled emulator version"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /Android emulator version 30\./,
+  "emulator wrapper must explicitly treat emulator 30.x as not supporting the direct-launch radio override"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /EMULATOR_USE_RADIO_OVERRIDE/,
+  "emulator wrapper must allow explicit opt-in or opt-out of the radio override when needed"
 );
 assert.match(
   emulatorTurnWrapper,
   /set -- "\$@" -radio "\$\{EMULATOR_RADIO_DEVICE\}"/,
-  "emulator wrapper must pass the configured radio backend during direct launch"
+  "emulator wrapper must still be able to pass -radio when the emulator version supports it"
 );
 assert.match(
   emulatorTurnWrapper,
-  /Direct emulator radio device: \$\{EMULATOR_RADIO_DEVICE\}/,
-  "emulator wrapper must log the radio backend used during direct launch"
+  /Direct emulator radio override: disabled for emulator/,
+  "emulator wrapper must log when it skips the radio override for unsupported emulator builds"
 );
 assert.match(
   emulatorTurnWrapper,
-  /Using direct emulator mode; legacy launcher bypassed\./,
-  "emulator wrapper must log when it bypasses the legacy launcher"
+  /Direct emulator radio override: \$\{EMULATOR_RADIO_DEVICE\}/,
+  "emulator wrapper must log the configured radio override when it is applied"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /ADB server is running on port 5037 for direct emulator launch/,
+  "emulator wrapper must pre-start adb in direct mode so the emulator does not race a missing adb daemon on port 5037"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /elif \[ "\$\{EMULATOR_LAUNCH_MODE\}" = "legacy" \]; then[\s\S]*ADB_PORT="5557"[\s\S]*ADB_PORT="5555"/,
+  "emulator wrapper must guard the correct internal ADB port for both legacy and direct launch modes"
 );
 assert.match(
   emulatorTurnWrapper,
@@ -242,18 +262,18 @@ assert.match(
 );
 assert.match(
   logAnalyzer,
-  /direct-launch-left-internal-modem-enabled/,
-  "emulator log analyzer must classify the direct-launch modem crash that persists without a radio override"
+  /unsupported-radio-override/,
+  "emulator log analyzer must classify emulator builds that reject the direct-launch -radio override"
 );
 assert.match(
   logAnalyzer,
   /direct-launch-missing-adb-host-server/,
-  "emulator log analyzer must classify the direct-launch restart loop caused by a missing adb host server"
+  "emulator log analyzer must still classify the direct-launch restart loop caused by a missing adb host server"
 );
 assert.match(
   logAnalyzer,
-  /runtime lacked a usable adb binary, so the emulator could not connect to the host adb server on port 5037/i,
-  "emulator log analyzer must explain the missing-adb restart loop clearly"
+  /Direct launch attempted to force a radio override, but the bundled emulator build rejected -radio entirely/i,
+  "emulator log analyzer must explain the unsupported-radio restart loop clearly"
 );
 
 console.log("[native-webrtc-test] Native WebRTC routing + frontend defaults verified.");

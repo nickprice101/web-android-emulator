@@ -138,6 +138,7 @@ RUN apt-get update \
     jq \
     python3 \
     libxkbfile1 \
+    socat \
     iptables \
     iproute2 \
     nftables \

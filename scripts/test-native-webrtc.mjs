@@ -203,6 +203,26 @@ assert.match(
 );
 assert.match(
   emulatorTurnWrapper,
+  /start_direct_adb_bridge_forwarder\(\)/,
+  "emulator wrapper must provide an explicit direct-mode adb bridge forwarder for sibling-container TCP access"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /Started direct adb bridge forwarder on \$\{_container_ipv4\}:\$\{_bridge_port\} -> 127\.0\.0\.1:\$\{_bridge_port\}\./,
+  "emulator wrapper must log the direct-mode adb bridge forwarding target so bridge failures are diagnosable"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /TCP4-LISTEN:\$\{_bridge_port\},bind=\$\{_container_ipv4\},reuseaddr,fork/,
+  "emulator wrapper must bind the direct-mode adb bridge forwarder on the non-loopback container IPv4"
+);
+assert.match(
+  emulatorTurnWrapper,
+  /TCP4:127\.0\.0\.1:\$\{_bridge_port\}/,
+  "emulator wrapper must forward the direct-mode adb bridge to the loopback-only emulator adb port"
+);
+assert.match(
+  emulatorTurnWrapper,
   /ERROR: adb binary unavailable for direct launch/,
   "emulator wrapper must fail fast with an explicit message if platform-tools\/adb is missing"
 );
@@ -303,6 +323,11 @@ assert.match(
   emulatorDockerfile,
   /libxkbfile1/,
   "emulator Dockerfile must install libxkbfile1 so the manually installed emulator package can report its version cleanly at runtime"
+);
+assert.match(
+  emulatorDockerfile,
+  /socat/,
+  "emulator Dockerfile must install socat so direct launch can expose the adb bridge to sibling containers"
 );
 assert.match(
   emulatorDockerfile,
@@ -441,6 +466,11 @@ assert.match(
   startupSmokeTest,
   /ADB bridge probe mode:/,
   "startup smoke test output must report whether the ADB bridge check ran in strict or passive mode"
+);
+assert.match(
+  startupSmokeTest,
+  /Started direct adb bridge forwarder on /,
+  "startup smoke test must require the direct-mode adb bridge forwarder log so bridge regressions are visible"
 );
 assert.match(
   startupSmokeTest,

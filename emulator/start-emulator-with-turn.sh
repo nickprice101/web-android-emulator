@@ -582,6 +582,45 @@ ensure_adb_server() {
   fi
 }
 
+resolve_container_ipv4() {
+  if command -v hostname >/dev/null 2>&1; then
+    hostname -I 2>/dev/null | tr ' ' '\n' | awk '/^[0-9]+\./ && $1 != "127.0.0.1" { print; exit }'
+    return 0
+  fi
+
+  if command -v ip >/dev/null 2>&1; then
+    ip -4 -o addr show scope global 2>/dev/null | awk '{split($4, addr, "/"); if (addr[1] != "127.0.0.1") { print addr[1]; exit }}'
+  fi
+}
+
+start_direct_adb_bridge_forwarder() {
+  _bridge_port="${EMULATOR_ADB_BRIDGE_PORT:-5555}"
+  _container_ipv4="$(resolve_container_ipv4 || true)"
+  _forwarder_log="${EMULATOR_ADB_BRIDGE_LOG:-/tmp/adb-bridge-forwarder.log}"
+
+  if [ -z "${_container_ipv4}" ]; then
+    log "ERROR: unable to determine a non-loopback container IPv4 for the direct adb bridge forwarder."
+    exit 1
+  fi
+
+  if ! command -v socat >/dev/null 2>&1; then
+    log "ERROR: socat is unavailable; cannot expose the direct adb bridge on ${_container_ipv4}:${_bridge_port}."
+    exit 1
+  fi
+
+  : > "${_forwarder_log}"
+  (
+    tail -n +1 -F "${_forwarder_log}" 2>/dev/null | sed 's/^/[adb-bridge-forwarder] /' >&2
+  ) &
+
+  socat \
+    "TCP4-LISTEN:${_bridge_port},bind=${_container_ipv4},reuseaddr,fork" \
+    "TCP4:127.0.0.1:${_bridge_port}" \
+    >"${_forwarder_log}" 2>&1 &
+
+  log "Started direct adb bridge forwarder on ${_container_ipv4}:${_bridge_port} -> 127.0.0.1:${_bridge_port}."
+}
+
 supports_direct_radio_override() {
   case "${EMULATOR_USE_RADIO_OVERRIDE}" in
     1|true|TRUE|yes|YES)
@@ -615,6 +654,7 @@ launch_direct_emulator() {
   fi
 
   ensure_adb_server
+  start_direct_adb_bridge_forwarder
   prepare_direct_emulator_logs
 
   set -- \

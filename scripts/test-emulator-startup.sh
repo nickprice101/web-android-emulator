@@ -328,6 +328,9 @@ fi
 if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq '[start-emulator-with-turn] Using direct emulator mode; legacy launcher bypassed.'; then
   fail "Container logs do not show the expected direct emulator launch mode"
 fi
+if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Fq '[start-emulator-with-turn] Started direct adb bridge forwarder on '; then
+  fail "Container logs do not show the expected direct-mode adb bridge forwarder startup"
+fi
 if ! docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq '\[start-emulator-with-turn\] (Verified IPv6 literal ::1 resolves for qemu modem sockets\.|Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution\.)'; then
   fail "Container logs do not show the expected IPv6 modem-resolution preflight succeeding"
 fi

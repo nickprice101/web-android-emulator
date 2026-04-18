@@ -468,6 +468,68 @@ else
   log "TURN_KEY not set (or placeholder); skipping -turncfg setup"
 fi
 
+DIRECT_EMULATOR_BIN="${ANDROID_SDK_ROOT:-/android/sdk}/emulator/emulator"
+prepare_direct_emulator_logs() {
+  _runtime_dir="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}"
+  _kernel_log="${_runtime_dir}/kernel.log"
+  _logcat_log="${_runtime_dir}/logcat.log"
+
+  mkdir -p "${_runtime_dir}"
+  : > "${_kernel_log}"
+  : > "${_logcat_log}"
+
+  (
+    tail -n +1 -F "${_kernel_log}" 2>/dev/null | sed 's/^/[kernel] /' >&2
+  ) &
+  (
+    tail -n +1 -F "${_logcat_log}" 2>/dev/null | sed 's/^/[logcat] /' >&2
+  ) &
+}
+
+launch_direct_emulator() {
+  _ports="${EMULATOR_PORTS:-5554,5555}"
+  _grpc_port="${EMULATOR_GRPC_PORT:-8554}"
+  _kernel_log="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}/kernel.log"
+  _logcat_log="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}/logcat.log"
+  _qemu_append="${EMULATOR_QEMU_APPEND:-panic=1}"
+
+  if [ ! -x "${DIRECT_EMULATOR_BIN}" ]; then
+    echo "Direct emulator binary is not executable: ${DIRECT_EMULATOR_BIN}" >&2
+    exit 1
+  fi
+
+  prepare_direct_emulator_logs
+
+  set -- \
+    "${DIRECT_EMULATOR_BIN}" \
+    -avd Pixel2 \
+    -ports "${_ports}" \
+    -grpc "${_grpc_port}" \
+    -no-window \
+    -skip-adb-auth \
+    -shell-serial "file:${_kernel_log}" \
+    -logcat-output "${_logcat_log}" \
+    -feature AllowSnapshotMigration
+
+  if [ -n "${TURN:-}" ]; then
+    set -- "$@" -turncfg "${TURN}"
+  fi
+
+  if [ -n "${EMULATOR_PARAMS_VALUE}" ]; then
+    # EMULATOR_PARAMS is a user-controlled shell-style flag string.
+    # Split it once here so direct mode preserves current compose behavior.
+    eval "set -- \"\$@\" ${EMULATOR_PARAMS_VALUE}"
+  fi
+
+  if [ -n "${_qemu_append}" ]; then
+    set -- "$@" -qemu -append "${_qemu_append}"
+  fi
+
+  log "Using direct emulator launch: ${DIRECT_EMULATOR_BIN}"
+  log "Direct emulator ports: ${_ports} (grpc=${_grpc_port})"
+  exec "$@"
+}
+
 LAUNCHER_PATH="${EMULATOR_LAUNCHER:-}"
 if [ -n "${LAUNCHER_PATH}" ] && [ ! -x "${LAUNCHER_PATH}" ]; then
   echo "Configured EMULATOR_LAUNCHER is not executable: ${LAUNCHER_PATH}" >&2
@@ -681,7 +743,7 @@ _ensure_adb_accept
 # Write the guard loop to a file and run it via setsid so it is in its own
 # session and is NOT killed when the current shell process-group is replaced
 # by exec.  This is the most reliable way to keep the guard alive across the
-# exec chain: start-emulator-with-turn.sh → launch-emulator.sh → emulator.
+# exec chain: start-emulator-with-turn.sh -> launcher/direct mode -> emulator.
 _GUARD_SCRIPT=/tmp/adb-port-guard.sh
 cat > "${_GUARD_SCRIPT}" << GUARD_EOF
 #!/bin/sh

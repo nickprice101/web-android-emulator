@@ -198,6 +198,9 @@ fi
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1'; then
   fail "Container logs still show the fatal QEMU modem ::1 resolution failure"
 fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq '\[start-emulator-with-turn\] Using emulator launcher: /android/sdk/launch-emulator\.sh'; then
+  fail "Container logs show the wrapper falling back to the legacy Google launcher"
+fi
 
 log "Analyzing captured container logs for known restart-loop signatures..."
 docker logs "${CONTAINER_NAME}" > "${ARTIFACT_DIR}/container.log" 2>&1 || true

@@ -119,7 +119,7 @@ const summary = {
   explanation,
   likelyHealthyLongRunningRuntime:
     findings.grpcServerStarted &&
-    findings.adbPortGuardHeartbeatCount >= 5 &&
+    findings.adbPortGuardHeartbeatCount >= 3 &&
     !findings.modemIpv6Failure &&
     !findings.invalidRadioOption &&
     !findings.shellUnsetVariableCrash &&

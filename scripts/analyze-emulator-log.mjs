@@ -27,10 +27,13 @@ const findings = {
     /-radio null/.test(logText),
   directLaunchRadioOverrideDisabled:
     /\[start-emulator-with-turn\] Direct emulator radio override: disabled/.test(logText),
+  directLaunchAdbServerStarted:
+    /\[start-emulator-with-turn\] ADB server is running on port 5037 for direct emulator launch/.test(logText),
   missingAdbBinary:
     /\[start-emulator-with-turn\] (WARNING|ERROR): adb binary unavailable/.test(logText) ||
     /\[start-emulator-with-turn\] WARNING: adb command unavailable/.test(logText),
   adbHostServerFailure: /AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 5037/.test(logText),
+  shellUnsetVariableCrash: /start-emulator-with-turn\.sh:\s*\d+:\s*_emulator_version: parameter not set/.test(logText),
   modemIpv6Failure: /qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1/.test(logText),
   invalidRadioOption: /qemu-system-x86_64-headless: -radio: invalid option/.test(logText),
   repeatedRestartLoop:
@@ -72,6 +75,15 @@ if (
     "Direct launch attempted to force a radio override, but the bundled emulator build rejected -radio entirely, so QEMU exited before the guest could boot.";
 } else if (
   findings.directWrapperPatchedApi34 &&
+  findings.directLaunchAdbServerStarted &&
+  findings.directLaunchReportedApi34 &&
+  findings.shellUnsetVariableCrash
+) {
+  rootCause = "direct-launch-unset-version-variable";
+  explanation =
+    "Direct launch was selected correctly, but the wrapper unset the cached emulator version before the radio-override gate referenced it under set -u, so the shell exited and the container restarted.";
+} else if (
+  findings.directWrapperPatchedApi34 &&
   findings.directModeEnabled &&
   findings.directLaunchReportedApi34 &&
   findings.directLaunchLoggedRadioNull &&
@@ -97,7 +109,7 @@ if (rootCause !== "unclassified") {
   process.exit(1);
 }
 
-if (findings.modemIpv6Failure || findings.invalidRadioOption || findings.repeatedRestartLoop) {
+if (findings.modemIpv6Failure || findings.invalidRadioOption || findings.shellUnsetVariableCrash || findings.repeatedRestartLoop) {
   console.error("Detected an emulator restart loop, but the exact signature was not classified.");
   process.exit(1);
 }

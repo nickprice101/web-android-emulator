@@ -210,6 +210,9 @@ fi
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'qemu-system-x86_64-headless: -radio: invalid option'; then
   fail "Container logs still show the unsupported -radio option crash"
 fi
+if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'start-emulator-with-turn\.sh: [0-9]+: _emulator_version: parameter not set'; then
+  fail "Container logs show the direct-launch wrapper crashing on an unset emulator-version variable"
+fi
 if docker logs "${CONTAINER_NAME}" 2>&1 | grep -Eq 'adb binary unavailable for direct launch|WARNING: adb command unavailable'; then
   fail "Container logs show that adb is unavailable in the runtime image"
 fi

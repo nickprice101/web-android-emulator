@@ -170,6 +170,7 @@ _emulator_version="unknown"
 if [ -x "${_emulator_bin}" ]; then
   _emulator_version="$(${_emulator_bin} -version 2>&1 | head -1 || true)"
 fi
+DIRECT_EMULATOR_VERSION="${_emulator_version}"
 _system_image_props=""
 for _props_path in \
     "${ANDROID_SDK_ROOT}/system-images/android-34/google_apis/x86_64/source.properties" \
@@ -528,6 +529,7 @@ ensure_adb_server() {
 }
 
 supports_direct_radio_override() {
+  _emulator_version_for_launch="${DIRECT_EMULATOR_VERSION:-unknown}"
   case "${EMULATOR_USE_RADIO_OVERRIDE:-auto}" in
     1|true|TRUE|yes|YES)
       return 0
@@ -536,7 +538,7 @@ supports_direct_radio_override() {
       return 1
       ;;
     auto|'')
-      case "${_emulator_version}" in
+      case "${_emulator_version_for_launch}" in
         "Android emulator version 30."*|"Android emulator version 29."*|"Android emulator version 28."*)
           return 1
           ;;
@@ -606,7 +608,7 @@ launch_direct_emulator() {
   if [ "${_radio_override_applied}" -eq 1 ]; then
     log "Direct emulator radio override: ${EMULATOR_RADIO_DEVICE}"
   else
-    log "Direct emulator radio override: disabled for emulator '${_emulator_version}'"
+    log "Direct emulator radio override: disabled for emulator '${DIRECT_EMULATOR_VERSION:-unknown}'"
   fi
   exec "$@"
 }

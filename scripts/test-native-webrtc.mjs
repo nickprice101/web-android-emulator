@@ -82,6 +82,16 @@ assert.match(
   /fetchFallbackIceServers[\s\S]*fetchWithRetry\("\/bridge\/api\/config"/m,
   "fetchFallbackIceServers must use fetchWithRetry so transient bridge unavailability during native WebRTC startup cannot permanently lose the ICE fallback configuration"
 );
+assert.match(
+  frontendMain,
+  /code: "native-relay-connectivity-failed"/,
+  "frontend must classify the case where the browser reaches TURN relay candidates but the native emulator session still never establishes media"
+);
+assert.match(
+  frontendMain,
+  /Switching to the custom WebRTC bridge for a reliable video stream\./,
+  "frontend must fail over to the custom bridge when native WebRTC cannot establish media even after the browser reaches TURN relay candidates"
+);
 
 const composeConfig = readRepoFile("docker-compose.yml");
 assert.match(
@@ -205,6 +215,18 @@ assert.match(
   emulatorTurnWrapper,
   /EMULATOR_LAUNCH_MODE="\$\{EMULATOR_LAUNCH_MODE:-direct\}"/,
   "emulator wrapper must default to direct launch mode so the wrapper controls the final emulator argv"
+);
+
+const testbedScript = readRepoFile("scripts/testbed.sh");
+assert.match(
+  testbedScript,
+  /RUN_EMULATOR_STREAM_TEST/,
+  "testbed must expose an opt-in emulator video-stream validation stage"
+);
+assert.match(
+  testbedScript,
+  /npm --prefix frontend run test:e2e:deployed-turns/,
+  "testbed must be able to run the deployed Playwright video-stream validation"
 );
 assert.match(
   emulatorTurnWrapper,

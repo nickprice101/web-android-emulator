@@ -645,6 +645,15 @@ function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDia
     iceConnectionState === "connected" ||
     iceConnectionState === "completed" ||
     Boolean(selectedPair);
+  const transportFailed =
+    emuState === "disconnected" ||
+    emuState === "error" ||
+    connectionState === "failed" ||
+    connectionState === "disconnected" ||
+    connectionState === "closed" ||
+    iceConnectionState === "failed" ||
+    iceConnectionState === "disconnected" ||
+    iceConnectionState === "closed";
 
   if (renderableVideo) {
     return {
@@ -699,6 +708,23 @@ function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDia
       code: "unreachable-host-candidates",
       summary:
         "The native session only exposed private or loopback ICE candidates and never selected a working pair, so the browser had no reachable media path.",
+    };
+  }
+
+  if (
+    transportFailed &&
+    !selectedPair &&
+    packetsReceived === 0 &&
+    bytesReceived === 0 &&
+    framesReceived === 0 &&
+    framesDecoded === 0 &&
+    (remoteCandidates.relay ?? 0) > 0 &&
+    (localCandidates.relay ?? 0) === 0
+  ) {
+    return {
+      code: "native-relay-connectivity-failed",
+      summary:
+        "The browser gathered TURN relay candidates, but the native emulator session still never selected a working ICE pair or delivered RTP. This deployment is not establishing native media over the relay path.",
     };
   }
 
@@ -2668,7 +2694,13 @@ function App() {
       return;
     }
 
-    const retryableReasons = new Set(["placeholder-frame", "no-inbound-rtp", "decode-stalled", "disconnected"]);
+    const retryableReasons = new Set([
+      "placeholder-frame",
+      "no-inbound-rtp",
+      "decode-stalled",
+      "disconnected",
+      "native-relay-connectivity-failed",
+    ]);
     if (!retryableReasons.has(nativeFailureReason.code)) {
       nativeFailureSinceRef.current = null;
       nativeFailureSignatureRef.current = null;
@@ -2705,12 +2737,22 @@ function App() {
     nativeFailureSinceRef.current = null;
     nativeFailureSignatureRef.current = null;
 
+    if (nativeFailureReason.code === "native-relay-connectivity-failed") {
+      const failoverMessage =
+        "Native WebRTC reached browser TURN relay candidates but still never established media from the emulator. Switching to the custom WebRTC bridge for a reliable video stream.";
+      handleStreamModeChange("custom-webrtc");
+      setWebrtcNotice(failoverMessage);
+      setMessage(failoverMessage);
+      return;
+    }
+
     if (nativeRetryCount >= NATIVE_WEBRTC_MAX_RETRIES) {
       const shouldFailOverToCustomWebrtc = new Set([
         "missing-ice-servers",
         "disconnected",
         "no-inbound-rtp",
         "unreachable-host-candidates",
+        "native-relay-connectivity-failed",
       ]).has(nativeFailureReason.code);
       if (shouldFailOverToCustomWebrtc) {
         const failoverMessage = `Native WebRTC could not recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries. Switching to the custom WebRTC bridge so the browser can keep streaming over the repository-managed relay path.`;
@@ -2781,6 +2823,7 @@ function App() {
     const definitiveReasons = new Set([
       "missing-ice-servers",
       "unreachable-host-candidates",
+      "native-relay-connectivity-failed",
       "no-inbound-rtp",
       "decode-stalled",
       "placeholder-frame",

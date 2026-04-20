@@ -967,12 +967,18 @@ async function fetchWithRetry(url, options, { maxAttempts = 3, baseDelayMs = 800
         throw error;
       }
       lastError = error;
-      if (attempt < maxAttempts - 1 && !isCancelled()) {
-        await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
+      // Either stop retrying because the caller has been cancelled, or apply
+      // backoff before the next attempt.  Both checks are inside the catch
+      // block so they are only reached after a network-level failure.
+      if (isCancelled()) {
+        throw lastError;
       }
-    }
-    if (isCancelled()) {
-      throw lastError;
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
+        if (isCancelled()) {
+          throw lastError;
+        }
+      }
     }
   }
   throw lastError;

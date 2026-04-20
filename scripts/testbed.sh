@@ -58,4 +58,12 @@ else
   echo "[testbed] skipping emulator startup smoke test (set RUN_EMULATOR_STARTUP_TEST=1 to run it)"
 fi
 
+stage "stage 8: optional deployed video-stream validation"
+if [[ "${RUN_EMULATOR_STREAM_TEST:-0}" == "1" || -n "${E2E_BASE_URL:-}" ]]; then
+  echo "[testbed] running deployed Playwright video-stream validation"
+  npm --prefix frontend run test:e2e:deployed-turns
+else
+  echo "[testbed] skipping deployed video-stream validation (set RUN_EMULATOR_STREAM_TEST=1 or E2E_BASE_URL to run it)"
+fi
+
 echo "[testbed] all checks passed"

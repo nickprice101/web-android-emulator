@@ -2043,6 +2043,7 @@ class NativeRtcVideoRelay {
     this.guid = null;
     this.running = false;
     this.turnTlsTunnelCleanup = null;
+    this.firstFrameTimer = null;
     this._resetFirstFrameState();
   }
 
@@ -2246,7 +2247,7 @@ class NativeRtcVideoRelay {
       closeSession(
         this.session,
         "media-failed",
-        "native-rtc: emulator video track connected but no renderable frame arrived in time. The emulator display may not have initialised."
+        "native-rtc: emulator video track connected but no renderable frame arrived in time. The emulator display may not have initialized."
       );
     };
 
@@ -2264,7 +2265,7 @@ class NativeRtcVideoRelay {
         // Reuse the session's screenrecord tracking field — the same field is
         // used by adb-screenrecord sessions and consumed by the diagnostics UI
         // to report frame-verification state.  In native-rtc sessions this is
-        // pre-initialised to "not-requested" in NativeRtcVideoRelay.start().
+        // pre-initialized to "not-requested" in NativeRtcVideoRelay.start().
         this.session.media.screenrecord = {
           ...(this.session.media.screenrecord || {}),
           decodeGraceUsed: true,

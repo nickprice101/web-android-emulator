@@ -20,6 +20,21 @@ assert.match(
   /prefix:\s*"\/android\.emulation\.control\.EmulatorController"[\s\S]*?cluster:\s*emulator_service_grpc/m,
   "envoy.yaml must route /android.emulation.control.EmulatorController to emulator_service_grpc"
 );
+assert.match(
+  envoyConfig,
+  /prefix:\s*"\/bridge\/"[\s\S]*?cluster:\s*bridge_webrtc/m,
+  "envoy.yaml must route /bridge/ to bridge_webrtc for the custom WebRTC bridge path"
+);
+assert.match(
+  envoyConfig,
+  /prefix:\s*"\/bridge\/"[\s\S]*?prefix_rewrite:\s*"\/"/m,
+  "envoy.yaml must rewrite the /bridge/ prefix to / when forwarding to bridge_webrtc so the bridge server receives paths like /api/config, not /bridge/api/config"
+);
+assert.match(
+  envoyConfig,
+  /prefix:\s*"\/bridge\/"[\s\S]*?timeout:\s*0s/m,
+  "envoy.yaml bridge_webrtc route must disable the route timeout to support long-lived SSE event streams for session state"
+);
 
 const frontendMain = readRepoFile("frontend/src/main.jsx");
 assert.match(
@@ -61,6 +76,11 @@ assert.match(
   frontendMain,
   /fallbackSummary\.hasTurn && !fallbackSummary\.hasStun[\s\S]*FALLBACK_STUN_URL/m,
   "bridge TURN fallback should also inject STUN to avoid single-path TURN failures"
+);
+assert.match(
+  frontendMain,
+  /fetchFallbackIceServers[\s\S]*fetchWithRetry\("\/bridge\/api\/config"/m,
+  "fetchFallbackIceServers must use fetchWithRetry so transient bridge unavailability during native WebRTC startup cannot permanently lose the ICE fallback configuration"
 );
 
 const composeConfig = readRepoFile("docker-compose.yml");

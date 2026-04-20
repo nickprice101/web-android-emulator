@@ -2305,7 +2305,7 @@ function App() {
           // override the browser peer connection is still constrained to relay
           // candidates only, which fails for the same reason as the original
           // relay-only attempt.
-          const shouldOverrideToAll =
+          const shouldOverrideRelayToAll =
             Boolean(baseSignal?.start) &&
             nativeIceTransportMode !== "relay" &&
             baseSignal.start.iceTransportPolicy === "relay";
@@ -2319,7 +2319,7 @@ function App() {
                     iceTransportPolicy: "relay",
                   },
                 }
-              : shouldOverrideToAll
+              : shouldOverrideRelayToAll
               ? {
                   ...baseSignal,
                   start: {

@@ -2299,6 +2299,17 @@ function App() {
                 }
               : signal;
 
+          // When the emulator advertises relay-only transport but we are in a
+          // mixed-ICE retry (nativeIceTransportMode === "all"), the emulator's
+          // iceTransportPolicy must also be relaxed to "all". Without this
+          // override the browser peer connection is still constrained to relay
+          // candidates only, which fails for the same reason as the original
+          // relay-only attempt.
+          const shouldOverrideToAll =
+            Boolean(baseSignal?.start) &&
+            nativeIceTransportMode !== "relay" &&
+            baseSignal.start.iceTransportPolicy === "relay";
+
           const patchedSignal =
             baseSignal?.start && shouldPreferRelay && baseSignal.start.iceTransportPolicy !== "relay"
               ? {
@@ -2306,6 +2317,14 @@ function App() {
                   start: {
                     ...baseSignal.start,
                     iceTransportPolicy: "relay",
+                  },
+                }
+              : shouldOverrideToAll
+              ? {
+                  ...baseSignal,
+                  start: {
+                    ...baseSignal.start,
+                    iceTransportPolicy: "all",
                   },
                 }
               : baseSignal;
@@ -2345,8 +2364,16 @@ function App() {
             );
           }
           if (patchedSignal !== baseSignal) {
-            pushNativeEvent("Forcing native browser ICE transport policy to relay because TURN is configured");
-          } else if (startSummary.hasTurn && nativeIceTransportMode !== "relay") {
+            if (shouldPreferRelay) {
+              pushNativeEvent("Forcing native browser ICE transport policy to relay because TURN is configured");
+            } else {
+              pushNativeEvent(
+                "Overriding emulator relay-only ICE transport policy to allow mixed candidates for retry",
+                { requestedTransportMode: nativeIceTransportMode }
+              );
+            }
+          }
+          if (startSummary.hasTurn && nativeIceTransportMode !== "relay") {
             pushNativeEvent("Native browser is allowing mixed ICE candidates after a failed relay-only attempt", {
               requestedTransportMode: nativeIceTransportMode,
             });

@@ -46,9 +46,15 @@ test("deployed turns path renders real video frames", async ({ page }, testInfo)
         return candidateArea >= bestArea ? candidate : best;
       }, null);
       const bodyText = document.body?.innerText ?? "";
+      // Only treat disconnection as a definitive failure once the frontend has
+      // exhausted all native WebRTC retries (signalled by the "could not
+      // recover" message) or once the custom-bridge fallback also reports
+      // disconnected.  The "native WebRTC disconnected" overlay is a transient
+      // state that appears before each retry fires (~1.5 s) and must not cause
+      // an early abort.
       const failureDetected =
-        bodyText.includes("The native emulator session dropped before the browser rendered a usable frame.") ||
-        bodyText.includes("Mode: native WebRTC disconnected");
+        bodyText.includes("could not recover") ||
+        bodyText.includes("Mode: custom WebRTC disconnected");
 
       if (!(video instanceof HTMLVideoElement)) {
         return failureDetected ? { outcome: "failed", videoStats: null } : null;

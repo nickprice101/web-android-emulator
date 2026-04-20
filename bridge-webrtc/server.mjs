@@ -2043,6 +2043,16 @@ class NativeRtcVideoRelay {
     this.guid = null;
     this.running = false;
     this.turnTlsTunnelCleanup = null;
+    this.firstFrameTimer = null;
+    this._resetFirstFrameState();
+  }
+
+  _resetFirstFrameState() {
+    clearTimeout(this.firstFrameTimer);
+    this.firstFrameTimer = null;
+    this.firstFrameGraceUsed = false;
+    this.firstRenderableFrameAt = null;
+    this.placeholderFrameCount = 0;
   }
 
   async start() {
@@ -2162,6 +2172,10 @@ class NativeRtcVideoRelay {
         this.turnTlsTunnelCleanup();
         this.turnTlsTunnelCleanup = null;
       }
+      // Cancel any pending first-frame watchdog from a previous JSEP session
+      // so it cannot fire and close the session while a fresh negotiation is
+      // in progress.
+      this._resetFirstFrameState();
       if (this.emulatorPeer) {
         this.emulatorPeer.close();
       }
@@ -2175,9 +2189,14 @@ class NativeRtcVideoRelay {
         },
       });
       this.turnTlsTunnelCleanup = preparedIceServers.close;
+      // Always use "all" ICE transport policy for the internal bridge→emulator
+      // connection. Bridge and emulator run in the same Docker network, so they
+      // can connect directly via host candidates without needing TURN relay.
+      // Using relay-only here would fail whenever coturn relay is unavailable
+      // or misconfigured, even though a perfectly good direct path exists.
       this.emulatorPeer = new RTCPeerConnection({
         iceServers: preparedIceServers.iceServers,
-        iceTransportPolicy: preferRelayTransport ? "relay" : "all",
+        iceTransportPolicy: "all",
       });
       this.emulatorPeer.onicecandidate = (event) => {
         if (event.candidate) {
@@ -2205,6 +2224,71 @@ class NativeRtcVideoRelay {
     }
   }
 
+  _armFirstFrameWatchdog() {
+    this._resetFirstFrameState();
+
+    const failSession = (withGraceExtension) => {
+      if (!this.running || this.firstRenderableFrameAt) {
+        return;
+      }
+      recordSessionLog(
+        this.session,
+        "error",
+        "native-rtc: no renderable frame received within the watchdog window; closing session",
+        {
+          timeoutMs: withGraceExtension
+            ? screenrecordFirstFrameTimeoutMs + screenrecordDecodeGraceTimeoutMs
+            : screenrecordFirstFrameTimeoutMs,
+          placeholdersSeen: this.placeholderFrameCount,
+          peerConnectionState: this.session.peerConnectionState || null,
+          iceConnectionState: this.session.iceConnectionState || null,
+        }
+      );
+      closeSession(
+        this.session,
+        "media-failed",
+        "native-rtc: emulator video track connected but no renderable frame arrived in time. The emulator display may not have initialized."
+      );
+    };
+
+    this.firstFrameTimer = setTimeout(() => {
+      if (!this.running || this.firstRenderableFrameAt) {
+        return;
+      }
+
+      const placeholdersSeen = this.placeholderFrameCount;
+      if (placeholdersSeen > 0 && !this.firstFrameGraceUsed) {
+        // The emulator is alive (sending placeholder frames) but Android has
+        // not rendered its first real frame yet.  Extend the watchdog once by
+        // the grace period to accommodate slow Android boot sequences.
+        this.firstFrameGraceUsed = true;
+        // Reuse the session's screenrecord tracking field — the same field is
+        // used by adb-screenrecord sessions and consumed by the diagnostics UI
+        // to report frame-verification state.  In native-rtc sessions this is
+        // pre-initialized to "not-requested" in NativeRtcVideoRelay.start().
+        this.session.media.screenrecord = {
+          ...(this.session.media.screenrecord || {}),
+          decodeGraceUsed: true,
+          verification: "waiting-for-decoded-frame",
+        };
+        recordSessionLog(
+          this.session,
+          "warn",
+          "native-rtc: emulator video track is alive (placeholder frames received) but no renderable frame yet; extending watchdog",
+          {
+            placeholdersSeen,
+            graceTimeoutMs: screenrecordDecodeGraceTimeoutMs,
+          }
+        );
+        this.firstFrameTimer = setTimeout(() => failSession(true), screenrecordDecodeGraceTimeoutMs);
+        broadcastSessionStatus(this.session);
+        return;
+      }
+
+      failSession(false);
+    }, screenrecordFirstFrameTimeoutMs);
+  }
+
   _attachVideoSink(videoTrack) {
     if (this.videoSink) {
       this.videoSink.stop();
@@ -2212,7 +2296,8 @@ class NativeRtcVideoRelay {
     const sink = new RTCVideoSink(videoTrack);
     this.videoSink = sink;
     let frameCount = 0;
-    let placeholderFrameCount = 0;
+    this.placeholderFrameCount = 0;
+    this._armFirstFrameWatchdog();
     sink.onframe = ({ frame }) => {
       if (!this.running || sink.stopped) {
         return;
@@ -2220,14 +2305,19 @@ class NativeRtcVideoRelay {
       const { width, height, data } = frame;
       const media = this.session.media;
       if (!isRenderableNativeRtcFrame(frame)) {
-        placeholderFrameCount += 1;
-        if (placeholderFrameCount === 1) {
+        this.placeholderFrameCount += 1;
+        if (this.placeholderFrameCount === 1) {
           recordSessionLog(this.session, "warn", "native-rtc: ignoring placeholder startup frame", {
             width,
             height,
           });
         }
         return;
+      }
+      if (!this.firstRenderableFrameAt) {
+        this.firstRenderableFrameAt = nowIso();
+        clearTimeout(this.firstFrameTimer);
+        this.firstFrameTimer = null;
       }
       frameCount++;
       media.framesDelivered = frameCount;
@@ -2254,6 +2344,7 @@ class NativeRtcVideoRelay {
 
   stop() {
     this.running = false;
+    this._resetFirstFrameState();
     this.abortController.abort();
     if (typeof this.turnTlsTunnelCleanup === "function") {
       this.turnTlsTunnelCleanup();

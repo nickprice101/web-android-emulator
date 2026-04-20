@@ -9,6 +9,7 @@ const NATIVE_WEBRTC_MAX_RETRIES = 3;
 const STREAM_MODE_OPTIONS = [
   { value: "native-webrtc", label: "WebRTC (native emulator)" },
   { value: "custom-webrtc", label: "WebRTC (custom bridge)" },
+  { value: "png", label: "PNG preview" },
 ];
 // Public STUN server used as a fallback when the emulator advertises no ICE
 // servers.  Set VITE_FALLBACK_STUN_URL at build time to override.
@@ -2705,18 +2706,11 @@ function App() {
     nativeFailureSignatureRef.current = null;
 
     if (nativeRetryCount >= NATIVE_WEBRTC_MAX_RETRIES) {
-      const fallbackMessage = [
-        `Native WebRTC could not recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries.`,
-        "Switching to the custom WebRTC bridge so the frontend can still receive a real video stream over the bridge path.",
-      ].join(" ");
-      webrtcFailureRef.current = false;
-      setWebrtcDiagnostics(null);
-      setWebrtcNotice(fallbackMessage);
-      setMessage(fallbackMessage);
-      setEmuState("connecting");
-      setNativeVideoStats(null);
-      setNativeHasVideoFrame(false);
-      setStreamMode("custom-webrtc");
+      const failMessage = `Native WebRTC could not recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries. Use the Stream dropdown to switch to a different mode.`;
+      setWebrtcNotice(failMessage);
+      setMessage(failMessage);
+      nativeFailureSinceRef.current = null;
+      nativeFailureSignatureRef.current = null;
       return;
     }
 

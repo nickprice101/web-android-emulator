@@ -718,13 +718,13 @@ function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDia
     bytesReceived === 0 &&
     framesReceived === 0 &&
     framesDecoded === 0 &&
-    (remoteCandidates.relay ?? 0) > 0 &&
-    (localCandidates.relay ?? 0) === 0
+    (localCandidates.relay ?? 0) > 0 &&
+    (remoteCandidates.relay ?? 0) === 0
   ) {
     return {
       code: "native-relay-connectivity-failed",
       summary:
-        "The browser gathered TURN relay candidates, but the native emulator session still never selected a working ICE pair or delivered RTP. This deployment is not establishing native media over the relay path.",
+        "The browser gathered TURN relay candidates, but the emulator still only advertised non-relay candidates and never selected a working ICE pair or delivered RTP. This deployment is not establishing native media over the relay path.",
     };
   }
 

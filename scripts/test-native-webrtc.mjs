@@ -89,6 +89,11 @@ assert.match(
 );
 assert.match(
   frontendMain,
+  /\(localCandidates\.relay \?\? 0\) > 0[\s\S]*\(remoteCandidates\.relay \?\? 0\) === 0/m,
+  "native relay dead-end detection must trigger when the browser side gathered relay candidates but the emulator side still exposed no relay candidates"
+);
+assert.match(
+  frontendMain,
   /Switching to the custom WebRTC bridge for a reliable video stream\./,
   "frontend must fail over to the custom bridge when native WebRTC cannot establish media even after the browser reaches TURN relay candidates"
 );
@@ -227,6 +232,21 @@ assert.match(
   testbedScript,
   /npm --prefix frontend run test:e2e:deployed-turns/,
   "testbed must be able to run the deployed Playwright video-stream validation"
+);
+assert.match(
+  testbedScript,
+  /NPM_BIN="\$\{NPM_BIN:-npm\}"/,
+  "testbed must allow npm to be overridden for environments where npm is not on PATH"
+);
+assert.match(
+  testbedScript,
+  /PYTHON3_BIN="\$\{PYTHON3_BIN:-python3\}"/,
+  "testbed must allow python3 to be overridden for environments where python3 is not on PATH"
+);
+assert.match(
+  testbedScript,
+  /NODE_BIN="\$\{NODE_BIN:-node\}"/,
+  "testbed must allow node to be overridden for environments where node is not on PATH"
 );
 assert.match(
   emulatorTurnWrapper,

@@ -1711,7 +1711,11 @@ class EmulatorVideoCapture {
         }
 
         const reader = response.body.getReader();
-        this.consecutiveFailures = 0;
+        // Do NOT reset consecutiveFailures here — only reset it once the stream
+        // actually delivers at least one data chunk.  Resetting unconditionally
+        // on a successful HTTP connection would mask repeated "connect, empty
+        // body, disconnect" cycles where apkbridge accepts the request but
+        // immediately ends the stream because adb screenrecord is failing.
         this.session.media.screenrecord = {
           ...(this.session.media.screenrecord || {}),
           connectedAt: nowIso(),
@@ -1722,12 +1726,18 @@ class EmulatorVideoCapture {
           fps: captureFps,
         });
 
+        let receivedData = false;
         while (this.running) {
           const { done, value } = await reader.read();
           if (done) {
             break;
           }
           if (value?.length) {
+            if (!receivedData) {
+              // First data chunk received — the stream is genuinely alive.
+              receivedData = true;
+              this.consecutiveFailures = 0;
+            }
             const receivedAt = nowIso();
             const previousChunksReceived = Number(this.session.media.screenrecord?.chunksReceived || 0);
             const previousBytesReceived = Number(this.session.media.screenrecord?.bytesReceived || 0);
@@ -1767,6 +1777,24 @@ class EmulatorVideoCapture {
         if (!this.running) {
           return;
         }
+
+        if (!receivedData) {
+          // The stream connected but ended without sending any H.264 data.
+          // This happens when adb screenrecord on the apkbridge side exits
+          // immediately (e.g. because ADB dropped).  Treat this the same as a
+          // fetch-level failure so the consecutive-failure limit is enforced
+          // and the reconnect loop cannot spin indefinitely without backoff.
+          this.consecutiveFailures += 1;
+          recordSessionLog(this.session, "warn", "Screenrecord stream connected but delivered no data", {
+            attempt: this.consecutiveFailures,
+          });
+          if (this.consecutiveFailures >= 3) {
+            throw new Error("Screenrecord stream connected but delivered no data repeatedly; apkbridge screenrecord may be failing");
+          }
+          await sleep(500);
+          continue;
+        }
+
         recordSessionLog(this.session, "warn", "Screenrecord stream ended; reconnecting");
         // Discard any partial raw-video frame that was accumulating for the
         // previous segment.  Each new screenrecord segment restarts the H.264

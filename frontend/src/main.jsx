@@ -952,6 +952,50 @@ function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
   });
 }
 
+/**
+ * Fetch a URL, retrying on transient network errors (TypeError — e.g. Chrome's
+ * "Failed to fetch" when the server is briefly unreachable).  HTTP error
+ * responses are surfaced immediately without retrying because they carry
+ * meaningful status codes that should not be masked.
+ *
+ * @param {string} url - The URL to fetch.
+ * @param {RequestInit|undefined} options - Standard fetch options.
+ * @param {object} [retryOptions]
+ * @param {number} [retryOptions.maxAttempts=3] - Maximum number of attempts.
+ * @param {number} [retryOptions.baseDelayMs=800] - Base delay in ms; each retry
+ *   uses `baseDelayMs * attemptNumber` (linear back-off).
+ * @param {() => boolean} [retryOptions.isCancelled] - Return true to abort
+ *   retrying early (e.g. when the enclosing React effect has been cleaned up).
+ * @returns {Promise<Response>} - Resolves with the first successful Response.
+ * @throws {TypeError} - Rethrows the last network error after all attempts.
+ */
+async function fetchWithRetry(url, options, { maxAttempts = 3, baseDelayMs = 800, isCancelled = () => false } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      if (!(error instanceof TypeError)) {
+        throw error;
+      }
+      lastError = error;
+      // Either stop retrying because the caller has been cancelled, or apply
+      // backoff before the next attempt.  Both checks are inside the catch
+      // block so they are only reached after a network-level failure.
+      if (isCancelled()) {
+        throw lastError;
+      }
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
+        if (isCancelled()) {
+          throw lastError;
+        }
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function parseJsonResponse(resp, label) {
   const text = await resp.text();
   let data;
@@ -1068,7 +1112,10 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         setAnswerSdp("");
         onStateChange("connecting");
 
-        const config = await parseJsonResponse(await fetch("/bridge/api/config"), "/bridge/api/config");
+        const config = await parseJsonResponse(
+          await fetchWithRetry("/bridge/api/config", undefined, { isCancelled: () => cancelled }),
+          "/bridge/api/config"
+        );
         if (cancelled) {
           return;
         }
@@ -1148,14 +1195,18 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
           iceCandidates: localOfferCandidates,
         });
 
-        const sessionResp = await fetch("/bridge/api/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: localOffer.type,
-            sdp: localOffer.sdp,
-          }),
-        });
+        const sessionResp = await fetchWithRetry(
+          "/bridge/api/session",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: localOffer.type,
+              sdp: localOffer.sdp,
+            }),
+          },
+          { isCancelled: () => cancelled }
+        );
 
         const sessionText = await sessionResp.text();
         let session;

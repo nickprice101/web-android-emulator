@@ -2243,7 +2243,10 @@ function App() {
       }
       fallbackIceFetchPromise = (async () => {
         try {
-          const config = await parseJsonResponse(await fetch("/bridge/api/config"), "/bridge/api/config");
+          const config = await parseJsonResponse(
+            await fetchWithRetry("/bridge/api/config", undefined, { isCancelled: () => !active }),
+            "/bridge/api/config"
+          );
           if (!active) {
             return [];
           }

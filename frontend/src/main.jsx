@@ -952,11 +952,23 @@ function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
   });
 }
 
-// Retry a fetch call on transient network errors (e.g. "Failed to fetch" when
-// the bridge container is briefly restarting).  Only TypeError (network-level
-// failures) are retried; HTTP error responses are surfaced immediately.
-// The isCancelled callback lets the caller signal that the operation should be
-// abandoned (e.g. when the enclosing React effect is cleaned up).
+/**
+ * Fetch a URL, retrying on transient network errors (TypeError — e.g. Chrome's
+ * "Failed to fetch" when the server is briefly unreachable).  HTTP error
+ * responses are surfaced immediately without retrying because they carry
+ * meaningful status codes that should not be masked.
+ *
+ * @param {string} url - The URL to fetch.
+ * @param {RequestInit|undefined} options - Standard fetch options.
+ * @param {object} [retryOptions]
+ * @param {number} [retryOptions.maxAttempts=3] - Maximum number of attempts.
+ * @param {number} [retryOptions.baseDelayMs=800] - Base delay in ms; each retry
+ *   uses `baseDelayMs * attemptNumber` (linear back-off).
+ * @param {() => boolean} [retryOptions.isCancelled] - Return true to abort
+ *   retrying early (e.g. when the enclosing React effect has been cleaned up).
+ * @returns {Promise<Response>} - Resolves with the first successful Response.
+ * @throws {TypeError} - Rethrows the last network error after all attempts.
+ */
 async function fetchWithRetry(url, options, { maxAttempts = 3, baseDelayMs = 800, isCancelled = () => false } = {}) {
   let lastError;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {

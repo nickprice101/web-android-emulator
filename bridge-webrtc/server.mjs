@@ -1726,16 +1726,16 @@ class EmulatorVideoCapture {
           fps: captureFps,
         });
 
-        let streamDeliveredData = false;
+        let receivedData = false;
         while (this.running) {
           const { done, value } = await reader.read();
           if (done) {
             break;
           }
           if (value?.length) {
-            if (!streamDeliveredData) {
+            if (!receivedData) {
               // First data chunk received — the stream is genuinely alive.
-              streamDeliveredData = true;
+              receivedData = true;
               this.consecutiveFailures = 0;
             }
             const receivedAt = nowIso();
@@ -1778,7 +1778,7 @@ class EmulatorVideoCapture {
           return;
         }
 
-        if (!streamDeliveredData) {
+        if (!receivedData) {
           // The stream connected but ended without sending any H.264 data.
           // This happens when adb screenrecord on the apkbridge side exits
           // immediately (e.g. because ADB dropped).  Treat this the same as a

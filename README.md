@@ -63,6 +63,14 @@ This repository now defaults the bridge service to the same public TURN route
 as the browser and emulator, which is the safest default for Intel/Linux
 deployments such as Unraid.
 
+The default `docker-compose.yml` no longer injects `TURN_INTERNAL_*` into the
+emulator service. The native emulator gRPC-Web path shares its advertised ICE
+servers with the browser, so an emulator-only TURN URL like
+`turn:host.docker.internal:3478?transport=tcp` can leave the browser on a black
+screen while ICE fails. Keep the emulator on `TURN_HOST` unless you are
+deliberately debugging a native relay issue and understand that the browser may
+also see that internal route.
+
 If you need an internal bridge-only TURN route to bypass hairpin NAT or debug a
 client-specific `turns:` issue, set `TURN_BRIDGE_*` explicitly:
 

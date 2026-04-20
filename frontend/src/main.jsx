@@ -2706,6 +2706,20 @@ function App() {
     nativeFailureSignatureRef.current = null;
 
     if (nativeRetryCount >= NATIVE_WEBRTC_MAX_RETRIES) {
+      const shouldFailOverToCustomWebrtc = new Set([
+        "missing-ice-servers",
+        "disconnected",
+        "no-inbound-rtp",
+        "unreachable-host-candidates",
+      ]).has(nativeFailureReason.code);
+      if (shouldFailOverToCustomWebrtc) {
+        const failoverMessage = `Native WebRTC could not recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries. Switching to the custom WebRTC bridge so the browser can keep streaming over the repository-managed relay path.`;
+        handleStreamModeChange("custom-webrtc");
+        setWebrtcNotice(failoverMessage);
+        setMessage(failoverMessage);
+        return;
+      }
+
       const failMessage = `Native WebRTC could not recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries. Use the Stream dropdown to switch to a different mode.`;
       setWebrtcNotice(failMessage);
       setMessage(failMessage);

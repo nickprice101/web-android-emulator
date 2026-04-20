@@ -2043,6 +2043,11 @@ class NativeRtcVideoRelay {
     this.guid = null;
     this.running = false;
     this.turnTlsTunnelCleanup = null;
+    this._resetFirstFrameState();
+  }
+
+  _resetFirstFrameState() {
+    clearTimeout(this.firstFrameTimer);
     this.firstFrameTimer = null;
     this.firstFrameGraceUsed = false;
     this.firstRenderableFrameAt = null;
@@ -2169,10 +2174,7 @@ class NativeRtcVideoRelay {
       // Cancel any pending first-frame watchdog from a previous JSEP session
       // so it cannot fire and close the session while a fresh negotiation is
       // in progress.
-      clearTimeout(this.firstFrameTimer);
-      this.firstFrameTimer = null;
-      this.firstRenderableFrameAt = null;
-      this.placeholderFrameCount = 0;
+      this._resetFirstFrameState();
       if (this.emulatorPeer) {
         this.emulatorPeer.close();
       }
@@ -2222,12 +2224,9 @@ class NativeRtcVideoRelay {
   }
 
   _armFirstFrameWatchdog() {
-    clearTimeout(this.firstFrameTimer);
-    this.firstFrameTimer = null;
-    this.firstFrameGraceUsed = false;
-    this.firstRenderableFrameAt = null;
+    this._resetFirstFrameState();
 
-    const failSession = (graceUsed) => {
+    const failSession = (withGraceExtension) => {
       if (!this.running || this.firstRenderableFrameAt) {
         return;
       }
@@ -2236,7 +2235,7 @@ class NativeRtcVideoRelay {
         "error",
         "native-rtc: no renderable frame received within the watchdog window; closing session",
         {
-          timeoutMs: graceUsed
+          timeoutMs: withGraceExtension
             ? screenrecordFirstFrameTimeoutMs + screenrecordDecodeGraceTimeoutMs
             : screenrecordFirstFrameTimeoutMs,
           placeholdersSeen: this.placeholderFrameCount,
@@ -2262,6 +2261,10 @@ class NativeRtcVideoRelay {
         // not rendered its first real frame yet.  Extend the watchdog once by
         // the grace period to accommodate slow Android boot sequences.
         this.firstFrameGraceUsed = true;
+        // Reuse the session's screenrecord tracking field — the same field is
+        // used by adb-screenrecord sessions and consumed by the diagnostics UI
+        // to report frame-verification state.  In native-rtc sessions this is
+        // pre-initialised to "not-requested" in NativeRtcVideoRelay.start().
         this.session.media.screenrecord = {
           ...(this.session.media.screenrecord || {}),
           decodeGraceUsed: true,
@@ -2340,8 +2343,7 @@ class NativeRtcVideoRelay {
 
   stop() {
     this.running = false;
-    clearTimeout(this.firstFrameTimer);
-    this.firstFrameTimer = null;
+    this._resetFirstFrameState();
     this.abortController.abort();
     if (typeof this.turnTlsTunnelCleanup === "function") {
       this.turnTlsTunnelCleanup();

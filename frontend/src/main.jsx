@@ -952,6 +952,32 @@ function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
   });
 }
 
+// Retry a fetch call on transient network errors (e.g. "Failed to fetch" when
+// the bridge container is briefly restarting).  Only TypeError (network-level
+// failures) are retried; HTTP error responses are surfaced immediately.
+// The isCancelled callback lets the caller signal that the operation should be
+// abandoned (e.g. when the enclosing React effect is cleaned up).
+async function fetchWithRetry(url, options, { maxAttempts = 3, baseDelayMs = 800, isCancelled = () => false } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      if (!(error instanceof TypeError)) {
+        throw error;
+      }
+      lastError = error;
+      if (attempt < maxAttempts - 1 && !isCancelled()) {
+        await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
+      }
+    }
+    if (isCancelled()) {
+      throw lastError;
+    }
+  }
+  throw lastError;
+}
+
 async function parseJsonResponse(resp, label) {
   const text = await resp.text();
   let data;
@@ -1068,7 +1094,10 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
         setAnswerSdp("");
         onStateChange("connecting");
 
-        const config = await parseJsonResponse(await fetch("/bridge/api/config"), "/bridge/api/config");
+        const config = await parseJsonResponse(
+          await fetchWithRetry("/bridge/api/config", undefined, { isCancelled: () => cancelled }),
+          "/bridge/api/config"
+        );
         if (cancelled) {
           return;
         }
@@ -1148,14 +1177,18 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
           iceCandidates: localOfferCandidates,
         });
 
-        const sessionResp = await fetch("/bridge/api/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: localOffer.type,
-            sdp: localOffer.sdp,
-          }),
-        });
+        const sessionResp = await fetchWithRetry(
+          "/bridge/api/session",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: localOffer.type,
+              sdp: localOffer.sdp,
+            }),
+          },
+          { isCancelled: () => cancelled }
+        );
 
         const sessionText = await sessionResp.text();
         let session;

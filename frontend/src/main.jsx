@@ -9,6 +9,7 @@ const NATIVE_WEBRTC_MAX_RETRIES = 3;
 const STREAM_MODE_OPTIONS = [
   { value: "native-webrtc", label: "WebRTC (native emulator)" },
   { value: "custom-webrtc", label: "WebRTC (custom bridge)" },
+  { value: "scrcpy-http", label: "HTTP video (scrcpy)" },
   { value: "png", label: "PNG preview" },
 ];
 // Public STUN server used as a fallback when the emulator advertises no ICE
@@ -364,6 +365,9 @@ function describeCaptureMode(mode) {
   if (mode === "adb-screencap") {
     return "screen captures";
   }
+  if (mode === "scrcpy-http") {
+    return "scrcpy HTTP video";
+  }
   if (mode === "stub") {
     return "disabled";
   }
@@ -376,6 +380,9 @@ function describeCaptureBackend(mode) {
   }
   if (mode === "adb-screencap") {
     return "apkbridge /frame";
+  }
+  if (mode === "scrcpy-http") {
+    return "apkbridge /scrcpy-video";
   }
   if (mode === "stub") {
     return "stub mode";
@@ -1794,6 +1801,188 @@ function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inp
   );
 }
 
+
+function appendMediaBuffer(sourceBuffer, chunk) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      sourceBuffer.removeEventListener("updateend", onUpdateEnd);
+      sourceBuffer.removeEventListener("error", onError);
+    };
+    const onUpdateEnd = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("MediaSource append failed"));
+    };
+    sourceBuffer.addEventListener("updateend", onUpdateEnd, { once: true });
+    sourceBuffer.addEventListener("error", onError, { once: true });
+    sourceBuffer.appendBuffer(chunk);
+  });
+}
+
+function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
+  const videoRef = useRef(null);
+  const containerRef = useRef(null);
+  const gestureRef = useRef(null);
+  const [status, setStatus] = useState("connecting");
+  const [detail, setDetail] = useState("Opening ordinary HTTPS video stream from scrcpy...");
+  const [hasVideo, setHasVideo] = useState(false);
+
+  const sendInput = useCallback(async (payload) => {
+    const response = await fetch("/api/input-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text.slice(0, 160) || `input failed (${response.status})`);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const abortController = new AbortController();
+    const mediaSource = new MediaSource();
+    const objectUrl = URL.createObjectURL(mediaSource);
+    const video = videoRef.current;
+    if (video) {
+      video.src = objectUrl;
+    }
+
+    async function start() {
+      try {
+        await new Promise((resolve, reject) => {
+          mediaSource.addEventListener("sourceopen", resolve, { once: true });
+          mediaSource.addEventListener("error", () => reject(new Error("MediaSource failed to open")), { once: true });
+        });
+        if (cancelled) return;
+        const sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+        sourceBuffer.mode = "segments";
+        const response = await fetch(`/api/scrcpy-video?cache=${Date.now()}`, {
+          signal: abortController.signal,
+          headers: { Accept: "video/mp4" },
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`scrcpy video stream failed (${response.status})`);
+        }
+        setStatus("streaming");
+        setDetail("Receiving fragmented MP4 over HTTPS from scrcpy.");
+        onStateChange?.("connected");
+        onMessage?.("Connected to scrcpy HTTP video stream");
+        const reader = response.body.getReader();
+        while (!cancelled) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value?.byteLength) {
+            await appendMediaBuffer(sourceBuffer, value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+            const buffered = video?.buffered;
+            if (video && buffered?.length) {
+              const end = buffered.end(buffered.length - 1);
+              if (end - video.currentTime > 0.8) {
+                video.currentTime = Math.max(0, end - 0.25);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        if (!cancelled && error.name !== "AbortError") {
+          setStatus("error");
+          setDetail(error.message);
+          onStateChange?.("error");
+          onMessage?.(`Scrcpy HTTP video failed: ${error.message}`);
+        }
+      }
+    }
+
+    start();
+    return () => {
+      cancelled = true;
+      abortController.abort();
+      if (video) video.removeAttribute("src");
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [onMessage, onStateChange]);
+
+  const handlePointerDown = useCallback((event) => {
+    event.currentTarget.focus?.();
+    const ratios = resolvePointerRatios(event, containerRef.current, videoRef.current);
+    if (!ratios) return;
+    gestureRef.current = { ...ratios, pointerId: event.pointerId, startedAt: Date.now(), moved: false };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, []);
+
+  const handlePointerMove = useCallback((event) => {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const ratios = resolvePointerRatios(event, containerRef.current, videoRef.current);
+    if (!ratios) return;
+    if (Math.abs(ratios.xRatio - gesture.xRatio) >= 0.015 || Math.abs(ratios.yRatio - gesture.yRatio) >= 0.015) {
+      gesture.moved = true;
+    }
+  }, []);
+
+  const clearGesture = useCallback((event) => {
+    if (gestureRef.current?.pointerId === event.pointerId) gestureRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }, []);
+
+  const handlePointerUp = useCallback(async (event) => {
+    const gesture = gestureRef.current;
+    gestureRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (!gesture) return;
+    const end = resolvePointerRatios(event, containerRef.current, videoRef.current);
+    if (!end) return;
+    try {
+      if (!gesture.moved && Math.abs(end.xRatio - gesture.xRatio) < 0.015 && Math.abs(end.yRatio - gesture.yRatio) < 0.015) {
+        await sendInput({ type: "tap", xRatio: gesture.xRatio, yRatio: gesture.yRatio });
+        onMessage?.("Tap delivered through scrcpy HTTP video mode");
+      } else {
+        await sendInput({ type: "swipe", startXRatio: gesture.xRatio, startYRatio: gesture.yRatio, endXRatio: end.xRatio, endYRatio: end.yRatio, durationMs: Math.max(120, Date.now() - gesture.startedAt) });
+        onMessage?.("Swipe delivered through scrcpy HTTP video mode");
+      }
+    } catch (error) {
+      onMessage?.(`Scrcpy input failed: ${error.message}`);
+    }
+  }, [onMessage, sendInput]);
+
+  const handleKeyDown = useCallback(async (event) => {
+    const payload = mapKeyboardEventToPayload(event);
+    if (!payload) return;
+    event.preventDefault();
+    try {
+      await sendInput(payload);
+      onMessage?.("Keyboard input delivered through scrcpy HTTP video mode");
+    } catch (error) {
+      onMessage?.(`Scrcpy input failed: ${error.message}`);
+    }
+  }, [onMessage, sendInput]);
+
+  return (
+    <div style={{ width, height, borderRadius: 18, background: "#05070b", color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid #202634" }}>
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid #202634", display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12 }}>
+        <span>HTTP video (scrcpy)</span>
+        <span>transport: HTTPS fetch | status: {status}</span>
+      </div>
+      <div ref={containerRef} style={{ flex: 1, position: "relative", background: "#000" }} tabIndex={0} role="application" aria-label="Android emulator scrcpy video" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={clearGesture} onLostPointerCapture={clearGesture} onKeyDown={handleKeyDown}>
+        <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setHasVideo(true)} onPlaying={() => setHasVideo(true)} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", background: "#000" }} />
+        {!hasVideo && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+            <div style={{ maxWidth: 420, padding: 16, background: "rgba(10, 12, 18, 0.9)", border: "1px solid #3b465b", borderRadius: 14, fontSize: 13, lineHeight: 1.5 }}>
+              <strong>Scrcpy HTTP video</strong>
+              <div style={{ marginTop: 8 }}>{detail}</div>
+              <div style={{ marginTop: 8, color: "#a8b3c7" }}>No WebRTC, TURN, ICE, or WebSocket is used for this video path.</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const emuRef = useRef(null);
   const wrapRef = useRef(null);
@@ -3065,6 +3254,10 @@ function App() {
       setWebrtcNotice("");
       setEmuState("connecting");
       setMessage("Connecting via custom WebRTC bridge...");
+    } else if (nextMode === "scrcpy-http") {
+      setWebrtcNotice("");
+      setEmuState("connecting");
+      setMessage("Connecting to scrcpy HTTP video stream...");
     } else {
       setWebrtcNotice("");
       setMessage("Switching to PNG preview mode...");
@@ -3174,6 +3367,13 @@ function App() {
                 onMessage={handleWebrtcMessage}
                 inputRef={webrtcInputRef}
                 onDiagnosticsChange={setWebrtcDiagnostics}
+              />
+            ) : streamMode === "scrcpy-http" ? (
+              <ScrcpyHttpVideoPane
+                width={layout.width}
+                height={layout.height}
+                onStateChange={(state) => setEmuState(state)}
+                onMessage={setMessage}
               />
             ) : (
               <Emulator
@@ -3290,12 +3490,14 @@ function App() {
                   : "unavailable"}
               </div>
               <div>
-                WebRTC frame:{" "}
+                Video frame:{" "}
                 {streamMode === "custom-webrtc"
                   ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}${captureOverlay.verificationLine ? ` | ${captureOverlay.verificationLine}` : ""}`
                   : streamMode === "native-webrtc"
                     ? `${nativeWebrtcOverlay.statusLine}${nativeWebrtcOverlay.reasonLine ? ` | ${nativeWebrtcOverlay.reasonLine}` : ""}${nativeWebrtcOverlay.verificationLine ? ` | ${nativeWebrtcOverlay.verificationLine}` : ""}`
-                    : "switch to WebRTC mode to compare"}
+                    : streamMode === "scrcpy-http"
+                      ? "scrcpy fragmented MP4 over ordinary HTTPS fetch"
+                      : "switch to a video mode to compare"}
               </div>
               <div>Native WebRTC stays front and center here while we debug the emulator's built-in RTC path.</div>
             </div>

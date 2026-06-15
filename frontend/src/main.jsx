@@ -1862,7 +1862,7 @@ function buildScrcpyDebugSnapshot(video, mediaSource, sourceBuffer) {
   };
 }
 
-function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
+function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagnosticsChange }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const gestureRef = useRef(null);
@@ -1887,6 +1887,10 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
     lastEvent: "initializing",
     lastError: "none",
   });
+
+  useEffect(() => {
+    onDiagnosticsChange?.(debug);
+  }, [debug, onDiagnosticsChange]);
 
   const sendInput = useCallback(async (payload) => {
     const response = await fetch("/api/input-event", {
@@ -2073,8 +2077,10 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
     }
   }, [onMessage, sendInput]);
 
+  const inlineDebugSummary = `${formatBytes(debug.bytesReceived)} / ${debug.chunksReceived} chunks`;
+
   return (
-    <div style={{ width, height, borderRadius: 18, background: "#05070b", color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid #202634" }}>
+    <div aria-description={inlineDebugSummary} style={{ width, height, borderRadius: 18, background: "#05070b", color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid #202634" }}>
       <div style={{ padding: "10px 12px", borderBottom: "1px solid #202634", display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12 }}>
         <span>HTTP video (scrcpy)</span>
         <span>transport: HTTPS fetch | status: {status}</span>
@@ -2090,13 +2096,6 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
             </div>
           </div>
         )}
-        <div style={{ position: "absolute", left: 12, right: 12, bottom: 12, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, padding: 10, borderRadius: 12, background: "rgba(5, 7, 11, 0.82)", border: "1px solid rgba(83, 96, 125, 0.72)", color: "#d7dfed", fontSize: 11, pointerEvents: "none" }} aria-label="scrcpy HTTP video debug overlay">
-          <div><strong>HTTP</strong><br />{debug.response}<br />{debug.contentType}</div>
-          <div><strong>Stream</strong><br />{formatBytes(debug.bytesReceived)} / {debug.chunksReceived} chunks<br />first box: {debug.firstBox}</div>
-          <div><strong>MSE</strong><br />{debug.mediaSource} / appended {debug.chunksAppended}<br />updating: {String(debug.sourceBufferUpdating)}</div>
-          <div><strong>Video</strong><br />ready {debug.videoReadyState}, net {debug.videoNetworkState}, {debug.videoSize}<br />t={debug.currentTime}s buffered {debug.buffered}</div>
-          <div style={{ gridColumn: "1 / -1", color: debug.lastError === "none" ? "#a8b3c7" : "#ffb4a8" }}>last event: {debug.lastEvent} | last chunk: {formatBytes(debug.lastChunkBytes)} | error: {debug.lastError}</div>
-        </div>
       </div>
     </div>
   );
@@ -2134,6 +2133,7 @@ function App() {
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
+  const [scrcpyDiagnostics, setScrcpyDiagnostics] = useState(null);
   const [nativeVideoStats, setNativeVideoStats] = useState(null);
   const [nativeHasVideoFrame, setNativeHasVideoFrame] = useState(false);
   const [nativeDiagnostics, setNativeDiagnostics] = useState({
@@ -3493,6 +3493,7 @@ function App() {
                 height={layout.height}
                 onStateChange={(state) => setEmuState(state)}
                 onMessage={setMessage}
+                onDiagnosticsChange={setScrcpyDiagnostics}
               />
             ) : (
               <Emulator
@@ -3621,6 +3622,48 @@ function App() {
               <div>Native WebRTC stays front and center here while we debug the emulator's built-in RTC path.</div>
             </div>
           </div>
+
+
+          {streamMode === "scrcpy-http" && (
+            <div
+              data-testid="scrcpy-http-diagnostics"
+              style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}
+            >
+              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Scrcpy HTTP video diagnostics</div>
+              <pre
+                aria-label="scrcpy HTTP video debug overlay"
+                style={{
+                  margin: 0,
+                  padding: 10,
+                  background: "#0f1218",
+                  border: "1px solid #2b313d",
+                  borderRadius: 8,
+                  whiteSpace: "pre-wrap",
+                  userSelect: "text",
+                  fontFamily: "Consolas, monospace",
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                  maxHeight: 260,
+                  overflow: "auto",
+                }}
+              >
+                {[
+                  `http: ${scrcpyDiagnostics?.response || "pending"}`,
+                  `content-type: ${scrcpyDiagnostics?.contentType || "pending"}`,
+                  `stream: ${formatBytes(scrcpyDiagnostics?.bytesReceived || 0)} / ${scrcpyDiagnostics?.chunksReceived || 0} chunks`,
+                  `first box: ${scrcpyDiagnostics?.firstBox || "waiting"}`,
+                  `last chunk: ${formatBytes(scrcpyDiagnostics?.lastChunkBytes || 0)}`,
+                  `mse: ${scrcpyDiagnostics?.mediaSource || "unknown"} / appended ${scrcpyDiagnostics?.chunksAppended || 0}`,
+                  `source buffer updating: ${String(Boolean(scrcpyDiagnostics?.sourceBufferUpdating))}`,
+                  `video: ready ${scrcpyDiagnostics?.videoReadyState ?? 0}, net ${scrcpyDiagnostics?.videoNetworkState ?? 0}, ${scrcpyDiagnostics?.videoSize || "0x0"}`,
+                  `time: ${scrcpyDiagnostics?.currentTime || "0.00"}s`,
+                  `buffered: ${scrcpyDiagnostics?.buffered || "none"}`,
+                  `last event: ${scrcpyDiagnostics?.lastEvent || "initializing"}`,
+                  `error: ${scrcpyDiagnostics?.lastError || "none"}`,
+                ].join("\n")}
+              </pre>
+            </div>
+          )}
 
           {streamMode === "custom-webrtc" && (
             <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>

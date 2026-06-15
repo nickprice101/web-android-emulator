@@ -415,7 +415,10 @@ def scrcpy_video():
         fifo_reader = None
         try:
             os.mkfifo(fifo_path, 0o600)
-            fifo_reader_fd = os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)
+            # Keep a write handle open while ffmpeg starts. Opening the FIFO read-only
+            # before scrcpy attaches can make ffmpeg observe immediate EOF, which
+            # yields HTTP headers but no body bytes in the browser diagnostics.
+            fifo_reader_fd = os.open(fifo_path, os.O_RDWR | os.O_NONBLOCK)
             os.set_blocking(fifo_reader_fd, True)
             fifo_reader = os.fdopen(fifo_reader_fd, "rb", buffering=0)
             scrcpy_cmd = [

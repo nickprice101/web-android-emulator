@@ -74,6 +74,16 @@ assert.match(
 );
 assert.match(
   frontendMain,
+  /const SCRCPY_DEBUG_UPDATE_INTERVAL_MS = 250;/,
+  "scrcpy HTTP diagnostics must be throttled so frequent video chunks cannot flood React renders and freeze the browser"
+);
+assert.match(
+  frontendMain,
+  /pendingDebugPatch[\s\S]*setTimeout\(flushDebug, SCRCPY_DEBUG_UPDATE_INTERVAL_MS\)/m,
+  "scrcpy HTTP mode must coalesce chunk diagnostics before updating React state"
+);
+assert.match(
+  frontendMain,
   /jsep\._handleStart = \(signal\) => \{/,
   "native JSEP start patch must stay synchronous so SDP/candidate handling cannot race ahead of peer construction"
 );

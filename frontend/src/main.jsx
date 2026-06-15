@@ -6,6 +6,7 @@ const EMULATOR_ASPECT = 1080 / 1920;
 const MIN_RENDERABLE_VIDEO_DIMENSION = 16;
 const NATIVE_WEBRTC_RECOVERY_DELAY_MS = 1500;
 const NATIVE_WEBRTC_MAX_RETRIES = 3;
+const SCRCPY_DEBUG_UPDATE_INTERVAL_MS = 250;
 const STREAM_MODE_OPTIONS = [
   { value: "native-webrtc", label: "WebRTC (native emulator)" },
   { value: "custom-webrtc", label: "WebRTC (custom bridge)" },
@@ -1915,15 +1916,39 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
     let chunksReceived = 0;
     let chunksAppended = 0;
     let firstBox = "waiting";
-    const updateDebug = (patch = {}) => {
-      if (cancelled) {
+    let pendingDebugPatch = null;
+    let debugFlushTimer = null;
+    const flushDebug = () => {
+      if (debugFlushTimer) {
+        clearTimeout(debugFlushTimer);
+        debugFlushTimer = null;
+      }
+      if (cancelled || !pendingDebugPatch) {
         return;
       }
+      const patch = pendingDebugPatch;
+      pendingDebugPatch = null;
       setDebug((current) => ({
         ...current,
         ...buildScrcpyDebugSnapshot(video, mediaSource, sourceBuffer),
         ...patch,
       }));
+    };
+    const updateDebug = (patch = {}, { immediate = false } = {}) => {
+      if (cancelled) {
+        return;
+      }
+      pendingDebugPatch = {
+        ...(pendingDebugPatch || {}),
+        ...patch,
+      };
+      if (immediate) {
+        flushDebug();
+        return;
+      }
+      if (!debugFlushTimer) {
+        debugFlushTimer = setTimeout(flushDebug, SCRCPY_DEBUG_UPDATE_INTERVAL_MS);
+      }
     };
     const recordVideoEvent = (event) => updateDebug({ lastEvent: `video:${event.type}` });
     const recordVideoError = () => updateDebug({ lastEvent: "video:error", lastError: video?.error?.message || `media error ${video?.error?.code || "unknown"}` });
@@ -1947,7 +1972,7 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
         if (cancelled) return;
         sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
         sourceBuffer.mode = "segments";
-        updateDebug({ lastEvent: "mediasource:open" });
+        updateDebug({ lastEvent: "mediasource:open" }, { immediate: true });
         const response = await fetch(`/api/scrcpy-video?cache=${Date.now()}`, {
           signal: abortController.signal,
           headers: { Accept: "video/mp4" },
@@ -1956,7 +1981,7 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
           response: `${response.status} ${response.statusText || ""}`.trim(),
           contentType: response.headers.get("content-type") || "missing",
           lastEvent: "fetch:headers",
-        });
+        }, { immediate: true });
         if (!response.ok || !response.body) {
           throw new Error(`scrcpy video stream failed (${response.status})`);
         }
@@ -1997,7 +2022,7 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
         if (!cancelled && error.name !== "AbortError") {
           setStatus("error");
           setDetail(error.message);
-          updateDebug({ lastEvent: "error", lastError: error.message });
+          updateDebug({ lastEvent: "error", lastError: error.message }, { immediate: true });
           onStateChange?.("error");
           onMessage?.(`Scrcpy HTTP video failed: ${error.message}`);
         }
@@ -2008,6 +2033,10 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
     return () => {
       cancelled = true;
       abortController.abort();
+      if (debugFlushTimer) {
+        clearTimeout(debugFlushTimer);
+        debugFlushTimer = null;
+      }
       if (video) {
         video.removeEventListener("loadedmetadata", recordVideoEvent);
         video.removeEventListener("loadeddata", recordVideoEvent);

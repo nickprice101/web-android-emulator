@@ -1,3 +1,4 @@
+import io
 import subprocess
 import sys
 import time
@@ -59,6 +60,56 @@ class ScreenrecordEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(first_chunk, b"frame-2")
+
+
+class ScrcpyVideoEndpointTests(unittest.TestCase):
+    def test_scrcpy_video_streams_fragmented_mp4_and_uses_plain_http_headers(self):
+        class FakeStdout:
+            def __init__(self):
+                self.chunks = [b"ftyp", b""]
+
+            def read(self, size=-1):
+                return self.chunks.pop(0) if self.chunks else b""
+
+        class FakeProc:
+            def __init__(self, stdout=None, stderr=None, polls=None):
+                self.stdout = stdout
+                self.stderr = stderr
+                self._polls = list(polls or [None, 0])
+
+            def poll(self):
+                return self._polls.pop(0) if self._polls else 0
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                pass
+
+        popen_calls = []
+
+        def fake_popen(cmd, **kwargs):
+            popen_calls.append(cmd)
+            if cmd[0] == "ffmpeg":
+                return FakeProc(stdout=FakeStdout(), stderr=None, polls=[None, 0])
+            return FakeProc(stdout=None, stderr=None, polls=[None, 0])
+
+        client = app.test_client()
+        with patch("app.tempfile.gettempdir", return_value="/tmp"), patch("app.os.mkfifo"), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch(
+            "app.os.fdopen", return_value=io.BytesIO()
+        ), patch("app.subprocess.Popen", side_effect=fake_popen):
+            response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=30", buffered=False)
+            first_chunk = next(response.response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(first_chunk, b"ftyp")
+        self.assertIn("video/mp4", response.mimetype)
+        self.assertEqual(response.headers.get("X-Accel-Buffering"), "no")
+        self.assertTrue(any(call[0] == "scrcpy" and "--no-display" in call and "--record-format" in call and "mkv" in call for call in popen_calls))
+        self.assertTrue(any(call[0] == "ffmpeg" and "empty_moov+default_base_moof+frag_keyframe" in call for call in popen_calls))
 
 
 if __name__ == "__main__":

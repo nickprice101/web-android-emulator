@@ -3,6 +3,7 @@ import queue
 import shlex
 import subprocess
 import tempfile
+import uuid
 import threading
 import time
 from pathlib import Path
@@ -17,6 +18,11 @@ SCREENRECORD_BIT_RATE = max(1_000_000, int(os.environ.get("SCREENRECORD_BIT_RATE
 SCREENRECORD_TIME_LIMIT = max(10, min(180, int(os.environ.get("SCREENRECORD_TIME_LIMIT", "180"))))
 SCREENRECORD_MAX_CONSECUTIVE_FAILURES = 3
 SCREENRECORD_RETRY_DELAY_SECONDS = 0.5
+
+SCRCPY_VIDEO_BIT_RATE = max(1_000_000, int(os.environ.get("SCRCPY_VIDEO_BIT_RATE", "8000000")))
+SCRCPY_MAX_SIZE = max(320, int(os.environ.get("SCRCPY_MAX_SIZE", "1080")))
+SCRCPY_MAX_FPS = max(1, int(os.environ.get("SCRCPY_MAX_FPS", "30")))
+SCRCPY_FFMPEG_FRAGMENT_US = max(50000, int(os.environ.get("SCRCPY_FFMPEG_FRAGMENT_US", "100000")))
 KEY_MAP = {"HOME": "3", "BACK": "4", "RECENTS": "187", "POWER": "26", "MENU": "82"}
 KEY_NAME_MAP = {
     "GoHome": KEY_MAP["HOME"],
@@ -380,6 +386,148 @@ def input_key():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.get("/scrcpy-video")
+def scrcpy_video():
+    """Stream scrcpy-captured emulator video as fragmented MP4 over plain HTTP.
+
+    scrcpy records a low-latency Matroska stream into a FIFO while ffmpeg remuxes
+    it into fragmented MP4 for browser MediaSource playback. This keeps the
+    browser transport on an ordinary HTTPS response, avoiding WebRTC, TURN, ICE,
+    and WebSocket upgrades.
+    """
+    bit_rate = request.args.get("bit_rate", str(SCRCPY_VIDEO_BIT_RATE)).strip()
+    max_size = request.args.get("max_size", str(SCRCPY_MAX_SIZE)).strip()
+    max_fps = request.args.get("max_fps", str(SCRCPY_MAX_FPS)).strip()
+
+    try:
+        bit_rate_value = max(1_000_000, int(bit_rate))
+        max_size_value = max(320, int(max_size))
+        max_fps_value = max(1, min(60, int(max_fps)))
+    except ValueError:
+        return jsonify({"ok": False, "error": "bit_rate, max_size, and max_fps must be integers"}), 400
+
+    def generate():
+        fifo_path = Path(tempfile.gettempdir()) / f"scrcpy-video-{uuid.uuid4().hex}.mkv"
+        scrcpy_proc = None
+        ffmpeg_proc = None
+        fifo_reader = None
+        try:
+            os.mkfifo(fifo_path, 0o600)
+            fifo_reader_fd = os.open(fifo_path, os.O_RDONLY | os.O_NONBLOCK)
+            os.set_blocking(fifo_reader_fd, True)
+            fifo_reader = os.fdopen(fifo_reader_fd, "rb", buffering=0)
+            scrcpy_cmd = [
+                "scrcpy",
+                "--serial",
+                ADB_TARGET,
+                "--no-display",
+                "--no-control",
+                "--bit-rate",
+                str(bit_rate_value),
+                "--max-size",
+                str(max_size_value),
+                "--max-fps",
+                str(max_fps_value),
+                "--record",
+                str(fifo_path),
+                "--record-format",
+                "mkv",
+            ]
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "warning",
+                "-fflags",
+                "nobuffer",
+                "-flags",
+                "low_delay",
+                "-probesize",
+                "32",
+                "-analyzeduration",
+                "0",
+                "-i",
+                "pipe:0",
+                "-an",
+                "-c:v",
+                "copy",
+                "-movflags",
+                "empty_moov+default_base_moof+frag_keyframe",
+                "-frag_duration",
+                str(SCRCPY_FFMPEG_FRAGMENT_US),
+                "-min_frag_duration",
+                str(SCRCPY_FFMPEG_FRAGMENT_US),
+                "-f",
+                "mp4",
+                "pipe:1",
+            ]
+            ffmpeg_proc = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=fifo_reader,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+            )
+            scrcpy_proc = subprocess.Popen(
+                scrcpy_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                bufsize=0,
+            )
+
+            stderr_chunks = []
+            while True:
+                chunk = ffmpeg_proc.stdout.read(32 * 1024) if ffmpeg_proc.stdout else b""
+                if chunk:
+                    yield chunk
+                    continue
+                if ffmpeg_proc.poll() is not None:
+                    break
+                if scrcpy_proc.poll() is not None:
+                    stderr = scrcpy_proc.stderr.read(4096) if scrcpy_proc.stderr else b""
+                    if stderr:
+                        stderr_chunks.append(stderr)
+                    if ffmpeg_proc.poll() is None:
+                        ffmpeg_proc.terminate()
+                    break
+                time.sleep(0.01)
+
+            if scrcpy_proc and scrcpy_proc.stderr:
+                stderr = scrcpy_proc.stderr.read(4096)
+                if stderr:
+                    stderr_chunks.append(stderr)
+            if stderr_chunks:
+                app.logger.warning(
+                    "scrcpy video stream ended: %s",
+                    b"".join(stderr_chunks).decode("utf-8", errors="replace").strip(),
+                )
+        finally:
+            for proc in (scrcpy_proc, ffmpeg_proc):
+                if proc and proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+            if fifo_reader:
+                fifo_reader.close()
+            try:
+                fifo_path.unlink()
+            except FileNotFoundError:
+                pass
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='video/mp4; codecs="avc1.42E01E"',
+        headers={
+            "Cache-Control": "no-store, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+        direct_passthrough=True,
+    )
 
 
 @app.post("/input-event")

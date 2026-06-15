@@ -54,6 +54,16 @@ assert.match(
 );
 assert.match(
   frontendMain,
+  /value: "scrcpy-http", label: "HTTP video \(scrcpy\)"/,
+  "frontend stream selector options must expose the scrcpy HTTP video mode"
+);
+assert.match(
+  frontendMain,
+  /fetch\(`\/api\/scrcpy-video\?cache=\$\{Date\.now\(\)\}`/,
+  "scrcpy HTTP mode must fetch fragmented MP4 over the normal API route instead of WebRTC or WebSocket"
+);
+assert.match(
+  frontendMain,
   /jsep\._handleStart = \(signal\) => \{/,
   "native JSEP start patch must stay synchronous so SDP/candidate handling cannot race ahead of peer construction"
 );
@@ -108,6 +118,13 @@ assert.match(
   composeConfig,
   /EMULATOR_PARAMS:\s*".*-camera-back none.*-camera-front none.*"/m,
   "docker-compose emulator params must disable virtual cameras to avoid unstable media extractor startup paths"
+);
+
+const apkbridgeDockerfile = readRepoFile("apkbridge/Dockerfile");
+assert.match(
+  apkbridgeDockerfile,
+  /apt-get install -y --no-install-recommends[^\n]*ffmpeg scrcpy/,
+  "apkbridge image must include ffmpeg and scrcpy for the HTTP video mode"
 );
 
 const emulatorTurnWrapper = readRepoFile("emulator/start-emulator-with-turn.sh");

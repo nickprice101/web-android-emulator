@@ -64,6 +64,16 @@ assert.match(
 );
 assert.match(
   frontendMain,
+  /aria-label="scrcpy HTTP video debug overlay"/,
+  "scrcpy HTTP mode must expose an in-browser debugging overlay for fetch, MediaSource, and video element state"
+);
+assert.match(
+  frontendMain,
+  /formatBytes\(debug\.bytesReceived\).*debug\.chunksReceived/s,
+  "scrcpy HTTP debug overlay must show byte and chunk counts so a connected-but-blank stream can be diagnosed in the browser"
+);
+assert.match(
+  frontendMain,
   /jsep\._handleStart = \(signal\) => \{/,
   "native JSEP start patch must stay synchronous so SDP/candidate handling cannot race ahead of peer construction"
 );

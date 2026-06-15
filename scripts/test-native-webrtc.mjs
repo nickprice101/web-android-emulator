@@ -123,8 +123,13 @@ assert.match(
 const apkbridgeDockerfile = readRepoFile("apkbridge/Dockerfile");
 assert.match(
   apkbridgeDockerfile,
-  /apt-get install -y --no-install-recommends[^\n]*ffmpeg scrcpy/,
-  "apkbridge image must include ffmpeg and scrcpy for the HTTP video mode"
+  /apt-get install -y --no-install-recommends[^\n]*curl[^\n]*ffmpeg/,
+  "apkbridge image must include curl before installing scrcpy so Debian's scrcpy post-install can download the prebuilt server"
+);
+assert.match(
+  apkbridgeDockerfile,
+  /apt-get install -y --no-install-recommends -t "\$\{VERSION_CODENAME\}-backports" scrcpy/,
+  "apkbridge image must install scrcpy from backports for the HTTP video mode"
 );
 
 const emulatorTurnWrapper = readRepoFile("emulator/start-emulator-with-turn.sh");

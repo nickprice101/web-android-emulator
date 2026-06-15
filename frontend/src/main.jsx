@@ -1822,6 +1822,46 @@ function appendMediaBuffer(sourceBuffer, chunk) {
   });
 }
 
+function formatBytes(value) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KiB`;
+  }
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function readMp4BoxType(chunk) {
+  if (!chunk || chunk.byteLength < 8) {
+    return "waiting";
+  }
+  const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+  return String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]).replace(/[^\x20-\x7e]/g, "?");
+}
+
+function buildScrcpyDebugSnapshot(video, mediaSource, sourceBuffer) {
+  const buffered = [];
+  if (video?.buffered) {
+    for (let index = 0; index < video.buffered.length; index += 1) {
+      buffered.push(`${video.buffered.start(index).toFixed(2)}-${video.buffered.end(index).toFixed(2)}s`);
+    }
+  }
+
+  return {
+    mediaSource: mediaSource?.readyState || "unknown",
+    sourceBufferUpdating: Boolean(sourceBuffer?.updating),
+    videoReadyState: video?.readyState ?? 0,
+    videoNetworkState: video?.networkState ?? 0,
+    videoSize: video?.videoWidth && video?.videoHeight ? `${video.videoWidth}x${video.videoHeight}` : "0x0",
+    currentTime: Number(video?.currentTime || 0).toFixed(2),
+    buffered: buffered.join(", ") || "none",
+  };
+}
+
 function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -1829,6 +1869,24 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
   const [status, setStatus] = useState("connecting");
   const [detail, setDetail] = useState("Opening ordinary HTTPS video stream from scrcpy...");
   const [hasVideo, setHasVideo] = useState(false);
+  const [debug, setDebug] = useState({
+    bytesReceived: 0,
+    chunksReceived: 0,
+    chunksAppended: 0,
+    firstBox: "waiting",
+    lastChunkBytes: 0,
+    response: "pending",
+    contentType: "pending",
+    mediaSource: "closed",
+    sourceBufferUpdating: false,
+    videoReadyState: 0,
+    videoNetworkState: 0,
+    videoSize: "0x0",
+    currentTime: "0.00",
+    buffered: "none",
+    lastEvent: "initializing",
+    lastError: "none",
+  });
 
   const sendInput = useCallback(async (payload) => {
     const response = await fetch("/api/input-event", {
@@ -1848,8 +1906,32 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
     const mediaSource = new MediaSource();
     const objectUrl = URL.createObjectURL(mediaSource);
     const video = videoRef.current;
+    let sourceBuffer = null;
+    let bytesReceived = 0;
+    let chunksReceived = 0;
+    let chunksAppended = 0;
+    let firstBox = "waiting";
+    const updateDebug = (patch = {}) => {
+      if (cancelled) {
+        return;
+      }
+      setDebug((current) => ({
+        ...current,
+        ...buildScrcpyDebugSnapshot(video, mediaSource, sourceBuffer),
+        ...patch,
+      }));
+    };
+    const recordVideoEvent = (event) => updateDebug({ lastEvent: `video:${event.type}` });
+    const recordVideoError = () => updateDebug({ lastEvent: "video:error", lastError: video?.error?.message || `media error ${video?.error?.code || "unknown"}` });
     if (video) {
       video.src = objectUrl;
+      video.addEventListener("loadedmetadata", recordVideoEvent);
+      video.addEventListener("loadeddata", recordVideoEvent);
+      video.addEventListener("canplay", recordVideoEvent);
+      video.addEventListener("playing", recordVideoEvent);
+      video.addEventListener("stalled", recordVideoEvent);
+      video.addEventListener("waiting", recordVideoEvent);
+      video.addEventListener("error", recordVideoError);
     }
 
     async function start() {
@@ -1859,11 +1941,17 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
           mediaSource.addEventListener("error", () => reject(new Error("MediaSource failed to open")), { once: true });
         });
         if (cancelled) return;
-        const sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+        sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
         sourceBuffer.mode = "segments";
+        updateDebug({ lastEvent: "mediasource:open" });
         const response = await fetch(`/api/scrcpy-video?cache=${Date.now()}`, {
           signal: abortController.signal,
           headers: { Accept: "video/mp4" },
+        });
+        updateDebug({
+          response: `${response.status} ${response.statusText || ""}`.trim(),
+          contentType: response.headers.get("content-type") || "missing",
+          lastEvent: "fetch:headers",
         });
         if (!response.ok || !response.body) {
           throw new Error(`scrcpy video stream failed (${response.status})`);
@@ -1877,7 +1965,20 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
           const { value, done } = await reader.read();
           if (done) break;
           if (value?.byteLength) {
+            chunksReceived += 1;
+            bytesReceived += value.byteLength;
+            if (firstBox === "waiting") {
+              firstBox = readMp4BoxType(value);
+            }
+            updateDebug({
+              bytesReceived,
+              chunksReceived,
+              firstBox,
+              lastChunkBytes: value.byteLength,
+              lastEvent: "fetch:chunk",
+            });
             await appendMediaBuffer(sourceBuffer, value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+            chunksAppended += 1;
             const buffered = video?.buffered;
             if (video && buffered?.length) {
               const end = buffered.end(buffered.length - 1);
@@ -1885,12 +1986,14 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
                 video.currentTime = Math.max(0, end - 0.25);
               }
             }
+            updateDebug({ chunksAppended, lastEvent: "mediasource:append" });
           }
         }
       } catch (error) {
         if (!cancelled && error.name !== "AbortError") {
           setStatus("error");
           setDetail(error.message);
+          updateDebug({ lastEvent: "error", lastError: error.message });
           onStateChange?.("error");
           onMessage?.(`Scrcpy HTTP video failed: ${error.message}`);
         }
@@ -1901,7 +2004,16 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
     return () => {
       cancelled = true;
       abortController.abort();
-      if (video) video.removeAttribute("src");
+      if (video) {
+        video.removeEventListener("loadedmetadata", recordVideoEvent);
+        video.removeEventListener("loadeddata", recordVideoEvent);
+        video.removeEventListener("canplay", recordVideoEvent);
+        video.removeEventListener("playing", recordVideoEvent);
+        video.removeEventListener("stalled", recordVideoEvent);
+        video.removeEventListener("waiting", recordVideoEvent);
+        video.removeEventListener("error", recordVideoError);
+        video.removeAttribute("src");
+      }
       URL.revokeObjectURL(objectUrl);
     };
   }, [onMessage, onStateChange]);
@@ -1978,6 +2090,13 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage }) {
             </div>
           </div>
         )}
+        <div style={{ position: "absolute", left: 12, right: 12, bottom: 12, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, padding: 10, borderRadius: 12, background: "rgba(5, 7, 11, 0.82)", border: "1px solid rgba(83, 96, 125, 0.72)", color: "#d7dfed", fontSize: 11, pointerEvents: "none" }} aria-label="scrcpy HTTP video debug overlay">
+          <div><strong>HTTP</strong><br />{debug.response}<br />{debug.contentType}</div>
+          <div><strong>Stream</strong><br />{formatBytes(debug.bytesReceived)} / {debug.chunksReceived} chunks<br />first box: {debug.firstBox}</div>
+          <div><strong>MSE</strong><br />{debug.mediaSource} / appended {debug.chunksAppended}<br />updating: {String(debug.sourceBufferUpdating)}</div>
+          <div><strong>Video</strong><br />ready {debug.videoReadyState}, net {debug.videoNetworkState}, {debug.videoSize}<br />t={debug.currentTime}s buffered {debug.buffered}</div>
+          <div style={{ gridColumn: "1 / -1", color: debug.lastError === "none" ? "#a8b3c7" : "#ffb4a8" }}>last event: {debug.lastEvent} | last chunk: {formatBytes(debug.lastChunkBytes)} | error: {debug.lastError}</div>
+        </div>
       </div>
     </div>
   );

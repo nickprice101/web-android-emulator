@@ -7,7 +7,7 @@
     "build": "vite build",
     "dev": "vite",
     "start": "vite",
-    "test:e2e:deployed-turns": "playwright test tests/e2e/native-turns-video.spec.mjs"
+    "test:e2e:guacamole-http": "playwright test tests/e2e/guacamole-http-video.spec.mjs"
   },
   "dependencies": {
     "@babel/runtime": "^7.26.0",

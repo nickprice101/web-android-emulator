@@ -233,7 +233,6 @@ docker run -d \
   --device /dev/kvm:/dev/kvm \
   --shm-size 2g \
   -e EMULATOR_PARAMS="-no-audio -grpc 8554 -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save" \
-  -e TURN_KEY="" \
   -e ADBKEY="PLACEHOLDER_ADB_KEY" \
   "${EMULATOR_IMAGE_TAG}" 2>&1 | head -1
 
@@ -398,7 +397,7 @@ docker logs "${CONTAINER_NAME}" > "${RUNTIME_LOG_PATH}" 2>&1 || true
 if grep -Eq 'version: AndroidVersion\.ApiLevel=30|Pkg\.Dependencies=emulator#30\.0\.4' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the base launcher resolving an API 30 guest"
 fi
-if grep -Eq '\[start-emulator-with-turn\]\s+emulator binary version\s+: Android emulator version 30\.' "${RUNTIME_LOG_PATH}"; then
+if grep -Eq '\[start-emulator\]\s+emulator binary version\s+: Android emulator version 30\.' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the stale emulator 30.x binary with the API 34 guest image"
 fi
 if grep -Fq 'Your emulator is out of date, please update by launching Android Studio:' "${RUNTIME_LOG_PATH}"; then
@@ -407,21 +406,21 @@ fi
 if grep -Fq 'libxkbfile.so.1: cannot open shared object file' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the manually installed emulator binary still misses libxkbfile.so.1 at runtime"
 fi
-if ! grep -Fq '[start-emulator-with-turn] Using direct emulator mode; legacy launcher bypassed.' "${RUNTIME_LOG_PATH}"; then
+if ! grep -Fq '[start-emulator] Using direct emulator mode; legacy launcher bypassed.' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs do not show the expected direct emulator launch mode"
 fi
-if ! grep -Fq '[start-emulator-with-turn] Started direct adb bridge forwarder on ' "${RUNTIME_LOG_PATH}"; then
+if ! grep -Fq '[start-emulator] Started direct adb bridge forwarder on ' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs do not show the expected direct-mode adb bridge forwarder startup"
 fi
-if ! grep -Eq '\[start-emulator-with-turn\] (Verified IPv6 literal ::1 resolves for qemu modem sockets\.|Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution\.)' "${RUNTIME_LOG_PATH}"; then
+if ! grep -Eq '\[start-emulator\] (Verified IPv6 literal ::1 resolves for qemu modem sockets\.|Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution\.)' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs do not show the expected IPv6 modem-resolution preflight succeeding"
 fi
 if [ "${EXPECTED_RADIO_OVERRIDE_MODE}" = "disabled" ]; then
-  if ! grep -Fq '[start-emulator-with-turn] Direct emulator radio override: disabled' "${RUNTIME_LOG_PATH}"; then
+  if ! grep -Fq '[start-emulator] Direct emulator radio override: disabled' "${RUNTIME_LOG_PATH}"; then
     fail "Container logs do not show the expected radio-override-disabled path for this emulator build"
   fi
 else
-  if ! grep -Fq "[start-emulator-with-turn] Direct emulator radio override: ${EXPECTED_RADIO_OVERRIDE_MODE}" "${RUNTIME_LOG_PATH}"; then
+  if ! grep -Fq "[start-emulator] Direct emulator radio override: ${EXPECTED_RADIO_OVERRIDE_MODE}" "${RUNTIME_LOG_PATH}"; then
     fail "Container logs do not show the expected direct-launch radio override (${EXPECTED_RADIO_OVERRIDE_MODE})"
   fi
 fi
@@ -437,13 +436,13 @@ fi
 if grep -Eq 'WARNING: IPv6 literal ::1 still does not resolve after provisioning dummy IPv6 interface' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the IPv6 modem-resolution preflight still failing"
 fi
-if grep -Eq 'start-emulator-with-turn\.sh: [0-9]+: _emulator_version: parameter not set' "${RUNTIME_LOG_PATH}"; then
+if grep -Eq 'start-emulator\.sh: [0-9]+: _emulator_version: parameter not set' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the direct-launch wrapper crashing on an unset emulator-version variable"
 fi
 if grep -Eq 'qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the fatal QEMU modem ::1 resolution failure"
 fi
-if grep -Eq '\[start-emulator-with-turn\] Using emulator launcher: /android/sdk/launch-emulator\.sh' "${RUNTIME_LOG_PATH}"; then
+if grep -Eq '\[start-emulator\] Using emulator launcher: /android/sdk/launch-emulator\.sh' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the wrapper falling back to the legacy Google launcher"
 fi
 

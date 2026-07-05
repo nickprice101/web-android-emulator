@@ -58,27 +58,19 @@ stage "stage 2: apkbridge validation"
 echo "[testbed] running apkbridge unit tests"
 "$VENV_PYTHON" -m unittest discover -s apkbridge/tests -v
 
-stage "stage 3: bridge relay and media validation"
+stage "stage 3: bridge media validation"
 echo "[testbed] running bridge-webrtc unit tests"
 run_node --test --test-force-exit bridge-webrtc/test/*.test.mjs
 
-stage "stage 4: native emulator WebRTC signaling guards"
-echo "[testbed] running native WebRTC configuration checks"
-run_node scripts/test-native-webrtc.mjs
+stage "stage 4: Guacamole-style HTTP tunnel configuration guards"
+echo "[testbed] running Guacamole-style HTTP configuration checks"
+run_node scripts/test-guacamole-http.mjs
 
 stage "stage 5: frontend production build"
 echo "[testbed] running frontend build"
 run_npm --prefix frontend run build
 
-stage "stage 6: optional TURN reachability/auth harness"
-if [[ -n "${TURN_HOST:-}" && -n "${TURN_KEY:-}" ]]; then
-  echo "[testbed] running TURN connectivity harness"
-  run_node bridge-webrtc/test/turn-connectivity-harness.mjs
-else
-  echo "[testbed] skipping TURN harness (set TURN_HOST and TURN_KEY to run it)"
-fi
-
-stage "stage 7: optional emulator container startup smoke test"
+stage "stage 6: optional emulator container startup smoke test"
 if [[ "${RUN_EMULATOR_STARTUP_TEST:-0}" == "1" ]]; then
   echo "[testbed] running emulator startup smoke test"
   bash scripts/test-emulator-startup.sh
@@ -86,10 +78,10 @@ else
   echo "[testbed] skipping emulator startup smoke test (set RUN_EMULATOR_STARTUP_TEST=1 to run it)"
 fi
 
-stage "stage 8: optional deployed video-stream validation"
+stage "stage 7: optional deployed video-stream validation"
 if [[ "${RUN_EMULATOR_STREAM_TEST:-0}" == "1" || -n "${E2E_BASE_URL:-}" ]]; then
   echo "[testbed] running deployed Playwright video-stream validation"
-  run_npm --prefix frontend run test:e2e:deployed-turns
+  run_npm --prefix frontend run test:e2e:guacamole-http
 else
   echo "[testbed] skipping deployed video-stream validation (set RUN_EMULATOR_STREAM_TEST=1 or E2E_BASE_URL to run it)"
 fi

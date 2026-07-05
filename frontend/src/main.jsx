@@ -14,6 +14,7 @@ const STREAM_MODE_OPTIONS = [
   { value: "scrcpy-http", label: "Guacamole HTTP (24fps)" },
   { value: "png", label: "PNG preview" },
 ];
+const STREAM_MODE_VALUES = new Set(STREAM_MODE_OPTIONS.map((option) => option.value));
 function clampRatio(value) {
   if (!Number.isFinite(value)) {
     return null;
@@ -3225,22 +3226,7 @@ function App() {
         return;
       }
 
-      if (streamMode !== "custom-webrtc") {
-        emuRef.current?.sendKey?.(name);
-        return;
-      }
-
-      if (webrtcInputRef.current) {
-        await webrtcInputRef.current({ type: "key", key: name });
-        setMessage(`Sent ${name} through custom WebRTC bridge`);
-        return;
-      }
-
-      await callApi("/api/input-key", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: name }),
-      });
+      emuRef.current?.sendKey?.(name);
     } catch (error) {
       setMessage(`Key send failed: ${error.message}`);
     }
@@ -3345,32 +3331,21 @@ function App() {
   }
 
   function handleStreamModeChange(nextMode) {
+    const resolvedMode = STREAM_MODE_VALUES.has(nextMode) ? nextMode : "scrcpy-http";
     setWebrtcDiagnostics(null);
     nativeFailureSinceRef.current = null;
     nativeFailureSignatureRef.current = null;
     nativeRootCauseRef.current = null;
     setNativeRetryCount(0);
     setNativeIceTransportMode("all");
-    if (nextMode === "native-webrtc") {
-      setWebrtcNotice("");
-      setEmuState("connecting");
-      setMessage("Connecting to the emulator's native WebRTC stream...");
-      setNativeVideoStats(null);
-      setNativeHasVideoFrame(false);
-      setNativeWebrtcKey((value) => value + 1);
-    } else if (nextMode === "custom-webrtc") {
-      setWebrtcNotice("");
-      setEmuState("connecting");
-      setMessage("Connecting via custom WebRTC bridge...");
-    } else if (nextMode === "scrcpy-http") {
-      setWebrtcNotice("");
+    setWebrtcNotice("");
+    if (resolvedMode === "scrcpy-http") {
       setEmuState("connecting");
       setMessage("Connecting to Guacamole-style HTTP video tunnel...");
     } else {
-      setWebrtcNotice("");
       setMessage("Switching to PNG preview mode...");
     }
-    setStreamMode(nextMode);
+    setStreamMode(resolvedMode);
   }
 
   const layout = useMemo(() => {
@@ -3466,17 +3441,7 @@ function App() {
               WebkitUserSelect: "none",
             }}
           >
-            {streamMode === "custom-webrtc" ? (
-              <CustomWebrtcPane
-                active={true}
-                width={layout.width}
-                height={layout.height}
-                onStateChange={(state) => setEmuState(state)}
-                onMessage={handleWebrtcMessage}
-                inputRef={webrtcInputRef}
-                onDiagnosticsChange={setWebrtcDiagnostics}
-              />
-            ) : streamMode === "scrcpy-http" ? (
+            {streamMode === "scrcpy-http" ? (
               <ScrcpyHttpVideoPane
                 width={layout.width}
                 height={layout.height}
@@ -3486,14 +3451,10 @@ function App() {
               />
             ) : (
               <Emulator
-                key={
-                  streamMode === "native-webrtc"
-                    ? `native-webrtc-${nativeWebrtcKey}-${emulatorToken ? "auth" : "noauth"}`
-                    : `png-${nativeWebrtcKey}`
-                }
+                key={`png-${nativeWebrtcKey}`}
                 ref={emuRef}
                 uri={window.location.origin}
-                view={streamMode === "png" ? "png" : "webrtc"}
+                view="png"
                 muted={true}
                 width={layout.width}
                 height={layout.height}
@@ -3600,13 +3561,9 @@ function App() {
               </div>
               <div>
                 Video frame:{" "}
-                {streamMode === "custom-webrtc"
-                  ? `${captureOverlay.statusLine}${captureOverlay.reasonLine ? ` | ${captureOverlay.reasonLine}` : ""}${captureOverlay.verificationLine ? ` | ${captureOverlay.verificationLine}` : ""}`
-                  : streamMode === "native-webrtc"
-                    ? `${nativeWebrtcOverlay.statusLine}${nativeWebrtcOverlay.reasonLine ? ` | ${nativeWebrtcOverlay.reasonLine}` : ""}${nativeWebrtcOverlay.verificationLine ? ` | ${nativeWebrtcOverlay.verificationLine}` : ""}`
-                    : streamMode === "scrcpy-http"
-                      ? `Guacamole-style scrcpy MP4 over ordinary HTTPS fetch (${GUACAMOLE_HTTP_TARGET_FPS}fps target)`
-                      : "switch to a video mode to compare"}
+                {streamMode === "scrcpy-http"
+                  ? `Guacamole-style scrcpy MP4 over ordinary HTTPS fetch (${GUACAMOLE_HTTP_TARGET_FPS}fps target)`
+                  : "PNG preview over the emulator HTTP endpoint"}
               </div>
               <div>HTTP tunneling stays front and center here for corporate-firewall-friendly emulator access.</div>
             </div>

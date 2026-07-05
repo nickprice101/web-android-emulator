@@ -45,6 +45,13 @@ assert.match(
 const apkbridgeApp = readRepoFile("apkbridge/app.py");
 assert.match(apkbridgeApp, /SCRCPY_MAX_FPS = .*"24"/, "apkbridge must default scrcpy to 24fps");
 assert.match(apkbridgeApp, /SCRCPY_VIDEO_BIT_RATE = .*"6000000"/, "apkbridge must default to a tunnel-friendly bitrate");
+const scrcpyCommand = apkbridgeApp.match(/scrcpy_cmd = \[[\s\S]*?\n            \]/)?.[0] || "";
+assert.ok(scrcpyCommand, "apkbridge must define a scrcpy command for the HTTP tunnel");
+assert.doesNotMatch(scrcpyCommand, /"--no-display"/, "apkbridge must use scrcpy 3.x --no-window instead of removed --no-display");
+assert.doesNotMatch(scrcpyCommand, /"--bit-rate"/, "apkbridge must use scrcpy 3.x --video-bit-rate instead of removed --bit-rate");
+assert.match(scrcpyCommand, /"--no-window"/, "apkbridge must run scrcpy headless with the current --no-window option");
+assert.match(scrcpyCommand, /"--no-audio"/, "apkbridge must disable scrcpy audio in the headless HTTP tunnel");
+assert.match(scrcpyCommand, /"--video-bit-rate"/, "apkbridge must configure scrcpy video bitrate with the current option name");
 assert.match(
   apkbridgeApp,
   /empty_moov\+default_base_moof\+separate_moof\+omit_tfhd_offset/,

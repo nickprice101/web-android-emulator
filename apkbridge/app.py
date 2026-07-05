@@ -23,6 +23,8 @@ SCRCPY_VIDEO_BIT_RATE = max(1_000_000, int(os.environ.get("SCRCPY_VIDEO_BIT_RATE
 SCRCPY_MAX_SIZE = max(320, int(os.environ.get("SCRCPY_MAX_SIZE", "1080")))
 SCRCPY_MAX_FPS = max(1, int(os.environ.get("SCRCPY_MAX_FPS", "24")))
 SCRCPY_FFMPEG_FRAGMENT_US = max(50000, int(os.environ.get("SCRCPY_FFMPEG_FRAGMENT_US", "125000")))
+SCRCPY_STARTUP_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("SCRCPY_STARTUP_TIMEOUT_SECONDS", "20")))
+SCRCPY_LOG_CAPTURE_LIMIT = max(4096, int(os.environ.get("SCRCPY_LOG_CAPTURE_LIMIT", "65536")))
 KEY_MAP = {"HOME": "3", "BACK": "4", "RECENTS": "187", "POWER": "26", "MENU": "82"}
 KEY_NAME_MAP = {
     "GoHome": KEY_MAP["HOME"],
@@ -413,6 +415,45 @@ def scrcpy_video():
         scrcpy_proc = None
         ffmpeg_proc = None
         fifo_reader = None
+        stream_queue = queue.Queue()
+        stderr_chunks = []
+
+        def append_stderr(chunk):
+            if not chunk:
+                return
+            captured = sum(len(item) for item in stderr_chunks)
+            remaining = SCRCPY_LOG_CAPTURE_LIMIT - captured
+            if remaining > 0:
+                stderr_chunks.append(chunk[:remaining])
+
+        def collected_stderr():
+            return b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
+
+        def fail_stream(reason):
+            stderr_text = collected_stderr()
+            message = f"{reason}: {stderr_text}" if stderr_text else reason
+            app.logger.error("scrcpy video stream failed: %s", message)
+            raise RuntimeError(message)
+
+        def drain_pending_stderr():
+            while True:
+                try:
+                    stream_name, chunk = stream_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if stream_name != "ffmpeg-stdout":
+                    append_stderr(chunk)
+
+        def pump_pipe(fileobj, stream_name, chunk_size=32 * 1024):
+            try:
+                while fileobj:
+                    chunk = fileobj.read(chunk_size)
+                    stream_queue.put((stream_name, chunk or b""))
+                    if not chunk:
+                        break
+            except Exception as exc:
+                stream_queue.put((f"{stream_name}:error", str(exc).encode("utf-8", errors="replace")))
+
         try:
             os.mkfifo(fifo_path, 0o600)
             # Keep a write handle open while ffmpeg starts. Opening the FIFO read-only
@@ -425,9 +466,10 @@ def scrcpy_video():
                 "scrcpy",
                 "--serial",
                 ADB_TARGET,
-                "--no-display",
+                "--no-window",
                 "--no-control",
-                "--bit-rate",
+                "--no-audio",
+                "--video-bit-rate",
                 str(bit_rate_value),
                 "--max-size",
                 str(max_size_value),
@@ -489,31 +531,46 @@ def scrcpy_video():
                 bufsize=0,
             )
 
-            stderr_chunks = []
+            threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stdout, "ffmpeg-stdout"), daemon=True).start()
+            threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stderr, "ffmpeg-stderr"), daemon=True).start()
+            threading.Thread(target=pump_pipe, args=(scrcpy_proc.stderr, "scrcpy-stderr"), daemon=True).start()
+
+            delivered = False
+            startup_deadline = time.monotonic() + SCRCPY_STARTUP_TIMEOUT_SECONDS
             while True:
-                chunk = ffmpeg_proc.stdout.read(32 * 1024) if ffmpeg_proc.stdout else b""
-                if chunk:
+                try:
+                    stream_name, chunk = stream_queue.get(timeout=0.25)
+                except queue.Empty:
+                    if ffmpeg_proc.poll() is not None:
+                        break
+                    if not delivered and scrcpy_proc.poll() is not None:
+                        drain_pending_stderr()
+                        fail_stream("scrcpy exited before producing video")
+                    if not delivered and time.monotonic() >= startup_deadline:
+                        drain_pending_stderr()
+                        fail_stream(f"timed out waiting {SCRCPY_STARTUP_TIMEOUT_SECONDS:g}s for scrcpy video")
+                    continue
+
+                if stream_name == "ffmpeg-stdout":
+                    if not chunk:
+                        if not delivered and scrcpy_proc.poll() is not None:
+                            drain_pending_stderr()
+                            fail_stream("scrcpy exited before producing video")
+                        break
+                    delivered = True
                     yield chunk
                     continue
-                if ffmpeg_proc.poll() is not None:
-                    break
-                if scrcpy_proc.poll() is not None:
-                    stderr = scrcpy_proc.stderr.read(4096) if scrcpy_proc.stderr else b""
-                    if stderr:
-                        stderr_chunks.append(stderr)
-                    if ffmpeg_proc.poll() is None:
-                        ffmpeg_proc.terminate()
-                    break
-                time.sleep(0.01)
 
-            if scrcpy_proc and scrcpy_proc.stderr:
-                stderr = scrcpy_proc.stderr.read(4096)
-                if stderr:
-                    stderr_chunks.append(stderr)
-            if stderr_chunks:
+                append_stderr(chunk)
+
+            if not delivered:
+                fail_stream("scrcpy video stream ended before producing video")
+
+            stderr_text = collected_stderr()
+            if stderr_text:
                 app.logger.warning(
                     "scrcpy video stream ended: %s",
-                    b"".join(stderr_chunks).decode("utf-8", errors="replace").strip(),
+                    stderr_text,
                 )
         finally:
             for proc in (scrcpy_proc, ffmpeg_proc):

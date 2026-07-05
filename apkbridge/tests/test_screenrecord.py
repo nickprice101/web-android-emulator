@@ -108,8 +108,70 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
         self.assertEqual(first_chunk, b"ftyp")
         self.assertIn("video/mp4", response.mimetype)
         self.assertEqual(response.headers.get("X-Accel-Buffering"), "no")
-        self.assertTrue(any(call[0] == "scrcpy" and "--no-display" in call and "--max-fps" in call and "24" in call and "--record-format" in call and "mkv" in call for call in popen_calls))
+        self.assertTrue(
+            any(
+                call[0] == "scrcpy"
+                and "--no-window" in call
+                and "--no-audio" in call
+                and "--video-bit-rate" in call
+                and "--bit-rate" not in call
+                and "--no-display" not in call
+                and "--max-fps" in call
+                and "24" in call
+                and "--record-format" in call
+                and "mkv" in call
+                for call in popen_calls
+            )
+        )
         self.assertTrue(any(call[0] == "ffmpeg" and "empty_moov+default_base_moof+separate_moof+omit_tfhd_offset" in call and "-flush_packets" in call for call in popen_calls))
+
+    def test_scrcpy_video_fails_fast_when_scrcpy_exits_before_frames(self):
+        class FakeStdout:
+            def read(self, size=-1):
+                time.sleep(0.05)
+                return b""
+
+        class FakeStderr:
+            def __init__(self, chunks):
+                self.chunks = list(chunks)
+
+            def read(self, size=-1):
+                return self.chunks.pop(0) if self.chunks else b""
+
+        class FakeProc:
+            def __init__(self, stdout=None, stderr=None, polls=None):
+                self.stdout = stdout
+                self.stderr = stderr
+                self._polls = list(polls or [0])
+
+            def poll(self):
+                return self._polls.pop(0) if self._polls else 0
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                pass
+
+        def fake_popen(cmd, **kwargs):
+            if cmd[0] == "ffmpeg":
+                return FakeProc(stdout=FakeStdout(), stderr=FakeStderr([]), polls=[None, None])
+            return FakeProc(stdout=None, stderr=FakeStderr([b"ERROR: Unknown option --no-display\n"]), polls=[0])
+
+        client = app.test_client()
+        with patch("app.SCRCPY_STARTUP_TIMEOUT_SECONDS", 0.1), patch("app.tempfile.gettempdir", return_value="/tmp"), patch("app.os.mkfifo", create=True), patch(
+            "app.os.O_NONBLOCK", 0, create=True
+        ), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch("app.os.fdopen", return_value=io.BytesIO()), patch(
+            "app.subprocess.Popen", side_effect=fake_popen
+        ):
+            started_at = time.monotonic()
+            with self.assertRaisesRegex(RuntimeError, "scrcpy exited before producing video"):
+                client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
+
+        self.assertLess(time.monotonic() - started_at, 1.0)
 
 
 if __name__ == "__main__":

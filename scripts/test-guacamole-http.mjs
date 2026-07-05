@@ -53,13 +53,15 @@ assert.match(
 const apkbridgeApp = readRepoFile("apkbridge/app.py");
 assert.match(apkbridgeApp, /SCRCPY_MAX_FPS = .*"24"/, "apkbridge must default scrcpy to 24fps");
 assert.match(apkbridgeApp, /SCRCPY_VIDEO_BIT_RATE = .*"6000000"/, "apkbridge must default to a tunnel-friendly bitrate");
-const scrcpyCommand = apkbridgeApp.match(/scrcpy_cmd = \[[\s\S]*?\n            \]/)?.[0] || "";
+const scrcpyCommand = apkbridgeApp.match(/scrcpy_cmd = \[[\s\S]*?\n\s+\]/)?.[0] || "";
 assert.ok(scrcpyCommand, "apkbridge must define a scrcpy command for the HTTP tunnel");
 assert.doesNotMatch(scrcpyCommand, /"--no-display"/, "apkbridge must use scrcpy 3.x --no-window instead of removed --no-display");
 assert.doesNotMatch(scrcpyCommand, /"--bit-rate"/, "apkbridge must use scrcpy 3.x --video-bit-rate instead of removed --bit-rate");
 assert.match(scrcpyCommand, /"--no-window"/, "apkbridge must run scrcpy headless with the current --no-window option");
 assert.match(scrcpyCommand, /"--no-audio"/, "apkbridge must disable scrcpy audio in the headless HTTP tunnel");
+assert.match(scrcpyCommand, /"--port"/, "apkbridge must pass an explicit scrcpy port range");
 assert.match(scrcpyCommand, /"--video-bit-rate"/, "apkbridge must configure scrcpy video bitrate with the current option name");
+assert.match(apkbridgeApp, /generate_screenrecord_mp4/, "apkbridge must retain an adb screenrecord MP4 fallback");
 assert.match(
   apkbridgeApp,
   /empty_moov\+default_base_moof\+separate_moof\+omit_tfhd_offset/,
@@ -71,6 +73,7 @@ const composeConfig = readRepoFile("docker-compose.yml");
 assertNoActiveTurnConfig("docker-compose.yml", composeConfig);
 assert.match(composeConfig, /SCRCPY_MAX_FPS:\s*"24"/, "compose must pin scrcpy max fps to 24");
 assert.match(composeConfig, /SCRCPY_VIDEO_BIT_RATE:/, "compose must expose scrcpy bitrate tuning");
+assert.match(composeConfig, /SCRCPY_PORT_RANGE:/, "compose must expose scrcpy tunnel port range tuning");
 assert.match(composeConfig, /CAPTURE_FPS:\s*"\$\{CAPTURE_FPS:-24\}"/, "optional WebRTC bridge fallback must also default to 24fps");
 
 const emulatorDockerfile = readRepoFile("emulator/Dockerfile");

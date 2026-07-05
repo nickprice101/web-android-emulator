@@ -13,8 +13,12 @@ The frontend defaults to `Guacamole HTTP (24fps)`.
 * `SCRCPY_MAX_FPS=24`
 * `SCRCPY_VIDEO_BIT_RATE=6000000`
 * `SCRCPY_MAX_SIZE=1080`
+* `SCRCPY_PORT_RANGE=27183:27283`
 
-PNG preview remains available as a fallback for inspection or recovery.
+If scrcpy cannot start before video bytes are produced, `apkbridge` falls back
+to remuxing `adb exec-out screenrecord --output-format=h264 -` into the same
+fragmented MP4 response. PNG preview remains available for inspection or
+recovery.
 
 The old STUN/TURN server implementation has been removed. The stack no longer mints relay credentials, generates emulator `-turncfg`, runs a TURN connectivity harness, or depends on a public relay route.
 

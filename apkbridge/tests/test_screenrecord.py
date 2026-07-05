@@ -159,13 +159,14 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             return FakeProc(stdout=None, stderr=None, polls=[None, 0])
 
         client = app.test_client()
-        with patch("app.video_prerequisite_error", return_value=None), patch("app.tempfile.gettempdir", return_value="/tmp"), patch("app.os.mkfifo", create=True), patch(
-            "app.os.O_NONBLOCK", 0, create=True
-        ), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch("app.os.fdopen", return_value=io.BytesIO()), patch(
-            "app.subprocess.Popen", side_effect=fake_popen
-        ):
+        with patch("app.video_prerequisite_error", return_value=None), patch("app.shutil.which", side_effect=lambda tool: f"/usr/bin/{tool}"), patch(
+            "app.tempfile.gettempdir", return_value="/tmp"
+        ), patch("app.os.mkfifo", create=True), patch("app.os.O_NONBLOCK", 0, create=True), patch("app.os.open", return_value=123), patch(
+            "app.os.set_blocking"
+        ), patch("app.os.fdopen", return_value=io.BytesIO()), patch("app.subprocess.Popen", side_effect=fake_popen):
             response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
             first_chunk = next(response.response)
+            response.response.close()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(first_chunk, b"ftyp")
@@ -176,6 +177,8 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
                 call[0] == "scrcpy"
                 and "--no-window" in call
                 and "--no-audio" in call
+                and "--port" in call
+                and "27183:27283" in call
                 and "--video-bit-rate" in call
                 and "--bit-rate" not in call
                 and "--no-display" not in call
@@ -188,18 +191,17 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
         )
         self.assertTrue(any(call[0] == "ffmpeg" and "empty_moov+default_base_moof+separate_moof+omit_tfhd_offset" in call and "-flush_packets" in call for call in popen_calls))
 
-    def test_scrcpy_video_returns_json_when_scrcpy_exits_before_frames(self):
-        class FakeStdout:
-            def read(self, size=-1):
-                time.sleep(0.05)
-                return b""
-
-        class FakeStderr:
+    def test_scrcpy_video_falls_back_to_screenrecord_mp4_when_scrcpy_exits_before_frames(self):
+        class FakePipe:
             def __init__(self, chunks):
                 self.chunks = list(chunks)
+                self.closed = False
 
             def read(self, size=-1):
                 return self.chunks.pop(0) if self.chunks else b""
+
+            def close(self):
+                self.closed = True
 
         class FakeProc:
             def __init__(self, stdout=None, stderr=None, polls=None):
@@ -219,22 +221,175 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             def kill(self):
                 pass
 
+        popen_calls = []
+        adb_calls = []
+        ffmpeg_count = 0
+
         def fake_popen(cmd, **kwargs):
+            nonlocal ffmpeg_count
+            popen_calls.append(cmd)
             if cmd[0] == "ffmpeg":
-                return FakeProc(stdout=FakeStdout(), stderr=FakeStderr([]), polls=[None, None])
-            return FakeProc(stdout=None, stderr=FakeStderr([b"ERROR: Unknown option --no-display\n"]), polls=[0])
+                ffmpeg_count += 1
+                if ffmpeg_count == 1:
+                    return FakeProc(stdout=FakePipe([b""]), stderr=FakePipe([]), polls=[None, 0])
+                return FakeProc(stdout=FakePipe([b"ftyp-fallback", b""]), stderr=FakePipe([]), polls=[None, 0])
+            return FakeProc(
+                stdout=None,
+                stderr=FakePipe([b"bind: Address already in use\nERROR: Server connection failed\n"]),
+                polls=[0],
+            )
+
+        def fake_adb_popen(*args):
+            adb_calls.append(args)
+            return FakeProc(stdout=FakePipe([b"h264"]), stderr=FakePipe([]), polls=[None, 0])
 
         client = app.test_client()
-        with patch("app.video_prerequisite_error", return_value=None), patch("app.SCRCPY_STARTUP_TIMEOUT_SECONDS", 0.1), patch("app.tempfile.gettempdir", return_value="/tmp"), patch(
-            "app.os.mkfifo", create=True
-        ), patch("app.os.O_NONBLOCK", 0, create=True), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch(
-            "app.os.fdopen", return_value=io.BytesIO()
-        ), patch("app.subprocess.Popen", side_effect=fake_popen):
+        with patch("app.video_prerequisite_error", return_value=None), patch("app.shutil.which", side_effect=lambda tool: f"/usr/bin/{tool}"), patch(
+            "app.SCRCPY_STARTUP_TIMEOUT_SECONDS", 0.1
+        ), patch("app.tempfile.gettempdir", return_value="/tmp"), patch("app.os.mkfifo", create=True), patch(
+            "app.os.O_NONBLOCK", 0, create=True
+        ), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch("app.os.fdopen", return_value=io.BytesIO()), patch(
+            "app.subprocess.Popen", side_effect=fake_popen
+        ), patch("app.adb_popen", side_effect=fake_adb_popen):
+            response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
+            first_chunk = next(response.response)
+            response.response.close()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(first_chunk, b"ftyp-fallback")
+        self.assertTrue(any(call[0] == "scrcpy" for call in popen_calls))
+        self.assertTrue(any(call[0] == "ffmpeg" and "-f" in call and "h264" in call for call in popen_calls))
+        self.assertIn(
+            (
+                "exec-out",
+                "screenrecord",
+                "--output-format=h264",
+                "--bit-rate",
+                "1000000",
+                "--time-limit",
+                "180",
+                "-",
+            ),
+            adb_calls,
+        )
+
+    def test_scrcpy_video_uses_screenrecord_fallback_when_scrcpy_stream_is_already_active(self):
+        class BusyLock:
+            def __enter__(self):
+                return False
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+        class FakePipe:
+            def __init__(self, chunks):
+                self.chunks = list(chunks)
+                self.closed = False
+
+            def read(self, size=-1):
+                return self.chunks.pop(0) if self.chunks else b""
+
+            def close(self):
+                self.closed = True
+
+        class FakeProc:
+            def __init__(self, stdout=None, stderr=None, polls=None):
+                self.stdout = stdout
+                self.stderr = stderr
+                self._polls = list(polls or [0])
+
+            def poll(self):
+                return self._polls.pop(0) if self._polls else 0
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                pass
+
+        popen_calls = []
+
+        def fake_popen(cmd, **kwargs):
+            popen_calls.append(cmd)
+            return FakeProc(stdout=FakePipe([b"ftyp-lock-fallback", b""]), stderr=FakePipe([]), polls=[None, 0])
+
+        def fake_adb_popen(*args):
+            return FakeProc(stdout=FakePipe([b"h264"]), stderr=FakePipe([]), polls=[None, 0])
+
+        client = app.test_client()
+        with patch("app.video_prerequisite_error", return_value=None), patch("app.scrcpy_stream_lock", return_value=BusyLock()), patch(
+            "app.subprocess.Popen", side_effect=fake_popen
+        ), patch("app.adb_popen", side_effect=fake_adb_popen):
+            response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
+            first_chunk = next(response.response)
+            response.response.close()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(first_chunk, b"ftyp-lock-fallback")
+        self.assertFalse(any(call[0] == "scrcpy" for call in popen_calls))
+        self.assertTrue(any(call[0] == "ffmpeg" and "-f" in call and "h264" in call for call in popen_calls))
+
+    def test_scrcpy_video_returns_json_when_scrcpy_and_fallback_produce_no_frames(self):
+        class FakePipe:
+            def __init__(self, chunks):
+                self.chunks = list(chunks)
+                self.closed = False
+
+            def read(self, size=-1):
+                time.sleep(0.01)
+                return self.chunks.pop(0) if self.chunks else b""
+
+            def close(self):
+                self.closed = True
+
+        class FakeProc:
+            def __init__(self, stdout=None, stderr=None, polls=None):
+                self.stdout = stdout
+                self.stderr = stderr
+                self._polls = list(polls or [0])
+
+            def poll(self):
+                return self._polls.pop(0) if self._polls else 0
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                pass
+
+        ffmpeg_count = 0
+
+        def fake_popen(cmd, **kwargs):
+            nonlocal ffmpeg_count
+            if cmd[0] == "ffmpeg":
+                ffmpeg_count += 1
+                return FakeProc(stdout=FakePipe([b""]), stderr=FakePipe([b"ffmpeg no frames\n"]), polls=[None, 0])
+            return FakeProc(stdout=None, stderr=FakePipe([b"ERROR: Server connection failed\n"]), polls=[0])
+
+        def fake_adb_popen(*args):
+            return FakeProc(stdout=FakePipe([b""]), stderr=FakePipe([b"screenrecord no frames\n"]), polls=[0])
+
+        client = app.test_client()
+        with patch("app.video_prerequisite_error", return_value=None), patch("app.shutil.which", side_effect=lambda tool: f"/usr/bin/{tool}"), patch(
+            "app.SCRCPY_STARTUP_TIMEOUT_SECONDS", 0.1
+        ), patch("app.SCREENRECORD_RETRY_DELAY_SECONDS", 0), patch("app.SCREENRECORD_MAX_CONSECUTIVE_FAILURES", 1), patch(
+            "app.tempfile.gettempdir", return_value="/tmp"
+        ), patch("app.os.mkfifo", create=True), patch("app.os.O_NONBLOCK", 0, create=True), patch("app.os.open", return_value=123), patch(
+            "app.os.set_blocking"
+        ), patch("app.os.fdopen", return_value=io.BytesIO()), patch("app.subprocess.Popen", side_effect=fake_popen), patch(
+            "app.adb_popen", side_effect=fake_adb_popen
+        ):
             started_at = time.monotonic()
             response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
 
         self.assertEqual(response.status_code, 503)
-        self.assertIn("scrcpy exited before producing video", response.get_json()["error"])
+        self.assertIn("scrcpy failed and adb screenrecord fallback produced no video", response.get_json()["error"])
         self.assertLess(time.monotonic() - started_at, 1.0)
 
 

@@ -20,6 +20,59 @@ def make_python_proc(code):
     )
 
 
+class InputEventEndpointTests(unittest.TestCase):
+    def test_input_event_accepts_tap_ratios_from_http_video_surface(self):
+        adb_calls = []
+
+        def fake_adb(*args, **kwargs):
+            adb_calls.append(args)
+            return "ok"
+
+        client = app.test_client()
+        with patch("app.get_screen_size", return_value={"width": 1080, "height": 1920}), patch(
+            "app.adb", side_effect=fake_adb
+        ):
+            response = client.post("/input-event", json={"type": "tap", "xRatio": 0.5, "yRatio": 0.5})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(("shell", "input", "tap", "540", "960"), adb_calls)
+
+    def test_input_event_accepts_swipe_ratios_from_http_video_surface(self):
+        adb_calls = []
+
+        def fake_adb(*args, **kwargs):
+            adb_calls.append(args)
+            return "ok"
+
+        client = app.test_client()
+        with patch("app.get_screen_size", return_value={"width": 1080, "height": 1920}), patch(
+            "app.adb", side_effect=fake_adb
+        ):
+            response = client.post(
+                "/input-event",
+                json={
+                    "type": "swipe",
+                    "startXRatio": 0.25,
+                    "startYRatio": 0.25,
+                    "endXRatio": 0.75,
+                    "endYRatio": 0.75,
+                    "durationMs": 180,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(("shell", "input", "swipe", "270", "480", "809", "1439", "180"), adb_calls)
+
+    def test_input_event_rejects_missing_tap_coordinates_as_bad_request(self):
+        client = app.test_client()
+        with patch("app.get_screen_size", return_value={"width": 1080, "height": 1920}), patch("app.adb") as adb_mock:
+            response = client.post("/input-event", json={"type": "tap"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("x or xRatio", response.get_json()["error"])
+        adb_mock.assert_not_called()
+
+
 class ScreenrecordEndpointTests(unittest.TestCase):
     def test_screenrecord_streams_first_chunk_without_waiting_for_large_buffer(self):
         code = (
@@ -63,6 +116,14 @@ class ScreenrecordEndpointTests(unittest.TestCase):
 
 
 class ScrcpyVideoEndpointTests(unittest.TestCase):
+    def test_scrcpy_video_returns_json_when_prerequisites_are_missing(self):
+        client = app.test_client()
+        with patch("app.video_prerequisite_error", return_value=("Emulator ADB target emulator:5555 is not ready", 503)):
+            response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "Emulator ADB target emulator:5555 is not ready")
+
     def test_scrcpy_video_streams_fragmented_mp4_and_uses_plain_http_headers(self):
         class FakeStdout:
             def __init__(self):
@@ -98,9 +159,11 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             return FakeProc(stdout=None, stderr=None, polls=[None, 0])
 
         client = app.test_client()
-        with patch("app.tempfile.gettempdir", return_value="/tmp"), patch("app.os.mkfifo", create=True), patch("app.os.O_NONBLOCK", 0, create=True), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch(
-            "app.os.fdopen", return_value=io.BytesIO()
-        ), patch("app.subprocess.Popen", side_effect=fake_popen):
+        with patch("app.video_prerequisite_error", return_value=None), patch("app.tempfile.gettempdir", return_value="/tmp"), patch("app.os.mkfifo", create=True), patch(
+            "app.os.O_NONBLOCK", 0, create=True
+        ), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch("app.os.fdopen", return_value=io.BytesIO()), patch(
+            "app.subprocess.Popen", side_effect=fake_popen
+        ):
             response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
             first_chunk = next(response.response)
 
@@ -125,7 +188,7 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
         )
         self.assertTrue(any(call[0] == "ffmpeg" and "empty_moov+default_base_moof+separate_moof+omit_tfhd_offset" in call and "-flush_packets" in call for call in popen_calls))
 
-    def test_scrcpy_video_fails_fast_when_scrcpy_exits_before_frames(self):
+    def test_scrcpy_video_returns_json_when_scrcpy_exits_before_frames(self):
         class FakeStdout:
             def read(self, size=-1):
                 time.sleep(0.05)
@@ -162,15 +225,16 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             return FakeProc(stdout=None, stderr=FakeStderr([b"ERROR: Unknown option --no-display\n"]), polls=[0])
 
         client = app.test_client()
-        with patch("app.SCRCPY_STARTUP_TIMEOUT_SECONDS", 0.1), patch("app.tempfile.gettempdir", return_value="/tmp"), patch("app.os.mkfifo", create=True), patch(
-            "app.os.O_NONBLOCK", 0, create=True
-        ), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch("app.os.fdopen", return_value=io.BytesIO()), patch(
-            "app.subprocess.Popen", side_effect=fake_popen
-        ):
+        with patch("app.video_prerequisite_error", return_value=None), patch("app.SCRCPY_STARTUP_TIMEOUT_SECONDS", 0.1), patch("app.tempfile.gettempdir", return_value="/tmp"), patch(
+            "app.os.mkfifo", create=True
+        ), patch("app.os.O_NONBLOCK", 0, create=True), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch(
+            "app.os.fdopen", return_value=io.BytesIO()
+        ), patch("app.subprocess.Popen", side_effect=fake_popen):
             started_at = time.monotonic()
-            with self.assertRaisesRegex(RuntimeError, "scrcpy exited before producing video"):
-                client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
+            response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
 
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("scrcpy exited before producing video", response.get_json()["error"])
         self.assertLess(time.monotonic() - started_at, 1.0)
 
 

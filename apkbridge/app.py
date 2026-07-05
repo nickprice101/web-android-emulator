@@ -57,6 +57,10 @@ KEY_NAME_MAP = {
 SCRCPY_STREAM_THREAD_LOCK = threading.Lock()
 
 
+class ScrcpyStreamBusy(RuntimeError):
+    """Raised when another client already owns the single scrcpy video tunnel."""
+
+
 def run(cmd, timeout=90):
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -517,7 +521,6 @@ def scrcpy_video():
         fifo_path = Path(tempfile.gettempdir()) / f"scrcpy-video-{uuid.uuid4().hex}.mkv"
         scrcpy_proc = None
         ffmpeg_proc = None
-        fifo_reader = None
         stream_queue = queue.Queue()
         stderr_chunks = []
 
@@ -559,27 +562,27 @@ def scrcpy_video():
 
         with scrcpy_stream_lock() as lock_acquired:
             if not lock_acquired:
-                fail_stream("another scrcpy video stream is already active")
+                raise ScrcpyStreamBusy(
+                    "another scrcpy video stream is already active; close the other emulator tab "
+                    "or reconnect it before starting a new HTTP video stream"
+                )
             if not shutil.which("scrcpy"):
                 fail_stream("scrcpy binary is not available")
 
             try:
                 os.mkfifo(fifo_path, 0o600)
-                # Keep a write handle open while ffmpeg starts. Opening the FIFO
-                # read-only before scrcpy attaches can make ffmpeg observe
-                # immediate EOF, which yields HTTP headers but no body bytes.
-                fifo_reader_fd = os.open(fifo_path, os.O_RDWR | os.O_NONBLOCK)
-                os.set_blocking(fifo_reader_fd, True)
-                fifo_reader = os.fdopen(fifo_reader_fd, "rb", buffering=0)
                 scrcpy_cmd = [
                     "scrcpy",
                     "--serial",
                     ADB_TARGET,
                     "--no-window",
+                    "--no-playback",
                     "--no-control",
                     "--no-audio",
                     "--port",
                     SCRCPY_PORT_RANGE,
+                    "--video-codec",
+                    "h264",
                     "--video-bit-rate",
                     str(bit_rate_value),
                     "--max-size",
@@ -597,22 +600,22 @@ def scrcpy_video():
                     "-loglevel",
                     "warning",
                     "-fflags",
-                    "nobuffer",
+                    "+genpts",
                     "-flags",
                     "low_delay",
+                    "-f",
+                    "matroska",
                     "-probesize",
-                    "32",
+                    "65536",
                     "-analyzeduration",
-                    "0",
-                    "-avioflags",
-                    "direct",
+                    "1000000",
                     "-i",
-                    "pipe:0",
+                    str(fifo_path),
                     *fragmented_mp4_output_args(),
                 ]
                 ffmpeg_proc = subprocess.Popen(
                     ffmpeg_cmd,
-                    stdin=fifo_reader,
+                    stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     bufsize=0,
@@ -674,8 +677,6 @@ def scrcpy_video():
                             proc.wait(timeout=2)
                         except subprocess.TimeoutExpired:
                             proc.kill()
-                if fifo_reader:
-                    fifo_reader.close()
                 try:
                     fifo_path.unlink()
                 except FileNotFoundError:
@@ -818,6 +819,8 @@ def scrcpy_video():
     def generate_with_fallback():
         try:
             yield from generate_scrcpy_mp4()
+        except ScrcpyStreamBusy:
+            raise
         except RuntimeError as exc:
             yield from generate_screenrecord_mp4(str(exc))
 
@@ -826,6 +829,8 @@ def scrcpy_video():
         first_chunk = next(stream)
     except StopIteration:
         return jsonify({"ok": False, "error": "scrcpy video stream ended before producing video"}), 503
+    except ScrcpyStreamBusy as e:
+        return jsonify({"ok": False, "error": str(e)}), 409
     except RuntimeError as e:
         return jsonify({"ok": False, "error": str(e)}), 503
     except Exception as e:

@@ -58,10 +58,17 @@ assert.ok(scrcpyCommand, "apkbridge must define a scrcpy command for the HTTP tu
 assert.doesNotMatch(scrcpyCommand, /"--no-display"/, "apkbridge must use scrcpy 3.x --no-window instead of removed --no-display");
 assert.doesNotMatch(scrcpyCommand, /"--bit-rate"/, "apkbridge must use scrcpy 3.x --video-bit-rate instead of removed --bit-rate");
 assert.match(scrcpyCommand, /"--no-window"/, "apkbridge must run scrcpy headless with the current --no-window option");
+assert.match(scrcpyCommand, /"--no-playback"/, "apkbridge must disable scrcpy playback for headless recording");
 assert.match(scrcpyCommand, /"--no-audio"/, "apkbridge must disable scrcpy audio in the headless HTTP tunnel");
 assert.match(scrcpyCommand, /"--port"/, "apkbridge must pass an explicit scrcpy port range");
+assert.match(scrcpyCommand, /"--video-codec"[\s\S]*?"h264"/, "apkbridge must force an MSE-compatible H.264 scrcpy stream");
 assert.match(scrcpyCommand, /"--video-bit-rate"/, "apkbridge must configure scrcpy video bitrate with the current option name");
 assert.match(apkbridgeApp, /generate_screenrecord_mp4/, "apkbridge must retain an adb screenrecord MP4 fallback");
+assert.match(
+  apkbridgeApp,
+  /"-f",\s*"matroska"[\s\S]*?"-probesize",\s*"65536"/,
+  "apkbridge ffmpeg input must parse scrcpy Matroska recordings with enough probe data"
+);
 assert.match(
   apkbridgeApp,
   /empty_moov\+default_base_moof\+separate_moof\+omit_tfhd_offset/,

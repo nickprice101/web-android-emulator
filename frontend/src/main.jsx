@@ -1047,6 +1047,16 @@ async function parseJsonResponse(resp, label) {
   return data;
 }
 
+async function readHttpError(resp, label) {
+  const text = await resp.text().catch(() => "");
+  try {
+    const data = JSON.parse(text);
+    return data.error || data.message || `${label} failed (${resp.status})`;
+  } catch {
+    return text.slice(0, 200) || `${label} failed (${resp.status})`;
+  }
+}
+
 function mapBridgeSessionState(sessionState, hasVideo, videoStats, receiverStats) {
   if (hasRenderableVideo(videoStats, receiverStats, hasVideo)) {
     return "connected";
@@ -1975,17 +1985,28 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
           bit_rate: String(GUACAMOLE_HTTP_BIT_RATE),
           max_size: String(GUACAMOLE_HTTP_MAX_SIZE),
         });
-        const response = await fetch(`/api/scrcpy-video?${params.toString()}`, {
-          signal: abortController.signal,
-          headers: { Accept: "video/mp4" },
-        });
+        const response = await fetchWithRetry(
+          `/api/scrcpy-video?${params.toString()}`,
+          {
+            signal: abortController.signal,
+            headers: { Accept: "video/mp4" },
+          },
+          {
+            maxAttempts: 5,
+            baseDelayMs: 1000,
+            isCancelled: () => cancelled || abortController.signal.aborted,
+          }
+        );
         updateDebug({
           response: `${response.status} ${response.statusText || ""}`.trim(),
           contentType: response.headers.get("content-type") || "missing",
           lastEvent: "fetch:headers",
         }, { immediate: true });
-        if (!response.ok || !response.body) {
-          throw new Error(`scrcpy video stream failed (${response.status})`);
+        if (!response.ok) {
+          throw new Error(await readHttpError(response, "/api/scrcpy-video"));
+        }
+        if (!response.body) {
+          throw new Error("scrcpy video stream returned no readable body");
         }
         setStatus("streaming");
         setDetail(`Receiving fragmented MP4 over HTTPS from scrcpy at ${GUACAMOLE_HTTP_TARGET_FPS}fps.`);
@@ -2301,7 +2322,13 @@ function App() {
         include_crash: "1",
         fatal_only: fatalOnly ? "1" : "0",
       });
-      const data = await parseJsonResponse(await fetch(`/api/logcat?${query.toString()}`), "/api/logcat");
+      const data = await parseJsonResponse(
+        await fetchWithRetry(`/api/logcat?${query.toString()}`, undefined, {
+          maxAttempts: 3,
+          baseDelayMs: 500,
+        }),
+        "/api/logcat"
+      );
       const incoming = Array.isArray(data.entries) ? data.entries : [];
       const lastSeen = lastSeenLogRef.current;
       let nextEntries = incoming;

@@ -1,6 +1,7 @@
 import os
 import queue
 import shlex
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -54,8 +55,8 @@ def run(cmd, timeout=90):
         return 1, "", "ADB Timeout"
 
 
-def adb(*args):
-    rc, out, err = run(["adb", "-s", ADB_TARGET, *args])
+def adb(*args, timeout=90):
+    rc, out, err = run(["adb", "-s", ADB_TARGET, *args], timeout=timeout)
     if rc != 0:
         raise RuntimeError(err or out or "adb command failed")
     return out or err or "ok"
@@ -130,6 +131,25 @@ def clamp_coordinate(value, maximum):
     return max(0, min(int(round(float(value))), max(0, maximum - 1)))
 
 
+def parse_number(value, field_name):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Input payload requires numeric {field_name}")
+    if parsed != parsed or parsed in (float("inf"), float("-inf")):
+        raise ValueError(f"Input payload requires finite {field_name}")
+    return parsed
+
+
+def coordinate_from_payload(payload, absolute_field, ratio_field, maximum):
+    if payload.get(absolute_field) is not None:
+        return clamp_coordinate(parse_number(payload.get(absolute_field), absolute_field), maximum)
+    if payload.get(ratio_field) is not None:
+        ratio = max(0.0, min(1.0, parse_number(payload.get(ratio_field), ratio_field)))
+        return clamp_coordinate(ratio * max(0, maximum - 1), maximum)
+    raise ValueError(f"Input payload requires {absolute_field} or {ratio_field}")
+
+
 def shell_quote_text(value):
     return shlex.quote(str(value))
 
@@ -157,8 +177,8 @@ def execute_input_event(payload):
     if event_type in {"tap", "swipe"}:
         size = get_screen_size()
         if event_type == "tap":
-            x = clamp_coordinate(payload.get("x"), size["width"])
-            y = clamp_coordinate(payload.get("y"), size["height"])
+            x = coordinate_from_payload(payload, "x", "xRatio", size["width"])
+            y = coordinate_from_payload(payload, "y", "yRatio", size["height"])
             adb("shell", "input", "tap", str(x), str(y))
             return {
                 "message": f"Tapped {x},{y}",
@@ -166,10 +186,10 @@ def execute_input_event(payload):
                 "screen": size,
             }
 
-        start_x = clamp_coordinate(payload.get("startX"), size["width"])
-        start_y = clamp_coordinate(payload.get("startY"), size["height"])
-        end_x = clamp_coordinate(payload.get("endX"), size["width"])
-        end_y = clamp_coordinate(payload.get("endY"), size["height"])
+        start_x = coordinate_from_payload(payload, "startX", "startXRatio", size["width"])
+        start_y = coordinate_from_payload(payload, "startY", "startYRatio", size["height"])
+        end_x = coordinate_from_payload(payload, "endX", "endXRatio", size["width"])
+        end_y = coordinate_from_payload(payload, "endY", "endYRatio", size["height"])
         duration_ms = max(50, min(5000, int(payload.get("durationMs", 250))))
         adb(
             "shell",
@@ -254,6 +274,20 @@ def infer_installed_package(previous_packages):
     if new_packages:
         return new_packages[-1]
     return ""
+
+
+def video_prerequisite_error():
+    missing = [tool for tool in ("adb", "scrcpy", "ffmpeg") if not shutil.which(tool)]
+    if missing:
+        return f"Missing required video tool(s): {', '.join(missing)}", 500
+
+    rc, out, err = run(["adb", "-s", ADB_TARGET, "get-state"], timeout=8)
+    state = (out or err).strip()
+    if rc != 0 or state != "device":
+        detail = state or "adb get-state did not report device"
+        return f"Emulator ADB target {ADB_TARGET} is not ready: {detail}", 503
+
+    return None
 
 
 @app.get("/health")
@@ -409,6 +443,11 @@ def scrcpy_video():
         max_fps_value = max(1, min(60, int(max_fps)))
     except ValueError:
         return jsonify({"ok": False, "error": "bit_rate, max_size, and max_fps must be integers"}), 400
+
+    prerequisite_error = video_prerequisite_error()
+    if prerequisite_error:
+        message, status_code = prerequisite_error
+        return jsonify({"ok": False, "error": message}), status_code
 
     def generate():
         fifo_path = Path(tempfile.gettempdir()) / f"scrcpy-video-{uuid.uuid4().hex}.mkv"
@@ -587,8 +626,26 @@ def scrcpy_video():
             except FileNotFoundError:
                 pass
 
+    stream = generate()
+    try:
+        first_chunk = next(stream)
+    except StopIteration:
+        return jsonify({"ok": False, "error": "scrcpy video stream ended before producing video"}), 503
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+    except Exception as e:
+        app.logger.exception("scrcpy video stream failed before headers")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    def generate_with_first_chunk():
+        try:
+            yield first_chunk
+            yield from stream
+        finally:
+            stream.close()
+
     return Response(
-        stream_with_context(generate()),
+        stream_with_context(generate_with_first_chunk()),
         mimetype='video/mp4; codecs="avc1.42E01E"',
         headers={
             "Cache-Control": "no-store, no-transform",
@@ -757,16 +814,31 @@ def logcat():
     fatal_only = request.args.get("fatal_only", "0") in {"1", "true", "yes", "on"}
 
     try:
-        logcat_args = ["logcat", "-d", "-v", "time"]
+        capture_count = min(2000, max(limit * 5, 200))
+        logcat_args = ["logcat", "-d", "-t", str(capture_count), "-v", "time"]
         if errors_only:
             logcat_args.extend(["*:E"])
 
-        combined_lines = [line for line in adb(*logcat_args).splitlines() if line.strip()]
+        combined_lines = [line for line in adb(*logcat_args, timeout=20).splitlines() if line.strip()]
 
         # The crash buffer keeps Java/Kotlin fatal exception stacks even when
         # the main buffer is noisy and the interesting lines scroll out.
         if include_crash:
-            crash_lines = [line for line in adb("logcat", "-d", "-b", "crash", "-v", "time").splitlines() if line.strip()]
+            crash_lines = [
+                line
+                for line in adb(
+                    "logcat",
+                    "-d",
+                    "-t",
+                    str(capture_count),
+                    "-b",
+                    "crash",
+                    "-v",
+                    "time",
+                    timeout=20,
+                ).splitlines()
+                if line.strip()
+            ]
             if crash_lines:
                 combined_lines.append("--------- crash buffer ---------")
                 combined_lines.extend(crash_lines)

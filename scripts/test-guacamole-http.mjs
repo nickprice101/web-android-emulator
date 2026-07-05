@@ -26,6 +26,14 @@ assert.match(
   /value: "scrcpy-http", label: "Guacamole HTTP \(24fps\)"/,
   "stream selector must expose the 24fps HTTP tunnel as the primary mode"
 );
+const streamModeOptions = frontendMain.match(/const STREAM_MODE_OPTIONS = \[[\s\S]*?\];/)?.[0] || "";
+assert.ok(streamModeOptions, "frontend must define stream mode options");
+assert.match(streamModeOptions, /value: "png", label: "PNG preview"/, "stream selector must retain PNG preview");
+assert.doesNotMatch(
+  streamModeOptions,
+  /custom-webrtc|native-webrtc/,
+  "stream selector must expose only Guacamole HTTP and PNG preview"
+);
 assert.doesNotMatch(
   frontendMain,
   /FALLBACK_STUN_URL|stun:stun\.l\.google\.com/,

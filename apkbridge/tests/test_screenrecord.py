@@ -176,9 +176,12 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             any(
                 call[0] == "scrcpy"
                 and "--no-window" in call
+                and "--no-playback" in call
                 and "--no-audio" in call
                 and "--port" in call
                 and "27183:27283" in call
+                and "--video-codec" in call
+                and "h264" in call
                 and "--video-bit-rate" in call
                 and "--bit-rate" not in call
                 and "--no-display" not in call
@@ -189,7 +192,17 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
                 for call in popen_calls
             )
         )
-        self.assertTrue(any(call[0] == "ffmpeg" and "empty_moov+default_base_moof+separate_moof+omit_tfhd_offset" in call and "-flush_packets" in call for call in popen_calls))
+        self.assertTrue(
+            any(
+                call[0] == "ffmpeg"
+                and "-f" in call
+                and "matroska" in call
+                and "65536" in call
+                and "empty_moov+default_base_moof+separate_moof+omit_tfhd_offset" in call
+                and "-flush_packets" in call
+                for call in popen_calls
+            )
+        )
 
     def test_scrcpy_video_falls_back_to_screenrecord_mp4_when_scrcpy_exits_before_frames(self):
         class FakePipe:
@@ -273,7 +286,7 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             adb_calls,
         )
 
-    def test_scrcpy_video_uses_screenrecord_fallback_when_scrcpy_stream_is_already_active(self):
+    def test_scrcpy_video_returns_conflict_when_scrcpy_stream_is_already_active(self):
         class BusyLock:
             def __enter__(self):
                 return False
@@ -281,56 +294,16 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             def __exit__(self, exc_type, exc_value, traceback):
                 return False
 
-        class FakePipe:
-            def __init__(self, chunks):
-                self.chunks = list(chunks)
-                self.closed = False
-
-            def read(self, size=-1):
-                return self.chunks.pop(0) if self.chunks else b""
-
-            def close(self):
-                self.closed = True
-
-        class FakeProc:
-            def __init__(self, stdout=None, stderr=None, polls=None):
-                self.stdout = stdout
-                self.stderr = stderr
-                self._polls = list(polls or [0])
-
-            def poll(self):
-                return self._polls.pop(0) if self._polls else 0
-
-            def terminate(self):
-                pass
-
-            def wait(self, timeout=None):
-                return 0
-
-            def kill(self):
-                pass
-
-        popen_calls = []
-
-        def fake_popen(cmd, **kwargs):
-            popen_calls.append(cmd)
-            return FakeProc(stdout=FakePipe([b"ftyp-lock-fallback", b""]), stderr=FakePipe([]), polls=[None, 0])
-
-        def fake_adb_popen(*args):
-            return FakeProc(stdout=FakePipe([b"h264"]), stderr=FakePipe([]), polls=[None, 0])
-
         client = app.test_client()
         with patch("app.video_prerequisite_error", return_value=None), patch("app.scrcpy_stream_lock", return_value=BusyLock()), patch(
-            "app.subprocess.Popen", side_effect=fake_popen
-        ), patch("app.adb_popen", side_effect=fake_adb_popen):
+            "app.subprocess.Popen"
+        ) as popen_mock, patch("app.adb_popen") as adb_popen_mock:
             response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
-            first_chunk = next(response.response)
-            response.response.close()
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(first_chunk, b"ftyp-lock-fallback")
-        self.assertFalse(any(call[0] == "scrcpy" for call in popen_calls))
-        self.assertTrue(any(call[0] == "ffmpeg" and "-f" in call and "h264" in call for call in popen_calls))
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("another scrcpy video stream is already active", response.get_json()["error"])
+        popen_mock.assert_not_called()
+        adb_popen_mock.assert_not_called()
 
     def test_scrcpy_video_returns_json_when_scrcpy_and_fallback_produce_no_frames(self):
         class FakePipe:

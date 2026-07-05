@@ -12,33 +12,33 @@ const absolutePath = resolve(inputPath);
 const logText = readFileSync(absolutePath, "utf8");
 
 const findings = {
-  directWrapperPatchedApi34: /\[start-emulator-with-turn\]\s+\[avd-patch\].*android-34\/google_apis\/x86_64\//.test(logText),
-  wrapperSelectedLegacyLauncher: /\[start-emulator-with-turn\] Using emulator launcher: \/android\/sdk\/launch-emulator\.sh/.test(logText),
+  directWrapperPatchedApi34: /\[start-emulator\]\s+\[avd-patch\].*android-34\/google_apis\/x86_64\//.test(logText),
+  wrapperSelectedLegacyLauncher: /\[start-emulator\] Using emulator launcher: \/android\/sdk\/launch-emulator\.sh/.test(logText),
   legacyLauncherReportedApi30:
     /version: AndroidVersion\.ApiLevel=30/.test(logText) ||
     /version: Pkg\.Dependencies=emulator#30\.0\.4/.test(logText),
-  directModeEnabled: /\[start-emulator-with-turn\] Using direct emulator mode; legacy launcher bypassed\./.test(logText),
+  directModeEnabled: /\[start-emulator\] Using direct emulator mode; legacy launcher bypassed\./.test(logText),
   directLaunchReportedApi34:
-    /\[start-emulator-with-turn\]\s+Pkg\.Dependencies=emulator#34\./.test(logText) ||
-    /\[start-emulator-with-turn\]\s+AndroidVersion\.ApiLevel=34/.test(logText),
+    /\[start-emulator\]\s+Pkg\.Dependencies=emulator#34\./.test(logText) ||
+    /\[start-emulator\]\s+AndroidVersion\.ApiLevel=34/.test(logText),
   directLaunchLoggedRadioNull:
-    /\[start-emulator-with-turn\] Direct emulator radio device: null/.test(logText) ||
-    /\[start-emulator-with-turn\] Direct emulator radio override: null/.test(logText) ||
+    /\[start-emulator\] Direct emulator radio device: null/.test(logText) ||
+    /\[start-emulator\] Direct emulator radio override: null/.test(logText) ||
     /-radio null/.test(logText),
   directLaunchRadioOverrideDisabled:
-    /\[start-emulator-with-turn\] Direct emulator radio override: disabled/.test(logText),
+    /\[start-emulator\] Direct emulator radio override: disabled/.test(logText),
   directLaunchAdbServerStarted:
-    /\[start-emulator-with-turn\] ADB server is running on port 5037 for direct emulator launch/.test(logText),
+    /\[start-emulator\] ADB server is running on port 5037 for direct emulator launch/.test(logText),
   ipv6LiteralResolutionVerified:
-    /\[start-emulator-with-turn\] Verified IPv6 literal ::1 resolves for qemu modem sockets\./.test(logText) ||
-    /\[start-emulator-with-turn\] Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution\./.test(logText),
+    /\[start-emulator\] Verified IPv6 literal ::1 resolves for qemu modem sockets\./.test(logText) ||
+    /\[start-emulator\] Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution\./.test(logText),
   ipv6LiteralResolutionFailed:
-    /\[start-emulator-with-turn\] WARNING: IPv6 literal ::1 still does not resolve after provisioning dummy IPv6 interface/.test(logText),
+    /\[start-emulator\] WARNING: IPv6 literal ::1 still does not resolve after provisioning dummy IPv6 interface/.test(logText),
   missingAdbBinary:
-    /\[start-emulator-with-turn\] (WARNING|ERROR): adb binary unavailable/.test(logText) ||
-    /\[start-emulator-with-turn\] WARNING: adb command unavailable/.test(logText),
+    /\[start-emulator\] (WARNING|ERROR): adb binary unavailable/.test(logText) ||
+    /\[start-emulator\] WARNING: adb command unavailable/.test(logText),
   adbHostServerFailure: /AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 5037/.test(logText),
-  shellUnsetVariableCrash: /start-emulator-with-turn\.sh:\s*\d+:\s*_emulator_version: parameter not set/.test(logText),
+  shellUnsetVariableCrash: /start-emulator\.sh:\s*\d+:\s*_emulator_version: parameter not set/.test(logText),
   modemIpv6Failure: /qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1/.test(logText),
   invalidRadioOption: /qemu-system-x86_64-headless: -radio: invalid option/.test(logText),
   grpcServerStarted: /Started GRPC server at 0\.0\.0\.0:8554/.test(logText),

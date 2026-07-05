@@ -1,15 +1,11 @@
 import { spawn } from "node:child_process";
-import { createHmac, randomUUID } from "node:crypto";
-import dns from "node:dns/promises";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
-import net from "node:net";
-import tls from "node:tls";
 import { URL } from "node:url";
 import wrtc from "@roamhq/wrtc";
 import { buildFfmpegArgs } from "./ffmpeg-config.mjs";
 import { isRenderableNativeRtcFrame } from "./native-rtc-frame-guard.mjs";
-import { prepareIceServersForNode } from "./turn-tls-shim.mjs";
 
 const { RTCPeerConnection, RTCSessionDescription, MediaStream, nonstandard = {} } = wrtc;
 const { RTCVideoSource, RTCVideoSink } = nonstandard;
@@ -22,7 +18,7 @@ const apkbridgeFramePath = process.env.APKBRIDGE_FRAME_PATH || "/frame";
 const apkbridgeScreenrecordPath = process.env.APKBRIDGE_SCREENRECORD_PATH || "/screenrecord";
 const apkbridgeInputPath = process.env.APKBRIDGE_INPUT_PATH || "/input-event";
 const apkbridgeDeviceInfoPath = process.env.APKBRIDGE_DEVICE_INFO_PATH || "/device-info";
-const captureFps = Math.max(1, Number.parseInt(process.env.CAPTURE_FPS || "30", 10));
+const captureFps = Math.max(1, Number.parseInt(process.env.CAPTURE_FPS || "24", 10));
 const captureBitrate = Math.max(1_000_000, Number.parseInt(process.env.CAPTURE_BIT_RATE || "12000000", 10));
 const defaultScreenWidth = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_WIDTH || "1080", 10));
 const defaultScreenHeight = Math.max(1, Number.parseInt(process.env.CAPTURE_DEFAULT_HEIGHT || "1920", 10));
@@ -34,30 +30,9 @@ const screenrecordDecodeGraceTimeoutMs = Math.max(
   1000,
   Number.parseInt(process.env.CAPTURE_SCREENRECORD_DECODE_GRACE_TIMEOUT_MS || "15000", 10)
 );
-const turnKey = process.env.TURN_KEY || "";
-const turnSecretSource = process.env.TURN_KEY ? "TURN_KEY" : null;
-const turnHost = process.env.TURN_HOST || "";
-const turnBridgeHost = process.env.TURN_BRIDGE_HOST?.trim() || "";
-const turnBridgeHostIsIp = Boolean(turnBridgeHost && net.isIP(turnBridgeHost));
-const turnBridgePort = process.env.TURN_BRIDGE_PORT?.trim() || "";
-const turnBridgeScheme = process.env.TURN_BRIDGE_SCHEME?.trim() || "";
-const turnPort = process.env.TURN_PORT || "443";
-const turnProtocol = process.env.TURN_PROTOCOL || "tcp";
-const turnScheme = process.env.TURN_SCHEME || "turns";
-const turnTtl = Number.parseInt(process.env.TURN_TTL || "86400", 10);
-const turnUsernameSuffix = process.env.TURN_USERNAME_SUFFIX || "emuuser";
 const answerTimeoutMs = Number.parseInt(process.env.WEBRTC_ANSWER_TIMEOUT_MS || "10000", 10);
 const sessionIdleTimeoutMs = Number.parseInt(process.env.WEBRTC_SESSION_IDLE_TIMEOUT_MS || "300000", 10);
 const sessionRetentionMs = Number.parseInt(process.env.WEBRTC_SESSION_RETENTION_MS || "30000", 10);
-const turnProbeTimeoutMs = Math.max(1000, Number.parseInt(process.env.TURN_PROBE_TIMEOUT_MS || "2000", 10));
-const allowRelayFallback = process.env.WEBRTC_ALLOW_RELAY_FALLBACK !== "false";
-const placeholderSecretPatterns = [/^PLACEHOLDER/i, /^REPLACE_ME/i, /^CHANGEME$/i];
-const hasConfiguredTurnSecret = Boolean(
-  turnKey &&
-    turnHost &&
-    !placeholderSecretPatterns.some((pattern) => pattern.test(turnKey.trim()))
-);
-const preferRelayTransport = hasConfiguredTurnSecret;
 
 const sessions = new Map();
 
@@ -133,389 +108,7 @@ function readBody(req) {
 }
 
 function buildIceServers() {
-  if (!hasConfiguredTurnSecret) {
-    return [];
-  }
-
-  return buildIceServersForUrls([buildTurnServerUrl()].filter(Boolean));
-}
-
-function formatTurnHostForUrl(host) {
-  if (!host) {
-    return host;
-  }
-  return net.isIP(host) === 6 ? `[${host}]` : host;
-}
-
-function buildTurnServerUrl(host = turnHost) {
-  if (!host) {
-    return null;
-  }
-  return `${turnScheme}:${formatTurnHostForUrl(host)}:${turnPort}?transport=${turnProtocol}`;
-}
-
-function buildBridgeTurnServerUrl(host = turnBridgeHost) {
-  if (!host) {
-    return null;
-  }
-  const scheme = turnBridgeScheme || turnScheme;
-  const port = turnBridgePort || turnPort;
-  return `${scheme}:${formatTurnHostForUrl(host)}:${port}?transport=${turnProtocol}`;
-}
-
-function buildIceServersForUrls(urls) {
-  if (!hasConfiguredTurnSecret || !Array.isArray(urls) || urls.length === 0) {
-    return [];
-  }
-
-  const expiry = Math.floor(Date.now() / 1000) + turnTtl;
-  const username = `${expiry}:${turnUsernameSuffix}`;
-  const credential = createHmac("sha1", turnKey).update(username).digest("base64");
-
-  return [
-    {
-      urls,
-      username,
-      credential,
-    },
-  ];
-}
-
-function uniqueValues(values) {
-  return Array.from(new Set((values || []).filter(Boolean)));
-}
-
-async function resolveTurnServerUrls() {
-  const hostnameUrl = buildTurnServerUrl();
-  // When TURN_BRIDGE_HOST is set, build a bridge-specific URL using
-  // TURN_BRIDGE_SCHEME and TURN_BRIDGE_PORT (if provided). This lets the bridge
-  // use plain TURN (turn: scheme) on the TURN server's standard listening port
-  // (typically 3478) for its own relay gathering, bypassing both the DNS lookup
-  // that libwebrtc's C++ resolver cannot satisfy from /etc/hosts, and any TLS
-  // certificate hostname mismatch that would occur when connecting via the LAN IP
-  // with the turns: scheme. Browsers still receive the public TURN_HOST URL.
-  const bridgeUrl =
-    turnBridgeHost && turnBridgeHost !== turnHost
-      ? buildBridgeTurnServerUrl(turnBridgeHost)
-      : null;
-  if (!hostnameUrl || !turnHost) {
-    return { hostnameUrl: null, bridgeUrl, resolvedUrls: [], resolvedAddresses: [] };
-  }
-
-  try {
-    const records = await dns.lookup(turnHost, { all: true });
-    const resolvedAddresses = uniqueValues(records.map((record) => record.address));
-    return {
-      hostnameUrl,
-      bridgeUrl,
-      resolvedAddresses,
-      resolvedUrls: resolvedAddresses.map((address) => buildTurnServerUrl(address)).filter(Boolean),
-    };
-  } catch {
-    return { hostnameUrl, bridgeUrl, resolvedUrls: [], resolvedAddresses: [] };
-  }
-}
-
-function buildTurnWarnings() {
-  const warnings = [];
-
-  if (!turnHost) {
-    warnings.push("TURN_HOST is not configured, so relay ICE cannot be used.");
-  }
-
-  if (!turnKey) {
-    warnings.push("TURN_KEY is not configured, so the bridge will not mint TURN credentials.");
-  } else if (placeholderSecretPatterns.some((pattern) => pattern.test(turnKey.trim()))) {
-    warnings.push("TURN_KEY still looks like a placeholder value, so TURN credentials are disabled.");
-  }
-
-  if (turnBridgeHost && turnBridgeHost !== turnHost) {
-    const effectiveBridgeScheme = turnBridgeScheme || turnScheme;
-    const effectiveBridgePort = turnBridgePort || turnPort;
-    if (effectiveBridgeScheme === "turn" && turnBridgeHostIsIp) {
-      warnings.push(
-        `TURN_BRIDGE_HOST is set to '${turnBridgeHost}' with TURN_BRIDGE_SCHEME 'turn'. The bridge will connect to this IP on port ${effectiveBridgePort} using plain (unencrypted) TURN for relay gathering, bypassing both the DNS lookup that can fail for libwebrtc's C++ resolver and any TLS certificate mismatch when connecting via an IP literal. Browsers still use TURN_HOST '${turnHost}' with ${turnScheme.toUpperCase()}.`
-      );
-    } else if (effectiveBridgeScheme === "turns" && turnBridgeHostIsIp) {
-      warnings.push(
-        `TURN_BRIDGE_HOST is set to the IP '${turnBridgeHost}' with scheme 'turns'. TLS certificate validation applies; the server certificate must be valid for '${turnHost}'. Consider setting TURN_BRIDGE_SCHEME=turn and TURN_BRIDGE_PORT=3478 to use plain TURN and avoid TLS certificate issues when connecting via an IP literal. Browsers still use TURN_HOST '${turnHost}'.`
-      );
-    } else {
-      warnings.push(
-        `TURN_BRIDGE_HOST is set to '${turnBridgeHost}'. The bridge will use this host to reach the TURN server internally (e.g. to bypass hairpin NAT). Browsers still use TURN_HOST '${turnHost}'.`
-      );
-    }
-  }
-
-  return warnings;
-}
-
-const turnWarnings = buildTurnWarnings();
-
-function probeErrorDetails(error) {
-  return {
-    code: error?.code || null,
-    message: error?.message || String(error),
-  };
-}
-
-async function probeTurnDns() {
-  try {
-    const records = await dns.lookup(turnHost, { all: true });
-    return {
-      ok: true,
-      addresses: records.map((record) => record.address),
-      family: records[0]?.family || null,
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      ...probeErrorDetails(error),
-    };
-  }
-}
-
-function connectTcp(host, portNumber) {
-  return new Promise((resolve, reject) => {
-    const socket = net.connect({
-      host,
-      port: portNumber,
-      timeout: turnProbeTimeoutMs,
-    });
-
-    socket.once("connect", () => {
-      const details = {
-        ok: true,
-        localAddress: socket.localAddress || null,
-        localPort: socket.localPort || null,
-        remoteAddress: socket.remoteAddress || null,
-        remotePort: socket.remotePort || null,
-      };
-      socket.end();
-      resolve(details);
-    });
-    socket.once("timeout", () => {
-      socket.destroy();
-      reject(new Error(`Timed out after ${turnProbeTimeoutMs}ms`));
-    });
-    socket.once("error", (error) => {
-      socket.destroy();
-      reject(error);
-    });
-  });
-}
-
-async function probeTurnTcp() {
-  try {
-    return await connectTcp(turnHost, Number.parseInt(turnPort, 10) || 443);
-  } catch (error) {
-    return {
-      ok: false,
-      ...probeErrorDetails(error),
-    };
-  }
-}
-
-function handshakeTls(host, portNumber, servername) {
-  return new Promise((resolve, reject) => {
-    const socket = tls.connect({
-      host,
-      port: portNumber,
-      servername: servername !== undefined ? servername : host,
-      timeout: turnProbeTimeoutMs,
-    });
-
-    socket.once("secureConnect", () => {
-      const certificate = socket.getPeerCertificate?.(true) || null;
-      const details = {
-        ok: socket.authorized,
-        authorized: socket.authorized,
-        authorizationError: socket.authorizationError || null,
-        protocol: socket.getProtocol?.() || null,
-        subject: certificate?.subject?.CN || null,
-        issuer: certificate?.issuer?.CN || null,
-      };
-      socket.end();
-      if (details.ok) {
-        resolve(details);
-        return;
-      }
-      reject(new Error(details.authorizationError || "TLS certificate was not authorized"));
-    });
-    socket.once("timeout", () => {
-      socket.destroy();
-      reject(new Error(`Timed out after ${turnProbeTimeoutMs}ms`));
-    });
-    socket.once("error", (error) => {
-      socket.destroy();
-      reject(error);
-    });
-  });
-}
-
-async function probeTurnTls() {
-  if (turnScheme !== "turns") {
-    return {
-      ok: true,
-      skipped: true,
-      reason: "TURN is not using TLS.",
-    };
-  }
-
-  try {
-    return await handshakeTls(turnHost, Number.parseInt(turnPort, 10) || 443);
-  } catch (error) {
-    return {
-      ok: false,
-      ...probeErrorDetails(error),
-    };
-  }
-}
-
-async function probeTurnConnectivity() {
-  if (!hasConfiguredTurnSecret) {
-    return null;
-  }
-
-  const effectiveHost = turnBridgeHost || turnHost;
-  const dnsResult = await probeTurnDns();
-  const tcpResult = dnsResult.ok ? await probeTurnTcp() : null;
-  const tlsResult = dnsResult.ok && tcpResult?.ok ? await probeTurnTls() : null;
-
-  let bridgeProbe = null;
-  if (turnBridgeHost && turnBridgeHost !== turnHost) {
-    const effectiveBridgeScheme = turnBridgeScheme || turnScheme;
-    const effectiveBridgePort = Number.parseInt(turnBridgePort || turnPort, 10) || 443;
-    const bridgeTcpResult = await connectTcp(turnBridgeHost, effectiveBridgePort).then(
-      (r) => r,
-      (e) => ({ ok: false, ...probeErrorDetails(e) })
-    );
-    const bridgeTlsResult =
-      effectiveBridgeScheme === "turns" && bridgeTcpResult?.ok
-        ? await handshakeTls(
-            turnBridgeHost,
-            effectiveBridgePort,
-            turnBridgeHostIsIp ? turnHost : undefined
-          ).then(
-            (r) => r,
-            (e) => ({ ok: false, ...probeErrorDetails(e) })
-          )
-        : effectiveBridgeScheme === "turn"
-          ? { ok: true, skipped: true }
-          : null;
-    bridgeProbe = {
-      host: turnBridgeHost,
-      tcp: bridgeTcpResult,
-      tls: bridgeTlsResult,
-    };
-  }
-
-  return {
-    at: nowIso(),
-    serverUrl: turnBridgeHost && turnBridgeHost !== turnHost ? buildBridgeTurnServerUrl(turnBridgeHost) : buildTurnServerUrl(effectiveHost),
-    dns: dnsResult,
-    tcp: tcpResult,
-    tls: tlsResult,
-    bridgeHostProbe: bridgeProbe,
-  };
-}
-
-function summarizeTurnFailure(session, diagnostics) {
-  const candidateTypes = diagnostics?.candidateTypes || parseCandidateDiagnostics("");
-  const probe = session.turnConnectivity || null;
-  const recentErrors = (session.turnCandidateErrors || []).slice(-3);
-  const recentErrorText = recentErrors
-    .map((entry) => entry.errorText || entry.url || `ICE error ${entry.errorCode || "unknown"}`)
-    .join(" | ");
-
-  if (probe?.bridgeHostProbe && !probe.bridgeHostProbe.tcp?.ok) {
-    const bridgePortDisplay = turnBridgePort || turnPort;
-    return `TURN_BRIDGE_HOST '${turnBridgeHost}' TCP connect on port ${bridgePortDisplay} failed: ${probe.bridgeHostProbe.tcp?.message || "unknown error"}. The bridge cannot reach the TURN server at this internal address.`;
-  }
-
-  if (probe?.bridgeHostProbe && probe.bridgeHostProbe.tls && !probe.bridgeHostProbe.tls?.ok) {
-    const bridgePortDisplay = turnBridgePort || turnPort;
-    return `TURN_BRIDGE_HOST '${turnBridgeHost}' TLS handshake on port ${bridgePortDisplay} failed: ${probe.bridgeHostProbe.tls?.message || "unknown error"}.`;
-  }
-
-  if (probe?.dns && !probe.dns.ok) {
-    return `DNS lookup failed for ${turnHost}: ${probe.dns.message}.`;
-  }
-
-  if (probe?.tcp && !probe.tcp.ok) {
-    return `TCP connect to ${turnHost}:${turnPort} failed: ${probe.tcp.message}.`;
-  }
-
-  if (probe?.tls && !probe.tls.ok) {
-    return `TLS handshake to ${turnHost}:${turnPort} failed: ${probe.tls.message}.`;
-  }
-
-  if (recentErrors.some((entry) => /host lookup/i.test(entry.errorText || ""))) {
-    if (session.turnUrlStrategy === "resolved-ip") {
-      return `TURN client still reported host lookup or socket setup errors even after retrying with DNS-resolved TURN IPs (${(session.turnResolution?.resolvedAddresses || []).join(", ")}). Recent ICE errors: ${recentErrorText}.`;
-    }
-    return `TURN client reported a DNS or host lookup error after preflight while using the TURN hostname. Recent ICE errors: ${recentErrorText}.`;
-  }
-
-  if (recentErrors.some((entry) => /tls|certificate|ssl/i.test(entry.errorText || ""))) {
-    return `TURN client reported a TLS failure after preflight. Recent ICE errors: ${recentErrorText}.`;
-  }
-
-  if (recentErrors.some((entry) => /create turn client socket/i.test(entry.errorText || ""))) {
-    return `TURN client socket setup failed after DNS/TCP${turnScheme === "turns" ? "/TLS" : ""} preflight passed. This usually points to TURN auth mismatch or blocked relay connectivity on 49160-49200/tcp.`;
-  }
-
-  if (
-    probe?.dns?.ok &&
-    probe?.tcp?.ok &&
-    (probe?.tls?.ok || probe?.tls?.skipped) &&
-    (candidateTypes.relay ?? 0) === 0 &&
-    (candidateTypes.privateHost ?? 0) > 0
-  ) {
-    return "TURN DNS/TCP/TLS preflight passed, but the bridge answer only exposed private Docker/LAN host candidates and no relay candidate. Browsers that fall back to TURN for those private peers commonly hit coturn 403 Forbidden IP unless that subnet is explicitly allowed.";
-  }
-
-  if (
-    probe?.dns?.ok &&
-    probe?.tcp?.ok &&
-    (probe?.tls?.ok || probe?.tls?.skipped) &&
-    (candidateTypes.relay ?? 0) === 0 &&
-    (candidateTypes.loopbackHost ?? 0) > 0
-  ) {
-    return "TURN DNS/TCP/TLS preflight passed, but the bridge answer still exposed loopback host candidates like 127.0.0.1 and no relay candidate. That SDP is not usable for a remote browser session.";
-  }
-
-  if (probe?.dns?.ok && probe?.tcp?.ok && (probe?.tls?.ok || probe?.tls?.skipped) && (candidateTypes.relay ?? 0) === 0) {
-    return "TURN DNS/TCP/TLS preflight passed, but no relay candidate was allocated. This usually points to TURN auth mismatch or blocked relay ports 49160-49200/tcp.";
-  }
-
-  return recentErrorText ? `Recent ICE errors: ${recentErrorText}.` : null;
-}
-
-function summarizeCandidateTypes(candidateTypes) {
-  if (!candidateTypes) {
-    return "no candidate diagnostics";
-  }
-
-  return [
-    `total=${candidateTypes.total ?? 0}`,
-    `relay=${candidateTypes.relay ?? 0}`,
-    `host=${candidateTypes.host ?? 0}`,
-    `srflx=${candidateTypes.srflx ?? 0}`,
-    `prflx=${candidateTypes.prflx ?? 0}`,
-  ].join(", ");
-}
-
-function summarizeCandidateAddresses(candidateTypes) {
-  const addresses = Array.isArray(candidateTypes?.addresses) ? candidateTypes.addresses.filter(Boolean) : [];
-  if (addresses.length === 0) {
-    return "no candidate addresses";
-  }
-  return addresses.join(", ");
-}
-
-function hasTurnHostLookupError(errors) {
-  return (errors || []).some((entry) => /host lookup/i.test(entry?.errorText || ""));
+  return [];
 }
 
 function parseCandidateDiagnostics(sdp) {
@@ -911,21 +504,6 @@ function parseSdpDiagnostics(sdp) {
   };
 }
 
-function buildRelayFailureMessage(session, diagnostics) {
-  const candidateTypes = diagnostics?.candidateTypes || parseCandidateDiagnostics("");
-  const addresses = candidateTypes.addresses.slice(0, 4).join(", ");
-  const failureSummary = summarizeTurnFailure(session, diagnostics);
-  const details = [
-    `TURN relay gathering failed for ${buildTurnServerUrl() || "the configured TURN server"}.`,
-    candidateTypes.total > 0
-      ? `The bridge only gathered non-relay candidates${addresses ? ` (${addresses})` : ""}.`
-      : "The bridge gathered no ICE candidates at all while relay-only mode was enabled.",
-    failureSummary,
-    "Check coturn reachability on 443/tcp and 49160-49200/tcp, and verify TURN_KEY matches coturn static-auth-secret exactly.",
-  ];
-  return details.filter(Boolean).join(" ");
-}
-
 function sessionPayload(session) {
   return {
     id: session.id,
@@ -957,14 +535,7 @@ function sessionPayload(session) {
     },
     answerDiagnostics: session.answerDiagnostics || null,
     answerAttempts: session.answerAttempts || [],
-    turnPolicy: session.turnPolicy || null,
-    relayFallbackUsed: Boolean(session.relayFallbackUsed),
-    turnFailureSummary: session.turnFailureSummary || null,
-    turnConnectivity: session.turnConnectivity,
-    turnResolution: session.turnResolution || null,
-    turnUrlStrategy: session.turnUrlStrategy || null,
-    turnTlsTunnels: session.turnTlsTunnels || [],
-    turnCandidateErrors: session.turnCandidateErrors.slice(-5),
+    iceCandidateErrors: session.iceCandidateErrors.slice(-5),
     recentLogs: session.logs.slice(-10),
     eventStreamUrl: `/bridge/api/session/${session.id}/events`,
     deleteUrl: `/bridge/api/session/${session.id}`,
@@ -1099,16 +670,8 @@ function createSession(offer) {
     listeners: new Set(),
     cleanupTimer: null,
     localIceCandidates: [],
-    turnCandidateErrors: [],
-    turnConnectivity: null,
-    turnResolution: null,
-    turnUrlStrategy: null,
-    turnTlsTunnels: [],
-    turnTlsTunnelCleanup: null,
+    iceCandidateErrors: [],
     answerAttempts: [],
-    turnPolicy: null,
-    relayFallbackUsed: false,
-    turnFailureSummary: null,
   };
   sessions.set(id, session);
   scheduleSessionExpiry(session);
@@ -1129,12 +692,6 @@ function closeSessionResources(session) {
     session.peer.close();
     session.peer = null;
   }
-
-  if (typeof session.turnTlsTunnelCleanup === "function") {
-    session.turnTlsTunnelCleanup();
-    session.turnTlsTunnelCleanup = null;
-  }
-  session.turnTlsTunnels = [];
 
   session.peerConnectionState = "closed";
   session.iceConnectionState = "closed";
@@ -1211,9 +768,9 @@ function attachPeerObservers(session) {
       errorCode: event.errorCode || null,
       errorText: event.errorText || null,
     };
-    session.turnCandidateErrors.push(entry);
-    if (session.turnCandidateErrors.length > 20) {
-      session.turnCandidateErrors.shift();
+    session.iceCandidateErrors.push(entry);
+    if (session.iceCandidateErrors.length > 20) {
+      session.iceCandidateErrors.shift();
     }
     recordSessionLog(session, "warn", "Bridge ICE candidate error", {
       ...entry,
@@ -1289,9 +846,8 @@ function waitForIceGatheringComplete(peer, timeoutMs = answerTimeoutMs) {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       // Proceed with whatever candidates have been gathered so far rather than
-      // aborting the session.  This mirrors the browser-side behaviour and allows
-      // the answer to be built from partial candidates when the TURN server is
-      // slow or unreachable instead of failing the entire session.
+      // aborting the session. This mirrors the browser-side behaviour and lets
+      // same-network debug sessions proceed with whatever local candidates exist.
       cleanup();
       resolve({ timedOut: true });
     }, timeoutMs);
@@ -2070,7 +1626,6 @@ class NativeRtcVideoRelay {
     this.abortController = new AbortController();
     this.guid = null;
     this.running = false;
-    this.turnTlsTunnelCleanup = null;
     this.firstFrameTimer = null;
     this._resetFirstFrameState();
   }
@@ -2196,10 +1751,6 @@ class NativeRtcVideoRelay {
 
   async _handleJsepSignal(signal) {
     if (signal.start) {
-      if (typeof this.turnTlsTunnelCleanup === "function") {
-        this.turnTlsTunnelCleanup();
-        this.turnTlsTunnelCleanup = null;
-      }
       // Cancel any pending first-frame watchdog from a previous JSEP session
       // so it cannot fire and close the session while a fresh negotiation is
       // in progress.
@@ -2207,23 +1758,10 @@ class NativeRtcVideoRelay {
       if (this.emulatorPeer) {
         this.emulatorPeer.close();
       }
-      const sourceIceServers =
-        Array.isArray(signal.start.iceServers) && signal.start.iceServers.length > 0
-          ? signal.start.iceServers
-          : buildIceServers();
-      const preparedIceServers = await prepareIceServersForNode(sourceIceServers, {
-        logger: (level, message, details) => {
-          recordSessionLog(this.session, level, `native-rtc: ${message}`, details);
-        },
-      });
-      this.turnTlsTunnelCleanup = preparedIceServers.close;
-      // Always use "all" ICE transport policy for the internal bridge→emulator
-      // connection. Bridge and emulator run in the same Docker network, so they
-      // can connect directly via host candidates without needing TURN relay.
-      // Using relay-only here would fail whenever coturn relay is unavailable
-      // or misconfigured, even though a perfectly good direct path exists.
+      // Bridge and emulator run in the same Docker network, so the internal
+      // debug relay uses direct local ICE only.
       this.emulatorPeer = new RTCPeerConnection({
-        iceServers: preparedIceServers.iceServers,
+        iceServers: [],
         iceTransportPolicy: "all",
       });
       this.emulatorPeer.onicecandidate = (event) => {
@@ -2374,10 +1912,6 @@ class NativeRtcVideoRelay {
     this.running = false;
     this._resetFirstFrameState();
     this.abortController.abort();
-    if (typeof this.turnTlsTunnelCleanup === "function") {
-      this.turnTlsTunnelCleanup();
-      this.turnTlsTunnelCleanup = null;
-    }
     if (this.videoSink) {
       this.videoSink.stop();
       this.videoSink = null;
@@ -2492,264 +2026,90 @@ function translateInputPayload(session, payload) {
 }
 
 async function buildAnswer(session) {
-  const turnUrlOptions = await resolveTurnServerUrls();
-  session.turnResolution = turnUrlOptions;
+  session.localIceCandidates = [];
+  session.iceCandidateErrors = [];
 
-  async function attemptAnswer(iceTransportPolicy, options = {}) {
-    const priorErrorCount = session.turnCandidateErrors.length;
-    session.localIceCandidates = [];
-    session.turnConnectivity = preferRelayTransport ? await probeTurnConnectivity() : null;
-    if (session.turnConnectivity) {
-      recordSessionLog(session, "info", "TURN connectivity preflight", session.turnConnectivity);
+  const iceTransportPolicy = "all";
+  const peer = new RTCPeerConnection({
+    iceServers: buildIceServers(),
+    iceTransportPolicy,
+  });
+
+  session.peer = peer;
+  attachPeerObservers(session);
+
+  setSessionState(
+    session,
+    "applying-offer",
+    "Applying the browser SDP offer on the bridge peer connection.",
+    { log: true }
+  );
+
+  await peer.setRemoteDescription(new RTCSessionDescription(session.offer));
+
+  // Pre-set the video transceiver direction to sendonly so the answer SDP
+  // correctly reflects that the bridge will send video, even though the
+  // capture track is attached in parallel below.
+  if (captureMode !== "stub") {
+    const videoTransceiver = peer
+      .getTransceivers()
+      .find((t) => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video");
+    if (videoTransceiver && videoTransceiver.direction !== "sendrecv") {
+      videoTransceiver.direction = "sendonly";
     }
-
-    const turnUrls = options.turnUrls || buildIceServers().flatMap((server) => server.urls || []);
-    const turnUrlStrategy = options.turnUrlStrategy || (turnUrls[0] === turnUrlOptions.hostnameUrl ? "hostname" : "resolved-ip");
-    session.turnUrlStrategy = turnUrlStrategy;
-    if (turnUrls.length > 0) {
-      recordSessionLog(session, "info", "Configuring bridge TURN URLs", {
-        turnUrlStrategy,
-        urls: turnUrls,
-      });
-    }
-
-    const preparedIceServers = await prepareIceServersForNode(buildIceServersForUrls(turnUrls), {
-      logger: (level, message, details) => {
-        recordSessionLog(session, level, message, details);
-      },
-    });
-    session.turnTlsTunnels = preparedIceServers.tunnels;
-    session.turnTlsTunnelCleanup = preparedIceServers.close;
-
-    const peer = new RTCPeerConnection({
-      iceServers: preparedIceServers.iceServers,
-      iceTransportPolicy,
-    });
-
-    session.peer = peer;
-    attachPeerObservers(session);
-
-    setSessionState(
-      session,
-      "applying-offer",
-      "Applying the browser SDP offer on the bridge peer connection.",
-      { log: true }
-    );
-
-    await peer.setRemoteDescription(new RTCSessionDescription(session.offer));
-
-    // Pre-set the video transceiver direction to sendonly so the answer SDP
-    // correctly reflects that the bridge will send video, even though the
-    // capture track is attached in parallel below.
-    if (captureMode !== "stub") {
-      const videoTransceiver = peer
-        .getTransceivers()
-        .find((t) => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video");
-      if (videoTransceiver && videoTransceiver.direction !== "sendrecv") {
-        videoTransceiver.direction = "sendonly";
-      }
-    }
-
-    setSessionState(session, "creating-answer", "Creating the SDP answer for the browser peer.", { log: true });
-    const answer = await peer.createAnswer();
-    await peer.setLocalDescription(answer);
-
-    setSessionState(
-      session,
-      "gathering-ice",
-      `Collecting ICE candidates and starting the capture pipeline concurrently (${iceTransportPolicy}).`,
-      { log: true }
-    );
-
-    // Run ICE gathering and media pipeline setup in parallel.  Previously the
-    // pipeline was started before createAnswer(), which prevented ICE gathering
-    // from beginning until the (potentially slow) screencap or screenrecord
-    // initialisation finished.  Running them concurrently cuts time-to-first-
-    // frame by up to ~2 s in the typical case.
-    const [gatherResult] = await Promise.all([waitForIceGatheringComplete(peer), attachVideoSource(session, peer)]);
-    if (gatherResult?.timedOut) {
-      recordSessionLog(session, "warn", "ICE gathering timed out; proceeding with partial candidates", {
-        iceTransportPolicy,
-        iceGatheringState: peer.iceGatheringState,
-        candidatesGathered: session.localIceCandidates.length,
-        timeoutMs: answerTimeoutMs,
-      });
-    }
-
-    const localAnswer = {
-      type: peer.localDescription?.type || answer.type,
-      sdp: buildAnswerSdpWithGatheredCandidates(peer.localDescription?.sdp || answer.sdp, session.localIceCandidates),
-    };
-    const diagnostics = parseSdpDiagnostics(localAnswer.sdp);
-    if (diagnostics) {
-      recordSessionLog(session, "info", "Created SDP answer diagnostics", {
-        iceTransportPolicy,
-        ...diagnostics,
-      });
-    }
-
-    return {
-      answer: localAnswer,
-      diagnostics,
-      iceTransportPolicy,
-      turnUrls,
-      turnUrlStrategy,
-      candidateErrors: session.turnCandidateErrors.slice(priorErrorCount),
-    };
   }
 
-  let result = await attemptAnswer(preferRelayTransport ? "relay" : "all", {
-    turnUrls: turnUrlOptions.bridgeUrl
-      ? [turnUrlOptions.bridgeUrl]
-      : turnUrlOptions.hostnameUrl
-        ? [turnUrlOptions.hostnameUrl]
-        : [],
-    turnUrlStrategy: turnUrlOptions.bridgeUrl ? "bridge-host" : "hostname",
-  });
+  setSessionState(session, "creating-answer", "Creating the SDP answer for the browser peer.", { log: true });
+  const answer = await peer.createAnswer();
+  await peer.setLocalDescription(answer);
+
+  setSessionState(
+    session,
+    "gathering-ice",
+    "Collecting local ICE candidates and starting the capture pipeline concurrently.",
+    { log: true }
+  );
+
+  const [gatherResult] = await Promise.all([waitForIceGatheringComplete(peer), attachVideoSource(session, peer)]);
+  if (gatherResult?.timedOut) {
+    recordSessionLog(session, "warn", "ICE gathering timed out; proceeding with partial candidates", {
+      iceTransportPolicy,
+      iceGatheringState: peer.iceGatheringState,
+      candidatesGathered: session.localIceCandidates.length,
+      timeoutMs: answerTimeoutMs,
+    });
+  }
+
+  const localAnswer = {
+    type: peer.localDescription?.type || answer.type,
+    sdp: buildAnswerSdpWithGatheredCandidates(peer.localDescription?.sdp || answer.sdp, session.localIceCandidates),
+  };
+  const diagnostics = parseSdpDiagnostics(localAnswer.sdp);
+  if (diagnostics) {
+    recordSessionLog(session, "info", "Created SDP answer diagnostics", {
+      iceTransportPolicy,
+      ...diagnostics,
+    });
+  }
+
+  if ((diagnostics?.candidateTypes?.total ?? 0) === 0) {
+    throw new Error("Bridge ICE gathering produced no local candidates for the optional WebRTC debug path.");
+  }
+
+  session.answer = localAnswer;
+  session.answerDiagnostics = diagnostics;
   session.answerAttempts.push({
-    iceTransportPolicy: result.iceTransportPolicy,
-    turnUrlStrategy: result.turnUrlStrategy,
-    turnUrls: result.turnUrls || [],
-    diagnostics: result.diagnostics || null,
-    candidateErrors: result.candidateErrors || [],
+    iceTransportPolicy,
+    diagnostics,
+    candidateErrors: session.iceCandidateErrors.slice(),
   });
-
-  if (
-    preferRelayTransport &&
-    (result.diagnostics?.candidateTypes?.relay ?? 0) === 0 &&
-    result.turnUrlStrategy === "bridge-host" &&
-    turnUrlOptions.hostnameUrl
-  ) {
-    recordSessionLog(
-      session,
-      "warn",
-      "Relay-only ICE gathering via TURN_BRIDGE_HOST produced no relay candidates; retrying with the public TURN_HOST hostname.",
-      {
-        bridgeUrl: turnUrlOptions.bridgeUrl,
-        hostnameUrl: turnUrlOptions.hostnameUrl,
-        candidateErrors: result.candidateErrors || [],
-      }
-    );
-    closeSessionResources(session);
-    result = await attemptAnswer("relay", {
-      turnUrls: [turnUrlOptions.hostnameUrl],
-      turnUrlStrategy: "hostname",
-    });
-    session.answerAttempts.push({
-      iceTransportPolicy: result.iceTransportPolicy,
-      turnUrlStrategy: result.turnUrlStrategy,
-      turnUrls: result.turnUrls || [],
-      diagnostics: result.diagnostics || null,
-      candidateErrors: result.candidateErrors || [],
-    });
-  }
-
-  if (
-    preferRelayTransport &&
-    (result.diagnostics?.candidateTypes?.relay ?? 0) === 0 &&
-    hasTurnHostLookupError(result.candidateErrors) &&
-    (turnUrlOptions.resolvedUrls?.length ?? 0) > 0
-  ) {
-    recordSessionLog(
-      session,
-      "warn",
-      "Relay-only ICE gathering reported TURN host lookup errors; retrying with DNS-resolved TURN IP literals.",
-      {
-        hostnameUrl: turnUrlOptions.hostnameUrl,
-        resolvedAddresses: turnUrlOptions.resolvedAddresses,
-        resolvedUrls: turnUrlOptions.resolvedUrls,
-      }
-    );
-    closeSessionResources(session);
-    result = await attemptAnswer("relay", {
-      turnUrls: turnUrlOptions.resolvedUrls,
-      turnUrlStrategy: "resolved-ip",
-    });
-    session.answerAttempts.push({
-      iceTransportPolicy: result.iceTransportPolicy,
-      turnUrlStrategy: result.turnUrlStrategy,
-      turnUrls: result.turnUrls || [],
-      diagnostics: result.diagnostics || null,
-      candidateErrors: result.candidateErrors || [],
-    });
-  }
-
-  if (preferRelayTransport && (result.diagnostics?.candidateTypes?.relay ?? 0) === 0) {
-    const relayFailureMessage = buildRelayFailureMessage(session, result.diagnostics);
-    session.turnFailureSummary = relayFailureMessage;
-
-    if (allowRelayFallback) {
-      session.relayFallbackUsed = true;
-      session.turnPolicy = {
-        requested: "relay",
-        applied: "all",
-        fallbackReason: relayFailureMessage,
-      };
-      recordSessionLog(session, "warn", "Relay-only ICE gathering produced no relay candidates; retrying with all candidates enabled.", {
-        relayCandidateSummary: summarizeCandidateTypes(result.diagnostics?.candidateTypes),
-        candidateErrors: result.candidateErrors || [],
-      });
-      closeSessionResources(session);
-      const allPolicyTurnUrls = turnUrlOptions.bridgeUrl
-        ? [turnUrlOptions.bridgeUrl]
-        : (turnUrlOptions.resolvedUrls?.length ?? 0) > 0
-          ? turnUrlOptions.resolvedUrls
-          : null;
-      const allPolicyTurnUrlStrategy = turnUrlOptions.bridgeUrl
-        ? "bridge-host"
-        : (turnUrlOptions.resolvedUrls?.length ?? 0) > 0
-          ? "resolved-ip"
-          : null;
-      result = await attemptAnswer("all", {
-        ...(allPolicyTurnUrls ? { turnUrls: allPolicyTurnUrls, turnUrlStrategy: allPolicyTurnUrlStrategy } : {}),
-      });
-      session.answerAttempts.push({
-        iceTransportPolicy: result.iceTransportPolicy,
-        diagnostics: result.diagnostics || null,
-        candidateErrors: result.candidateErrors || [],
-      });
-    } else {
-      throw new Error(relayFailureMessage);
-    }
-  }
-
-  if (
-    preferRelayTransport &&
-    (result.diagnostics?.candidateTypes?.relay ?? 0) === 0 &&
-    (result.diagnostics?.candidateTypes?.publicHost ?? 0) === 0
-  ) {
-    session.turnFailureSummary = [
-      buildRelayFailureMessage(session, result.diagnostics),
-      `Bridge candidate addresses: ${summarizeCandidateAddresses(result.diagnostics?.candidateTypes)}.`,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    throw new Error(session.turnFailureSummary);
-  }
-
-  if ((result.diagnostics?.candidateTypes?.total ?? 0) === 0) {
-    session.turnFailureSummary = buildRelayFailureMessage(session, result.diagnostics);
-    throw new Error(session.turnFailureSummary);
-  }
-
-  session.answer = result.answer;
-  session.answerDiagnostics = result.diagnostics;
-  if (!session.turnPolicy) {
-    session.turnPolicy = {
-      requested: result.iceTransportPolicy,
-      applied: result.iceTransportPolicy,
-      fallbackReason: null,
-    };
-  }
 
   setSessionState(
     session,
     captureMode === "stub" ? "answered-no-media" : "answered",
     captureMode === "stub"
       ? "SDP answer created successfully, but media is disabled because the bridge is in stub mode."
-      : session.relayFallbackUsed
-        ? "SDP answer created after retrying ICE gathering with all candidates enabled. Waiting for the browser peer to connect."
-        : "SDP answer created successfully. Waiting for the browser peer to connect.",
+      : "SDP answer created with local ICE only. Waiting for the browser peer to connect.",
     { log: true }
   );
 
@@ -2797,10 +2157,7 @@ const server = http.createServer(async (req, res) => {
         captureMode,
         captureFps,
         sessions: sessions.size,
-        turnConfigured: hasConfiguredTurnSecret,
-        turnSecretSource,
-        turnServerUrl: buildTurnServerUrl(),
-        warnings: turnWarnings,
+        iceServers: 0,
       });
       return;
     }
@@ -2845,14 +2202,11 @@ const server = http.createServer(async (req, res) => {
       },
       rtcConfiguration: {
         iceServers: buildIceServers(),
-        iceTransportPolicy: preferRelayTransport ? "relay" : "all",
+        iceTransportPolicy: "all",
       },
       notes: [
-        "The custom bridge now creates a live RTCPeerConnection per browser session and returns a real SDP answer.",
-        "ICE remains non-trickle for now, so the bridge waits for gathering to complete before responding.",
-        preferRelayTransport
-          ? "TURN is configured, so the bridge requires relay candidates instead of advertising container-local host candidates."
-          : "TURN is not configured, so the bridge can only advertise local host candidates.",
+        "The optional WebRTC bridge creates a live RTCPeerConnection per browser session and returns a real SDP answer.",
+        "ICE remains non-trickle and local-only; the primary firewall-friendly path is the scrcpy HTTP tunnel.",
         captureMode === "stub"
           ? "Media capture is disabled in stub mode."
           : captureMode === "native-rtc"
@@ -2860,19 +2214,8 @@ const server = http.createServer(async (req, res) => {
             : captureMode === "adb-screenrecord"
               ? "Video is captured from the emulator through an apkbridge-backed adb screenrecord H.264 stream and piped into WebRTC. If screenrecord stalls before the first frame, the bridge surfaces that failure instead of switching to screencap polling."
               : "Video is captured from the emulator through apkbridge screencaps and piped into WebRTC.",
-        ...turnWarnings,
       ],
-      warnings: turnWarnings,
-      turn: {
-        configured: hasConfiguredTurnSecret,
-        secretSource: turnSecretSource,
-        url: buildTurnServerUrl(),
-        bridgeHost: turnBridgeHost && turnBridgeHost !== turnHost ? turnBridgeHost : null,
-        bridgeUrl:
-          turnBridgeHost && turnBridgeHost !== turnHost
-            ? buildBridgeTurnServerUrl(turnBridgeHost)
-            : null,
-      },
+      warnings: [],
     });
     return;
   }
@@ -2994,19 +2337,7 @@ server.listen(port, "0.0.0.0", () => {
   console.log(`  captureFps         : ${captureFps}`);
   console.log(`  emulatorGrpcWebUrl : ${emulatorGrpcWebUrl}`);
   console.log(`  apkbridgeBaseUrl   : ${apkbridgeBaseUrl}`);
-  console.log(`  TURN configured    : ${hasConfiguredTurnSecret}`);
-  if (hasConfiguredTurnSecret) {
-    console.log(`  TURN server url    : ${buildTurnServerUrl()}`);
-    console.log(`  TURN bridge host   : ${turnBridgeHost || "(same as TURN_HOST)"}`);
-    console.log(`  preferRelay        : ${preferRelayTransport}`);
-  } else {
-    console.log(`  TURN              : not configured (TURN_KEY is missing or placeholder)`);
-  }
-  if (turnWarnings.length > 0) {
-    for (const w of turnWarnings) {
-      console.warn(`  [warn] ${w}`);
-    }
-  }
+  console.log("  iceServers         : none (local ICE only)");
 });
 
 process.on("uncaughtException", (err) => {

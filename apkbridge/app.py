@@ -19,10 +19,10 @@ SCREENRECORD_TIME_LIMIT = max(10, min(180, int(os.environ.get("SCREENRECORD_TIME
 SCREENRECORD_MAX_CONSECUTIVE_FAILURES = 3
 SCREENRECORD_RETRY_DELAY_SECONDS = 0.5
 
-SCRCPY_VIDEO_BIT_RATE = max(1_000_000, int(os.environ.get("SCRCPY_VIDEO_BIT_RATE", "8000000")))
+SCRCPY_VIDEO_BIT_RATE = max(1_000_000, int(os.environ.get("SCRCPY_VIDEO_BIT_RATE", "6000000")))
 SCRCPY_MAX_SIZE = max(320, int(os.environ.get("SCRCPY_MAX_SIZE", "1080")))
-SCRCPY_MAX_FPS = max(1, int(os.environ.get("SCRCPY_MAX_FPS", "30")))
-SCRCPY_FFMPEG_FRAGMENT_US = max(50000, int(os.environ.get("SCRCPY_FFMPEG_FRAGMENT_US", "100000")))
+SCRCPY_MAX_FPS = max(1, int(os.environ.get("SCRCPY_MAX_FPS", "24")))
+SCRCPY_FFMPEG_FRAGMENT_US = max(50000, int(os.environ.get("SCRCPY_FFMPEG_FRAGMENT_US", "125000")))
 KEY_MAP = {"HOME": "3", "BACK": "4", "RECENTS": "187", "POWER": "26", "MENU": "82"}
 KEY_NAME_MAP = {
     "GoHome": KEY_MAP["HOME"],
@@ -393,9 +393,9 @@ def scrcpy_video():
     """Stream scrcpy-captured emulator video as fragmented MP4 over plain HTTP.
 
     scrcpy records a low-latency Matroska stream into a FIFO while ffmpeg remuxes
-    it into fragmented MP4 for browser MediaSource playback. This keeps the
-    browser transport on an ordinary HTTPS response, avoiding WebRTC, TURN, ICE,
-    and WebSocket upgrades.
+    it into fragmented MP4 for browser MediaSource playback. This mirrors the
+    Guacamole deployment shape: the server stays close to the emulator, while the
+    browser only needs an ordinary proxied HTTPS response plus HTTP input calls.
     """
     bit_rate = request.args.get("bit_rate", str(SCRCPY_VIDEO_BIT_RATE)).strip()
     max_size = request.args.get("max_size", str(SCRCPY_MAX_SIZE)).strip()
@@ -451,13 +451,21 @@ def scrcpy_video():
                 "32",
                 "-analyzeduration",
                 "0",
+                "-avioflags",
+                "direct",
                 "-i",
                 "pipe:0",
                 "-an",
                 "-c:v",
                 "copy",
+                "-flush_packets",
+                "1",
+                "-muxdelay",
+                "0",
+                "-muxpreload",
+                "0",
                 "-movflags",
-                "empty_moov+default_base_moof+frag_keyframe",
+                "empty_moov+default_base_moof+separate_moof+omit_tfhd_offset",
                 "-frag_duration",
                 str(SCRCPY_FFMPEG_FRAGMENT_US),
                 "-min_frag_duration",

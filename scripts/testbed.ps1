@@ -77,20 +77,12 @@ Write-Host "[testbed] running bridge-webrtc unit tests"
 node --test --test-force-exit bridge-webrtc/test/*.test.mjs
 Assert-LastExitCode "node --test --test-force-exit bridge-webrtc/test/*.test.mjs"
 
-Write-Host "[testbed] running native WebRTC configuration checks"
-node scripts/test-native-webrtc.mjs
-Assert-LastExitCode "node scripts/test-native-webrtc.mjs"
+Write-Host "[testbed] running Guacamole-style HTTP configuration checks"
+node scripts/test-guacamole-http.mjs
+Assert-LastExitCode "node scripts/test-guacamole-http.mjs"
 
 Write-Host "[testbed] running frontend build"
 npm --prefix frontend run build
 Assert-LastExitCode "npm --prefix frontend run build"
-
-if ($env:TURN_HOST -and $env:TURN_KEY) {
-  Write-Host "[testbed] running TURN connectivity harness"
-  node bridge-webrtc/test/turn-connectivity-harness.mjs
-  Assert-LastExitCode "node bridge-webrtc/test/turn-connectivity-harness.mjs"
-} else {
-  Write-Host "[testbed] skipping TURN harness (set TURN_HOST and TURN_KEY to run it)"
-}
 
 Write-Host "[testbed] all checks passed"

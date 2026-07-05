@@ -18,13 +18,6 @@ services:
       ADBKEY: |
         PLACEHOLDER_ADB_KEY
       EMULATOR_PARAMS: "-no-audio -grpc 8554 -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
-      TURN_HOST: "turn.corsicanescape.com"
-      TURN_PORT: "${TURN_PORT:-443}"
-      TURN_PROTOCOL: "tcp"
-      TURN_SCHEME: "${TURN_SCHEME:-turns}"
-      TURN_KEY: "PLACEHOLDER_TURN_KEY"
-      TURN_TTL: "2592000"
-      TURN_USERNAME_SUFFIX: "emuuser"
     volumes:
       - emu-grpc-token:/run/emu-token
     expose:
@@ -67,6 +60,9 @@ services:
     environment:
       ADB_TARGET: "emulator:5555"
       WORKSPACE_ROOT: "/workspace"
+      SCRCPY_MAX_FPS: "24"
+      SCRCPY_VIDEO_BIT_RATE: "${SCRCPY_VIDEO_BIT_RATE:-6000000}"
+      SCRCPY_MAX_SIZE: "${SCRCPY_MAX_SIZE:-1080}"
       ADBKEY: |
         PLACEHOLDER_ADB_KEY
     volumes:
@@ -95,18 +91,9 @@ services:
     environment:
       PORT: "8090"
       CAPTURE_MODE: "${CAPTURE_MODE:-native-rtc}"
+      CAPTURE_FPS: "${CAPTURE_FPS:-24}"
       EMULATOR_GRPC_WEB_URL: "http://envoy:8080"
       APKBRIDGE_BASE_URL: "http://apkbridge:5000"
-      TURN_HOST: "turn.corsicanescape.com"
-      TURN_PORT: "${TURN_PORT:-443}"
-      TURN_PROTOCOL: "tcp"
-      TURN_SCHEME: "${TURN_SCHEME:-turns}"
-      TURN_BRIDGE_HOST: "${TURN_BRIDGE_HOST:-host.docker.internal}"
-      TURN_BRIDGE_PORT: "${TURN_BRIDGE_PORT:-3478}"
-      TURN_BRIDGE_SCHEME: "${TURN_BRIDGE_SCHEME:-turn}"
-      TURN_KEY: "PLACEHOLDER_TURN_KEY"
-      TURN_TTL: "2592000"
-      TURN_USERNAME_SUFFIX: "emuuser"
       EMULATOR_TOKEN_PATH: "/run/emu-token/emu-grpc-token"
     volumes:
       - emu-grpc-token:/run/emu-token

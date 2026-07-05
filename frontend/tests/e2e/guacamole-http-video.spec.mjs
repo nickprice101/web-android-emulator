@@ -22,13 +22,13 @@ function readSectionFromBody(bodyText, heading, nextHeading) {
   return bodyText.match(pattern)?.[1]?.trim() ?? "";
 }
 
-test("deployed turns path renders real video frames", async ({ page }, testInfo) => {
+test("deployed Guacamole-style HTTP path renders real video frames", async ({ page }, testInfo) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByText("Emulator state", { exact: true })).toBeVisible({
     timeout: VIDEO_WAIT_TIMEOUT_MS,
   });
-  await expect(page.getByText("Native WebRTC diagnostics", { exact: true })).toBeVisible({
+  await expect(page.getByText("Scrcpy HTTP video diagnostics", { exact: true })).toBeVisible({
     timeout: VIDEO_WAIT_TIMEOUT_MS,
   });
 
@@ -46,15 +46,9 @@ test("deployed turns path renders real video frames", async ({ page }, testInfo)
         return candidateArea >= bestArea ? candidate : best;
       }, null);
       const bodyText = document.body?.innerText ?? "";
-      // Only treat disconnection as a definitive failure once the frontend has
-      // exhausted all native WebRTC retries (signalled by the "could not
-      // recover" message) or once the custom-bridge fallback also reports
-      // disconnected.  The "native WebRTC disconnected" overlay is a transient
-      // state that appears before each retry fires (~1.5 s) and must not cause
-      // an early abort.
       const failureDetected =
-        bodyText.includes("could not recover") ||
-        bodyText.includes("Mode: custom WebRTC disconnected");
+        bodyText.includes("Scrcpy HTTP video failed") ||
+        bodyText.includes("last event: error");
 
       if (!(video instanceof HTMLVideoElement)) {
         return failureDetected ? { outcome: "failed", videoStats: null } : null;
@@ -98,52 +92,39 @@ test("deployed turns path renders real video frames", async ({ page }, testInfo)
   const emulatorState = readFieldFromBody(bodyText, "Emulator state");
   const bridgeApiState = readFieldFromBody(bodyText, "Bridge API");
   const lastMessage = readSectionFromBody(bodyText, "Last message", "Display diagnostics");
-  const nativeDiagnosticsText = readSectionFromBody(
-    bodyText,
-    "Native WebRTC diagnostics",
-    "First-frame path"
-  );
-  const customDiagnosticsText = readSectionFromBody(bodyText, "WebRTC diagnostics", "First-frame path");
+  const scrcpyDiagnosticsText = readSectionFromBody(bodyText, "Scrcpy HTTP video diagnostics", "Android system logs");
   const videoStats = mediaOutcome?.videoStats ?? null;
   const browserDiagnostics = await page.evaluate(() => window.__EMU_E2E__ || null);
-  const activeTransport = browserDiagnostics?.activeTransport || null;
-  const activeDiagnosticsText =
-    activeTransport === "custom-bridge-webrtc" ? customDiagnosticsText : nativeDiagnosticsText;
-  const selectedPairUsesRelay =
-    browserDiagnostics?.selectedCandidatePair?.localCandidateType === "relay" ||
-    browserDiagnostics?.selectedCandidatePair?.remoteCandidateType === "relay" ||
-    /Selected pair:\s+.*relay/i.test(activeDiagnosticsText);
+  const activeTransport = browserDiagnostics?.activeTransport || "scrcpy-http";
 
   const diagnosticsPayload = {
     emulatorState,
     bridgeApiState,
     lastMessage,
     activeTransport,
-    nativeDiagnosticsText,
-    customDiagnosticsText,
+    scrcpyDiagnosticsText,
     browserDiagnostics,
     mediaOutcome,
-    selectedPairUsesRelay,
     videoStats,
     testedAt: new Date().toISOString(),
     baseUrl: testInfo.project.use.baseURL,
   };
 
   await fs.writeFile(
-    testInfo.outputPath("native-turns-video-diagnostics.json"),
+    testInfo.outputPath("guacamole-http-video-diagnostics.json"),
     JSON.stringify(diagnosticsPayload, null, 2),
     "utf8"
   );
 
   await page.screenshot({
-    path: testInfo.outputPath("native-turns-video.png"),
+    path: testInfo.outputPath("guacamole-http-video.png"),
     fullPage: true,
   });
 
   expect(mediaOutcome?.outcome, `Expected usable video, got ${JSON.stringify(mediaOutcome)}`).toBe("ready");
   expect(emulatorState.toLowerCase()).toContain("connected");
   expect(bridgeApiState.toLowerCase()).toContain("ready");
-  expect(["native-emulator-webrtc", "custom-bridge-webrtc"]).toContain(activeTransport);
+  expect(activeTransport).toBe("scrcpy-http");
   expect(videoStats?.readyState ?? 0).toBeGreaterThanOrEqual(HAVE_CURRENT_DATA);
   expect(videoStats?.videoWidth ?? 0).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
   expect(videoStats?.videoHeight ?? 0).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
@@ -151,9 +132,6 @@ test("deployed turns path renders real video frames", async ({ page }, testInfo)
     ((videoStats?.totalVideoFrames ?? 0) > 0) || (videoStats?.currentTime ?? 0) > 0,
     `Expected decoded frames or playback progress, got ${JSON.stringify(videoStats)}`
   ).toBeTruthy();
-  expect(activeDiagnosticsText).toContain("Transport:");
-  expect(
-    selectedPairUsesRelay,
-    `Expected selected ICE candidate pair to use TURN relay, got ${JSON.stringify(browserDiagnostics)}`
-  ).toBeTruthy();
+  expect(scrcpyDiagnosticsText).toContain("stream:");
+  expect(scrcpyDiagnosticsText).toContain("mse:");
 });

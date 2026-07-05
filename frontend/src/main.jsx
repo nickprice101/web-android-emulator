@@ -7,18 +7,13 @@ const MIN_RENDERABLE_VIDEO_DIMENSION = 16;
 const NATIVE_WEBRTC_RECOVERY_DELAY_MS = 1500;
 const NATIVE_WEBRTC_MAX_RETRIES = 3;
 const SCRCPY_DEBUG_UPDATE_INTERVAL_MS = 250;
+const GUACAMOLE_HTTP_TARGET_FPS = 24;
+const GUACAMOLE_HTTP_BIT_RATE = 6_000_000;
+const GUACAMOLE_HTTP_MAX_SIZE = 1080;
 const STREAM_MODE_OPTIONS = [
-  { value: "native-webrtc", label: "WebRTC (native emulator)" },
-  { value: "custom-webrtc", label: "WebRTC (custom bridge)" },
-  { value: "scrcpy-http", label: "HTTP video (scrcpy)" },
+  { value: "scrcpy-http", label: "Guacamole HTTP (24fps)" },
   { value: "png", label: "PNG preview" },
 ];
-// Public STUN server used as a fallback when the emulator advertises no ICE
-// servers.  Set VITE_FALLBACK_STUN_URL at build time to override.
-const FALLBACK_STUN_URL =
-  typeof import.meta !== "undefined" && import.meta.env?.VITE_FALLBACK_STUN_URL
-    ? import.meta.env.VITE_FALLBACK_STUN_URL
-    : "stun:stun.l.google.com:19302";
 function clampRatio(value) {
   if (!Number.isFinite(value)) {
     return null;
@@ -1868,7 +1863,7 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
   const containerRef = useRef(null);
   const gestureRef = useRef(null);
   const [status, setStatus] = useState("connecting");
-  const [detail, setDetail] = useState("Opening ordinary HTTPS video stream from scrcpy...");
+  const [detail, setDetail] = useState(`Opening Guacamole-style HTTPS tunnel from scrcpy at ${GUACAMOLE_HTTP_TARGET_FPS}fps...`);
   const [hasVideo, setHasVideo] = useState(false);
   const [debug, setDebug] = useState({
     bytesReceived: 0,
@@ -1973,7 +1968,13 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
         sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
         sourceBuffer.mode = "segments";
         updateDebug({ lastEvent: "mediasource:open" }, { immediate: true });
-        const response = await fetch(`/api/scrcpy-video?cache=${Date.now()}`, {
+        const params = new URLSearchParams({
+          cache: String(Date.now()),
+          max_fps: String(GUACAMOLE_HTTP_TARGET_FPS),
+          bit_rate: String(GUACAMOLE_HTTP_BIT_RATE),
+          max_size: String(GUACAMOLE_HTTP_MAX_SIZE),
+        });
+        const response = await fetch(`/api/scrcpy-video?${params.toString()}`, {
           signal: abortController.signal,
           headers: { Accept: "video/mp4" },
         });
@@ -1986,9 +1987,9 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
           throw new Error(`scrcpy video stream failed (${response.status})`);
         }
         setStatus("streaming");
-        setDetail("Receiving fragmented MP4 over HTTPS from scrcpy.");
+        setDetail(`Receiving fragmented MP4 over HTTPS from scrcpy at ${GUACAMOLE_HTTP_TARGET_FPS}fps.`);
         onStateChange?.("connected");
-        onMessage?.("Connected to scrcpy HTTP video stream");
+        onMessage?.("Connected to Guacamole-style HTTP video tunnel");
         const reader = response.body.getReader();
         while (!cancelled) {
           const { value, done } = await reader.read();
@@ -2111,17 +2112,17 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
   return (
     <div aria-description={inlineDebugSummary} style={{ width, height, borderRadius: 18, background: "#05070b", color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid #202634" }}>
       <div style={{ padding: "10px 12px", borderBottom: "1px solid #202634", display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12 }}>
-        <span>HTTP video (scrcpy)</span>
-        <span>transport: HTTPS fetch | status: {status}</span>
+        <span>Guacamole-style HTTP tunnel</span>
+        <span>transport: HTTPS fetch | target: {GUACAMOLE_HTTP_TARGET_FPS}fps | status: {status}</span>
       </div>
       <div ref={containerRef} style={{ flex: 1, position: "relative", background: "#000" }} tabIndex={0} role="application" aria-label="Android emulator scrcpy video" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={clearGesture} onLostPointerCapture={clearGesture} onKeyDown={handleKeyDown}>
         <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setHasVideo(true)} onPlaying={() => setHasVideo(true)} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", background: "#000" }} />
         {!hasVideo && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
             <div style={{ maxWidth: 420, padding: 16, background: "rgba(10, 12, 18, 0.9)", border: "1px solid #3b465b", borderRadius: 14, fontSize: 13, lineHeight: 1.5 }}>
-              <strong>Scrcpy HTTP video</strong>
+              <strong>Guacamole-style HTTP video</strong>
               <div style={{ marginTop: 8 }}>{detail}</div>
-              <div style={{ marginTop: 8, color: "#a8b3c7" }}>No WebRTC, TURN, ICE, or WebSocket is used for this video path.</div>
+              <div style={{ marginTop: 8, color: "#a8b3c7" }}>No WebRTC relay or ICE negotiation is used for this video path.</div>
             </div>
           </div>
         )}
@@ -2157,7 +2158,7 @@ function App() {
   const [logPaneHeight, setLogPaneHeight] = useState(260);
   const lastSeenLogRef = useRef(null);
   const [leftPanePercent, setLeftPanePercent] = useState(35);
-  const [streamMode, setStreamMode] = useState("native-webrtc");
+  const [streamMode, setStreamMode] = useState("scrcpy-http");
   const [webrtcNotice, setWebrtcNotice] = useState("");
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const [deviceInfo, setDeviceInfo] = useState(null);
@@ -2178,7 +2179,7 @@ function App() {
   });
   const [nativeWebrtcKey, setNativeWebrtcKey] = useState(0);
   const [nativeRetryCount, setNativeRetryCount] = useState(0);
-  const [nativeIceTransportMode, setNativeIceTransportMode] = useState("relay");
+  const [nativeIceTransportMode, setNativeIceTransportMode] = useState("all");
   const [emulatorToken, setEmulatorToken] = useState(null);
   const emulatorTokenFetchedRef = useRef(false);
   const webrtcFailureRef = useRef(false);
@@ -2211,7 +2212,11 @@ function App() {
   const activeVideoStats =
     streamMode === "custom-webrtc" ? webrtcDiagnostics?.videoStats || null : nativeVideoStats || null;
   const activeTransport =
-    streamMode === "custom-webrtc" ? "custom-bridge-webrtc" : "native-emulator-webrtc";
+    streamMode === "scrcpy-http"
+      ? "scrcpy-http"
+      : streamMode === "custom-webrtc"
+        ? "custom-bridge-webrtc"
+        : "native-emulator-webrtc";
   const nativeRuntimeEventSummary =
     nativeDiagnostics.runtimeEvents.length > 0
       ? nativeDiagnostics.runtimeEvents.map(formatRuntimeEvent).join("\n")
@@ -2672,50 +2677,9 @@ function App() {
           const fallbackSummary = summarizeIceServers(fallbackIceServers);
           const shouldPreferRelay = startSummary.hasTurn && nativeIceTransportMode === "relay";
 
-        // When the emulator advertises no ICE servers at all the browser has no
-        // way to gather reflexive candidates, so the peer connection stays stuck
-        // on loopback/private host candidates. Prefer bridge-provided fallback
-        // ICE servers (which can include TURN credentials); otherwise inject a
-        // public STUN server so the browser can at least get srflx candidates.
-          const fallbackWithStun =
-            fallbackSummary.hasTurn && !fallbackSummary.hasStun
-              ? [...fallbackIceServers, { urls: FALLBACK_STUN_URL }]
-              : fallbackIceServers;
-          const rewrittenBrowserIceServers =
-            !startMissingIce &&
-            startSummary.hasTurn &&
-            fallbackSummary.hasTurn &&
-            !haveSameIceServerUrls(startIceServers, fallbackWithStun)
-              ? fallbackWithStun
-              : null;
-          const injectedIceServers =
-            startMissingIce
-              ? fallbackSummary.hasTurn || fallbackSummary.hasStun
-                ? fallbackWithStun
-                : [{ urls: FALLBACK_STUN_URL }]
-              : null;
-
-          const baseSignal =
-            rewrittenBrowserIceServers
-              ? {
-                  ...signal,
-                  start: {
-                    ...signal.start,
-                    iceServers: rewrittenBrowserIceServers,
-                  },
-                }
-              : injectedIceServers
-              ? {
-                  ...signal,
-                  start: {
-                    ...signal.start,
-                    iceServers: [
-                      ...startIceServers,
-                      ...injectedIceServers,
-                    ],
-                  },
-                }
-              : signal;
+          const rewrittenBrowserIceServers = null;
+          const injectedIceServers = null;
+          const baseSignal = signal;
 
           // When the emulator advertises relay-only transport but we are in a
           // mixed-ICE retry (nativeIceTransportMode === "all"), the emulator's
@@ -2761,25 +2725,11 @@ function App() {
             ...previous,
             startIceServers: startSummary,
           }));
-          if (injectedIceServers) {
-            if (fallbackSummary.hasTurn || fallbackSummary.hasStun) {
-              pushNativeEvent("Injected bridge ICE servers because emulator advertised no ICE servers", {
-                iceServers: summarizeIceServers(fallbackWithStun).count,
-                hasTurn: fallbackSummary.hasTurn,
-                hasStun: summarizeIceServers(fallbackWithStun).hasStun,
-              });
-            } else {
-              pushNativeEvent("Injected public STUN server because emulator advertised no ICE servers");
-            }
-          }
-          if (rewrittenBrowserIceServers) {
-            pushNativeEvent(
-              "Rewriting native browser ICE servers to the bridge-advertised public TURN route while the emulator keeps its internal TURN route",
-              {
-                emulatorTurnUrl: startSummary.urls[0] || null,
-                browserTurnUrl: fallbackSummary.urls[0] || null,
-              }
-            );
+          if (startMissingIce || fallbackSummary.count > 0) {
+            pushNativeEvent("Native WebRTC left on emulator-provided local ICE configuration", {
+              startMissingIce,
+              ignoredFallbackIceServers: fallbackSummary.count,
+            });
           }
           if (patchedSignal !== baseSignal) {
             if (shouldPreferRelay) {
@@ -3265,6 +3215,16 @@ function App() {
 
   async function sendKey(name) {
     try {
+      if (streamMode === "scrcpy-http") {
+        await callApi("/api/input-event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "key", key: name }),
+        });
+        setMessage(`Sent ${name} through Guacamole-style HTTP input`);
+        return;
+      }
+
       if (streamMode !== "custom-webrtc") {
         emuRef.current?.sendKey?.(name);
         return;
@@ -3390,7 +3350,7 @@ function App() {
     nativeFailureSignatureRef.current = null;
     nativeRootCauseRef.current = null;
     setNativeRetryCount(0);
-    setNativeIceTransportMode("relay");
+    setNativeIceTransportMode("all");
     if (nextMode === "native-webrtc") {
       setWebrtcNotice("");
       setEmuState("connecting");
@@ -3405,7 +3365,7 @@ function App() {
     } else if (nextMode === "scrcpy-http") {
       setWebrtcNotice("");
       setEmuState("connecting");
-      setMessage("Connecting to scrcpy HTTP video stream...");
+      setMessage("Connecting to Guacamole-style HTTP video tunnel...");
     } else {
       setWebrtcNotice("");
       setMessage("Switching to PNG preview mode...");
@@ -3645,10 +3605,10 @@ function App() {
                   : streamMode === "native-webrtc"
                     ? `${nativeWebrtcOverlay.statusLine}${nativeWebrtcOverlay.reasonLine ? ` | ${nativeWebrtcOverlay.reasonLine}` : ""}${nativeWebrtcOverlay.verificationLine ? ` | ${nativeWebrtcOverlay.verificationLine}` : ""}`
                     : streamMode === "scrcpy-http"
-                      ? "scrcpy fragmented MP4 over ordinary HTTPS fetch"
+                      ? `Guacamole-style scrcpy MP4 over ordinary HTTPS fetch (${GUACAMOLE_HTTP_TARGET_FPS}fps target)`
                       : "switch to a video mode to compare"}
               </div>
-              <div>Native WebRTC stays front and center here while we debug the emulator's built-in RTC path.</div>
+              <div>HTTP tunneling stays front and center here for corporate-firewall-friendly emulator access.</div>
             </div>
           </div>
 
@@ -3838,7 +3798,7 @@ function App() {
                 </div>
                 <div>
                   ICE transport mode:{" "}
-                  {nativeIceTransportMode === "relay" ? "relay-only (TURN preferred)" : "mixed candidates (relay + direct)"}
+                  {nativeIceTransportMode === "relay" ? "relay-only" : "mixed candidates (local + direct)"}
                 </div>
                 {nativeMissingTurnNotice ? <div>{nativeMissingTurnNotice}</div> : null}
                 <div>

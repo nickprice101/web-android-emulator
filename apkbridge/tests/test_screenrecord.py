@@ -98,18 +98,18 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             return FakeProc(stdout=None, stderr=None, polls=[None, 0])
 
         client = app.test_client()
-        with patch("app.tempfile.gettempdir", return_value="/tmp"), patch("app.os.mkfifo"), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch(
+        with patch("app.tempfile.gettempdir", return_value="/tmp"), patch("app.os.mkfifo", create=True), patch("app.os.O_NONBLOCK", 0, create=True), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch(
             "app.os.fdopen", return_value=io.BytesIO()
         ), patch("app.subprocess.Popen", side_effect=fake_popen):
-            response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=30", buffered=False)
+            response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
             first_chunk = next(response.response)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(first_chunk, b"ftyp")
         self.assertIn("video/mp4", response.mimetype)
         self.assertEqual(response.headers.get("X-Accel-Buffering"), "no")
-        self.assertTrue(any(call[0] == "scrcpy" and "--no-display" in call and "--record-format" in call and "mkv" in call for call in popen_calls))
-        self.assertTrue(any(call[0] == "ffmpeg" and "empty_moov+default_base_moof+frag_keyframe" in call for call in popen_calls))
+        self.assertTrue(any(call[0] == "scrcpy" and "--no-display" in call and "--max-fps" in call and "24" in call and "--record-format" in call and "mkv" in call for call in popen_calls))
+        self.assertTrue(any(call[0] == "ffmpeg" and "empty_moov+default_base_moof+separate_moof+omit_tfhd_offset" in call and "-flush_packets" in call for call in popen_calls))
 
 
 if __name__ == "__main__":

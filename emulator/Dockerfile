@@ -129,13 +129,11 @@ RUN set -eux; \
   ln -s "${_avd_ini}" "${ANDROID_SDK_ROOT}/avd/Pixel2.ini"; \
   echo "Canonicalized Pixel2 AVD metadata and compatibility links for /Pixel2.avd and ${ANDROID_SDK_ROOT}/avd/Pixel2.avd"
 
-COPY start-emulator-with-turn.sh /usr/local/bin/start-emulator-with-turn.sh
+COPY start-emulator.sh /usr/local/bin/start-emulator.sh
 COPY healthcheck-adb-bridge.sh /usr/local/bin/healthcheck-adb-bridge.sh
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    openssl \
-    jq \
     python3 \
     libxkbfile1 \
     socat \
@@ -143,8 +141,8 @@ RUN apt-get update \
     iproute2 \
     nftables \
   && rm -rf /var/lib/apt/lists/*
-RUN chmod +x /usr/local/bin/start-emulator-with-turn.sh /usr/local/bin/healthcheck-adb-bridge.sh
+RUN chmod +x /usr/local/bin/start-emulator.sh /usr/local/bin/healthcheck-adb-bridge.sh
 
 HEALTHCHECK --interval=30s --timeout=30s --start-period=180s --retries=10 CMD ["/usr/local/bin/healthcheck-adb-bridge.sh"]
 
-ENTRYPOINT ["/usr/local/bin/start-emulator-with-turn.sh"]
+ENTRYPOINT ["/usr/local/bin/start-emulator.sh"]

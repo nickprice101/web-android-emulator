@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+import errno
 import os
 import queue
 import shlex
@@ -10,6 +12,11 @@ import time
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, stream_with_context
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows unit-test fallback
+    fcntl = None
 
 app = Flask(__name__)
 
@@ -26,6 +33,10 @@ SCRCPY_MAX_FPS = max(1, int(os.environ.get("SCRCPY_MAX_FPS", "24")))
 SCRCPY_FFMPEG_FRAGMENT_US = max(50000, int(os.environ.get("SCRCPY_FFMPEG_FRAGMENT_US", "125000")))
 SCRCPY_STARTUP_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("SCRCPY_STARTUP_TIMEOUT_SECONDS", "20")))
 SCRCPY_LOG_CAPTURE_LIMIT = max(4096, int(os.environ.get("SCRCPY_LOG_CAPTURE_LIMIT", "65536")))
+SCRCPY_PORT_RANGE = os.environ.get("SCRCPY_PORT_RANGE", "27183:27283").strip() or "27183:27283"
+SCRCPY_STREAM_LOCK_PATH = Path(
+    os.environ.get("SCRCPY_STREAM_LOCK_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-scrcpy-video.lock"))
+)
 KEY_MAP = {"HOME": "3", "BACK": "4", "RECENTS": "187", "POWER": "26", "MENU": "82"}
 KEY_NAME_MAP = {
     "GoHome": KEY_MAP["HOME"],
@@ -43,6 +54,7 @@ KEY_NAME_MAP = {
     "Backspace": "67",
     "Delete": "112",
 }
+SCRCPY_STREAM_THREAD_LOCK = threading.Lock()
 
 
 def run(cmd, timeout=90):
@@ -86,6 +98,58 @@ def adb_popen(*args):
         stderr=subprocess.PIPE,
         bufsize=0,
     )
+
+
+@contextmanager
+def scrcpy_stream_lock():
+    """Hold one live scrcpy capture across all gunicorn workers."""
+    if fcntl is None:
+        acquired = SCRCPY_STREAM_THREAD_LOCK.acquire(blocking=False)
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                SCRCPY_STREAM_THREAD_LOCK.release()
+        return
+
+    SCRCPY_STREAM_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = SCRCPY_STREAM_LOCK_PATH.open("a+b")
+    acquired = False
+    try:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquired = True
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                raise
+        yield acquired
+    finally:
+        if acquired:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        lock_file.close()
+
+
+def fragmented_mp4_output_args():
+    return [
+        "-an",
+        "-c:v",
+        "copy",
+        "-flush_packets",
+        "1",
+        "-muxdelay",
+        "0",
+        "-muxpreload",
+        "0",
+        "-movflags",
+        "empty_moov+default_base_moof+separate_moof+omit_tfhd_offset",
+        "-frag_duration",
+        str(SCRCPY_FFMPEG_FRAGMENT_US),
+        "-min_frag_duration",
+        str(SCRCPY_FFMPEG_FRAGMENT_US),
+        "-f",
+        "mp4",
+        "pipe:1",
+    ]
 
 
 def safe_workspace_path(rel):
@@ -277,7 +341,7 @@ def infer_installed_package(previous_packages):
 
 
 def video_prerequisite_error():
-    missing = [tool for tool in ("adb", "scrcpy", "ffmpeg") if not shutil.which(tool)]
+    missing = [tool for tool in ("adb", "ffmpeg") if not shutil.which(tool)]
     if missing:
         return f"Missing required video tool(s): {', '.join(missing)}", 500
 
@@ -449,7 +513,7 @@ def scrcpy_video():
         message, status_code = prerequisite_error
         return jsonify({"ok": False, "error": message}), status_code
 
-    def generate():
+    def generate_scrcpy_mp4():
         fifo_path = Path(tempfile.gettempdir()) / f"scrcpy-video-{uuid.uuid4().hex}.mkv"
         scrcpy_proc = None
         ffmpeg_proc = None
@@ -493,140 +557,271 @@ def scrcpy_video():
             except Exception as exc:
                 stream_queue.put((f"{stream_name}:error", str(exc).encode("utf-8", errors="replace")))
 
-        try:
-            os.mkfifo(fifo_path, 0o600)
-            # Keep a write handle open while ffmpeg starts. Opening the FIFO read-only
-            # before scrcpy attaches can make ffmpeg observe immediate EOF, which
-            # yields HTTP headers but no body bytes in the browser diagnostics.
-            fifo_reader_fd = os.open(fifo_path, os.O_RDWR | os.O_NONBLOCK)
-            os.set_blocking(fifo_reader_fd, True)
-            fifo_reader = os.fdopen(fifo_reader_fd, "rb", buffering=0)
-            scrcpy_cmd = [
-                "scrcpy",
-                "--serial",
-                ADB_TARGET,
-                "--no-window",
-                "--no-control",
-                "--no-audio",
-                "--video-bit-rate",
-                str(bit_rate_value),
-                "--max-size",
-                str(max_size_value),
-                "--max-fps",
-                str(max_fps_value),
-                "--record",
-                str(fifo_path),
-                "--record-format",
-                "mkv",
-            ]
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "warning",
-                "-fflags",
-                "nobuffer",
-                "-flags",
-                "low_delay",
-                "-probesize",
-                "32",
-                "-analyzeduration",
-                "0",
-                "-avioflags",
-                "direct",
-                "-i",
-                "pipe:0",
-                "-an",
-                "-c:v",
-                "copy",
-                "-flush_packets",
-                "1",
-                "-muxdelay",
-                "0",
-                "-muxpreload",
-                "0",
-                "-movflags",
-                "empty_moov+default_base_moof+separate_moof+omit_tfhd_offset",
-                "-frag_duration",
-                str(SCRCPY_FFMPEG_FRAGMENT_US),
-                "-min_frag_duration",
-                str(SCRCPY_FFMPEG_FRAGMENT_US),
-                "-f",
-                "mp4",
-                "pipe:1",
-            ]
-            ffmpeg_proc = subprocess.Popen(
-                ffmpeg_cmd,
-                stdin=fifo_reader,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0,
-            )
-            scrcpy_proc = subprocess.Popen(
-                scrcpy_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                stdin=subprocess.DEVNULL,
-                bufsize=0,
-            )
+        with scrcpy_stream_lock() as lock_acquired:
+            if not lock_acquired:
+                fail_stream("another scrcpy video stream is already active")
+            if not shutil.which("scrcpy"):
+                fail_stream("scrcpy binary is not available")
 
-            threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stdout, "ffmpeg-stdout"), daemon=True).start()
-            threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stderr, "ffmpeg-stderr"), daemon=True).start()
-            threading.Thread(target=pump_pipe, args=(scrcpy_proc.stderr, "scrcpy-stderr"), daemon=True).start()
+            try:
+                os.mkfifo(fifo_path, 0o600)
+                # Keep a write handle open while ffmpeg starts. Opening the FIFO
+                # read-only before scrcpy attaches can make ffmpeg observe
+                # immediate EOF, which yields HTTP headers but no body bytes.
+                fifo_reader_fd = os.open(fifo_path, os.O_RDWR | os.O_NONBLOCK)
+                os.set_blocking(fifo_reader_fd, True)
+                fifo_reader = os.fdopen(fifo_reader_fd, "rb", buffering=0)
+                scrcpy_cmd = [
+                    "scrcpy",
+                    "--serial",
+                    ADB_TARGET,
+                    "--no-window",
+                    "--no-control",
+                    "--no-audio",
+                    "--port",
+                    SCRCPY_PORT_RANGE,
+                    "--video-bit-rate",
+                    str(bit_rate_value),
+                    "--max-size",
+                    str(max_size_value),
+                    "--max-fps",
+                    str(max_fps_value),
+                    "--record",
+                    str(fifo_path),
+                    "--record-format",
+                    "mkv",
+                ]
+                ffmpeg_cmd = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "warning",
+                    "-fflags",
+                    "nobuffer",
+                    "-flags",
+                    "low_delay",
+                    "-probesize",
+                    "32",
+                    "-analyzeduration",
+                    "0",
+                    "-avioflags",
+                    "direct",
+                    "-i",
+                    "pipe:0",
+                    *fragmented_mp4_output_args(),
+                ]
+                ffmpeg_proc = subprocess.Popen(
+                    ffmpeg_cmd,
+                    stdin=fifo_reader,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
+                )
+                scrcpy_proc = subprocess.Popen(
+                    scrcpy_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    stdin=subprocess.DEVNULL,
+                    bufsize=0,
+                )
 
-            delivered = False
-            startup_deadline = time.monotonic() + SCRCPY_STARTUP_TIMEOUT_SECONDS
-            while True:
-                try:
-                    stream_name, chunk = stream_queue.get(timeout=0.25)
-                except queue.Empty:
-                    if ffmpeg_proc.poll() is not None:
-                        break
-                    if not delivered and scrcpy_proc.poll() is not None:
-                        drain_pending_stderr()
-                        fail_stream("scrcpy exited before producing video")
-                    if not delivered and time.monotonic() >= startup_deadline:
-                        drain_pending_stderr()
-                        fail_stream(f"timed out waiting {SCRCPY_STARTUP_TIMEOUT_SECONDS:g}s for scrcpy video")
-                    continue
+                threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stdout, "ffmpeg-stdout"), daemon=True).start()
+                threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stderr, "ffmpeg-stderr"), daemon=True).start()
+                threading.Thread(target=pump_pipe, args=(scrcpy_proc.stderr, "scrcpy-stderr"), daemon=True).start()
 
-                if stream_name == "ffmpeg-stdout":
-                    if not chunk:
+                delivered = False
+                startup_deadline = time.monotonic() + SCRCPY_STARTUP_TIMEOUT_SECONDS
+                while True:
+                    try:
+                        stream_name, chunk = stream_queue.get(timeout=0.25)
+                    except queue.Empty:
+                        if ffmpeg_proc.poll() is not None:
+                            break
                         if not delivered and scrcpy_proc.poll() is not None:
                             drain_pending_stderr()
                             fail_stream("scrcpy exited before producing video")
-                        break
-                    delivered = True
-                    yield chunk
+                        if not delivered and time.monotonic() >= startup_deadline:
+                            drain_pending_stderr()
+                            fail_stream(f"timed out waiting {SCRCPY_STARTUP_TIMEOUT_SECONDS:g}s for scrcpy video")
+                        continue
+
+                    if stream_name == "ffmpeg-stdout":
+                        if not chunk:
+                            if not delivered and scrcpy_proc.poll() is not None:
+                                drain_pending_stderr()
+                                fail_stream("scrcpy exited before producing video")
+                            break
+                        delivered = True
+                        yield chunk
+                        continue
+
+                    append_stderr(chunk)
+
+                if not delivered:
+                    fail_stream("scrcpy video stream ended before producing video")
+
+                stderr_text = collected_stderr()
+                if stderr_text:
+                    app.logger.warning(
+                        "scrcpy video stream ended: %s",
+                        stderr_text,
+                    )
+            finally:
+                for proc in (scrcpy_proc, ffmpeg_proc):
+                    if proc and proc.poll() is None:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                if fifo_reader:
+                    fifo_reader.close()
+                try:
+                    fifo_path.unlink()
+                except FileNotFoundError:
+                    pass
+
+    def generate_screenrecord_mp4(fallback_reason):
+        app.logger.warning("Using adb screenrecord MP4 fallback for /scrcpy-video: %s", fallback_reason)
+        consecutive_failures = 0
+
+        while consecutive_failures < SCREENRECORD_MAX_CONSECUTIVE_FAILURES:
+            screenrecord_proc = None
+            ffmpeg_proc = None
+            stream_queue = queue.Queue()
+            stderr_chunks = []
+
+            def append_stderr(chunk):
+                if not chunk:
+                    return
+                captured = sum(len(item) for item in stderr_chunks)
+                remaining = SCRCPY_LOG_CAPTURE_LIMIT - captured
+                if remaining > 0:
+                    stderr_chunks.append(chunk[:remaining])
+
+            def collected_stderr():
+                return b"".join(stderr_chunks).decode("utf-8", errors="replace").strip()
+
+            def pump_pipe(fileobj, stream_name, chunk_size=32 * 1024):
+                try:
+                    while fileobj:
+                        chunk = fileobj.read(chunk_size)
+                        stream_queue.put((stream_name, chunk or b""))
+                        if not chunk:
+                            break
+                except Exception as exc:
+                    stream_queue.put((f"{stream_name}:error", str(exc).encode("utf-8", errors="replace")))
+
+            try:
+                screenrecord_proc = adb_popen(
+                    "exec-out",
+                    "screenrecord",
+                    "--output-format=h264",
+                    "--bit-rate",
+                    str(bit_rate_value),
+                    "--time-limit",
+                    str(SCREENRECORD_TIME_LIMIT),
+                    "-",
+                )
+                ffmpeg_cmd = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "warning",
+                    "-fflags",
+                    "+genpts+nobuffer",
+                    "-flags",
+                    "low_delay",
+                    "-probesize",
+                    "32",
+                    "-analyzeduration",
+                    "0",
+                    "-f",
+                    "h264",
+                    "-i",
+                    "pipe:0",
+                    *fragmented_mp4_output_args(),
+                ]
+                ffmpeg_proc = subprocess.Popen(
+                    ffmpeg_cmd,
+                    stdin=screenrecord_proc.stdout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
+                )
+                if screenrecord_proc.stdout:
+                    screenrecord_proc.stdout.close()
+
+                open_streams = 0
+                for fileobj, stream_name in (
+                    (ffmpeg_proc.stdout, "ffmpeg-stdout"),
+                    (ffmpeg_proc.stderr, "ffmpeg-stderr"),
+                    (screenrecord_proc.stderr, "screenrecord-stderr"),
+                ):
+                    if fileobj:
+                        open_streams += 1
+                        threading.Thread(target=pump_pipe, args=(fileobj, stream_name), daemon=True).start()
+
+                delivered = False
+                startup_deadline = time.monotonic() + SCRCPY_STARTUP_TIMEOUT_SECONDS
+                while open_streams > 0:
+                    try:
+                        stream_name, chunk = stream_queue.get(timeout=0.25)
+                    except queue.Empty:
+                        if ffmpeg_proc.poll() is not None:
+                            break
+                        if not delivered and time.monotonic() >= startup_deadline:
+                            break
+                        continue
+
+                    if not chunk:
+                        open_streams -= 1
+                        continue
+
+                    if stream_name == "ffmpeg-stdout":
+                        delivered = True
+                        consecutive_failures = 0
+                        yield chunk
+                    else:
+                        append_stderr(chunk)
+
+                if delivered:
                     continue
 
-                append_stderr(chunk)
-
-            if not delivered:
-                fail_stream("scrcpy video stream ended before producing video")
-
-            stderr_text = collected_stderr()
-            if stderr_text:
+                consecutive_failures += 1
+                stderr_text = collected_stderr()
                 app.logger.warning(
-                    "scrcpy video stream ended: %s",
-                    stderr_text,
+                    "adb screenrecord MP4 fallback produced no video (%s/%s): %s",
+                    consecutive_failures,
+                    SCREENRECORD_MAX_CONSECUTIVE_FAILURES,
+                    stderr_text or "no stderr",
                 )
-        finally:
-            for proc in (scrcpy_proc, ffmpeg_proc):
-                if proc and proc.poll() is None:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-            if fifo_reader:
-                fifo_reader.close()
-            try:
-                fifo_path.unlink()
-            except FileNotFoundError:
-                pass
+                if consecutive_failures < SCREENRECORD_MAX_CONSECUTIVE_FAILURES:
+                    time.sleep(SCREENRECORD_RETRY_DELAY_SECONDS)
+            finally:
+                for proc in (screenrecord_proc, ffmpeg_proc):
+                    if proc and proc.poll() is None:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                if screenrecord_proc and screenrecord_proc.stderr:
+                    screenrecord_proc.stderr.close()
+                if ffmpeg_proc and ffmpeg_proc.stdout:
+                    ffmpeg_proc.stdout.close()
+                if ffmpeg_proc and ffmpeg_proc.stderr:
+                    ffmpeg_proc.stderr.close()
 
-    stream = generate()
+        raise RuntimeError(f"scrcpy failed and adb screenrecord fallback produced no video: {fallback_reason}")
+
+    def generate_with_fallback():
+        try:
+            yield from generate_scrcpy_mp4()
+        except RuntimeError as exc:
+            yield from generate_screenrecord_mp4(str(exc))
+
+    stream = generate_with_fallback()
     try:
         first_chunk = next(stream)
     except StopIteration:

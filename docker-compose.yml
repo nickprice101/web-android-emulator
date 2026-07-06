@@ -17,11 +17,8 @@ services:
     environment:
       ADBKEY: |
         PLACEHOLDER_ADB_KEY
-      EMULATOR_PARAMS: "-no-audio -grpc 8554 -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
-    volumes:
-      - emu-grpc-token:/run/emu-token
+      EMULATOR_PARAMS: "-no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
     expose:
-      - "8554"
       - "5555"
     ports:
       - "15555:5555"
@@ -41,8 +38,11 @@ services:
     build:
       context: ./frontend
     image: google-emu-frontend:latest
-    expose:
-      - "80"
+    ports:
+      - "18080:80"
+    depends_on:
+      apkbridge:
+        condition: service_healthy
     restart: unless-stopped
     dns:
       - 1.1.1.1
@@ -92,69 +92,6 @@ services:
         aliases:
           - apkbridge
 
-  bridge-webrtc:
-    container_name: google-emu-bridge-webrtc
-    build:
-      context: ./bridge-webrtc
-      args:
-        WRTC_FORK_REPO: "${WRTC_FORK_REPO:-https://github.com/nickprice101/node-webrtc.git}"
-        WRTC_FORK_REF: "${WRTC_FORK_REF:-00ce1c2340477568d9ca76fd54659b666a69d767}"
-    image: google-emu-bridge-webrtc:latest
-    environment:
-      PORT: "8090"
-      CAPTURE_MODE: "${CAPTURE_MODE:-native-rtc}"
-      CAPTURE_FPS: "${CAPTURE_FPS:-24}"
-      EMULATOR_GRPC_WEB_URL: "http://envoy:8080"
-      APKBRIDGE_BASE_URL: "http://apkbridge:5000"
-      EMULATOR_TOKEN_PATH: "/run/emu-token/emu-grpc-token"
-    volumes:
-      - emu-grpc-token:/run/emu-token
-    expose:
-      - "8090"
-    depends_on:
-      emulator:
-        condition: service_healthy
-      envoy:
-        condition: service_started
-      apkbridge:
-        condition: service_healthy
-    restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
-    networks:
-      google-emu:
-        aliases:
-          - bridge-webrtc
-
-  envoy:
-    container_name: google-emu-envoy
-    image: envoyproxy/envoy:v1.31-latest
-    depends_on:
-      emulator:
-        condition: service_healthy
-      frontend:
-        condition: service_started
-      apkbridge:
-        condition: service_healthy
-    ports:
-      - "18080:8080"
-    volumes:
-      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
-    restart: unless-stopped
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
-    networks:
-      google-emu:
-        aliases:
-          - envoy
-
 networks:
   google-emu:
     driver: bridge
-
-volumes:
-  emu-grpc-token:

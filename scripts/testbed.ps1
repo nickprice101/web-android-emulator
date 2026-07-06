@@ -28,19 +28,6 @@ $pythonCommand = Get-TestbedPythonCommand
 Write-Host "[testbed] preparing Node dependencies"
 npm --prefix frontend ci
 Assert-LastExitCode "npm --prefix frontend ci"
-npm --prefix bridge-webrtc ci
-Assert-LastExitCode "npm --prefix bridge-webrtc ci"
-
-$bridgeWrtcBuildFork = ""
-if ($null -ne $env:BRIDGE_WRTC_BUILD_FORK) {
-  $bridgeWrtcBuildFork = $env:BRIDGE_WRTC_BUILD_FORK.ToLowerInvariant()
-}
-$buildFork = @("1", "true", "yes") -contains $bridgeWrtcBuildFork
-if ($buildFork) {
-  Write-Host "[testbed] building forked @roamhq/wrtc binary"
-  npm --prefix bridge-webrtc run build:wrtc-fork
-  Assert-LastExitCode "npm --prefix bridge-webrtc run build:wrtc-fork"
-}
 
 Write-Host "[testbed] preparing Python virtual environment"
 $venvReady = $false
@@ -72,10 +59,6 @@ if (-not $venvReady) {
 Write-Host "[testbed] running apkbridge unit tests"
 python -m unittest discover -s apkbridge/tests -v
 Assert-LastExitCode "python -m unittest discover -s apkbridge/tests -v"
-
-Write-Host "[testbed] running bridge-webrtc unit tests"
-node --test --test-force-exit bridge-webrtc/test/*.test.mjs
-Assert-LastExitCode "node --test --test-force-exit bridge-webrtc/test/*.test.mjs"
 
 Write-Host "[testbed] running Guacamole-style HTTP configuration checks"
 node scripts/test-guacamole-http.mjs

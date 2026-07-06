@@ -3,15 +3,14 @@
 #
 # Builds the emulator image from the local Dockerfile, runs it with minimal
 # privileges, and verifies that:
-#   1. The emulator gRPC server starts and binds port 8554.
-#   2. The emulator ADB bridge is reachable on port 5555.
-#   3. A non-loopback ADB client path can connect to the forwarded bridge target
+#   1. The emulator ADB bridge is reachable on port 5555.
+#   2. A non-loopback ADB client path can connect to the forwarded bridge target
 #      on <container-ip>:5555 and report a usable adb transport.
-#   4. A sibling-container adb client can also connect to that forwarded bridge
+#   3. A sibling-container adb client can also connect to that forwarded bridge
 #      target over Docker bridge networking.
-#   5. The Android guest can optionally be probed over ADB without blocking
+#   4. The Android guest can optionally be probed over ADB without blocking
 #      startup classification when guest boot is merely slow.
-#   6. The container remains running and becomes healthy after validation.
+#   5. The container remains running and becomes healthy after validation.
 #
 # Usage:
 #   bash scripts/test-emulator-startup.sh
@@ -26,7 +25,6 @@
 #   EMULATOR_SYSTEM_IMAGE    Android system image package to install.
 #   EMULATOR_PLATFORM        Android platform package to install.
 #   EXPECTED_GUEST_API       Expected Android guest API level.
-#   GRPC_READY_TIMEOUT       Seconds to wait for gRPC port 8554.
 #   ADB_READY_TIMEOUT        Seconds to wait for the external ADB bridge target
 #                            to report a usable adb transport.
 #   SIBLING_ADB_READY_TIMEOUT
@@ -57,7 +55,6 @@ EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_
 EMULATOR_PLATFORM="${EMULATOR_PLATFORM:-platforms;android-34}"
 EXPECTED_GUEST_API="${EXPECTED_GUEST_API:-34}"
 EXPECTED_RADIO_OVERRIDE_MODE="${EXPECTED_RADIO_OVERRIDE_MODE:-disabled}"
-GRPC_READY_TIMEOUT="${GRPC_READY_TIMEOUT:-300}"
 ADB_READY_TIMEOUT="${ADB_READY_TIMEOUT:-240}"
 SIBLING_ADB_READY_TIMEOUT="${SIBLING_ADB_READY_TIMEOUT:-90}"
 REQUIRE_ADB_BRIDGE="${REQUIRE_ADB_BRIDGE:-1}"
@@ -93,24 +90,6 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.settimeout(2)
 try:
     sock.connect((host, port))
-except OSError:
-    sys.exit(1)
-finally:
-    sock.close()
-PY
-}
-
-probe_local_tcp_port() {
-  local port="$1"
-  timeout 15 docker exec "${CONTAINER_NAME}" python3 - "$port" <<'PY' >/dev/null 2>&1
-import socket
-import sys
-
-port = int(sys.argv[1])
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.settimeout(2)
-try:
-    sock.connect(("127.0.0.1", port))
 except OSError:
     sys.exit(1)
 finally:
@@ -232,30 +211,9 @@ docker run -d \
   --privileged \
   --device /dev/kvm:/dev/kvm \
   --shm-size 2g \
-  -e EMULATOR_PARAMS="-no-audio -grpc 8554 -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save" \
+  -e EMULATOR_PARAMS="-no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save" \
   -e ADBKEY="PLACEHOLDER_ADB_KEY" \
   "${EMULATOR_IMAGE_TAG}" 2>&1 | head -1
-
-log "Waiting up to ${GRPC_READY_TIMEOUT}s for emulator gRPC port 8554..."
-grpc_deadline=$(( $(date +%s) + GRPC_READY_TIMEOUT ))
-grpc_ok=0
-while [ "$(date +%s)" -lt "${grpc_deadline}" ]; do
-  if probe_local_tcp_port 8554; then
-    grpc_ok=1
-    break
-  fi
-  if ! docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" 2>/dev/null | grep -q true; then
-    fail "Container exited before gRPC port became available"
-  fi
-  sleep 5
-done
-
-if [ "${grpc_ok}" -ne 1 ]; then
-  log "=== Container logs ==="
-  docker logs "${CONTAINER_NAME}" 2>&1 | tail -50
-  fail "Timed out waiting for emulator gRPC port 8554 after ${GRPC_READY_TIMEOUT}s"
-fi
-log "gRPC port 8554 is accessible."
 
 CONTAINER_IP="$(container_ipv4)"
 if [ -z "${CONTAINER_IP}" ]; then
@@ -494,7 +452,6 @@ fi
 
 log ""
 log "Emulator startup test PASSED"
-log "  - gRPC port 8554: reachable"
 log "  - ADB bridge probe mode: $( [ "${REQUIRE_ADB_BRIDGE}" = "1" ] && printf '%s' 'strict' || printf '%s' 'passive' )"
 log "  - Forwarded adb bridge target ${CONTAINER_IP}:5555: $( [ "${adb_ok}" -eq 1 ] && printf '%s' 'device' || printf '%s' 'pending' )"
 log "  - Sibling-container adb bridge ${CONTAINER_IP}:5555: $( [ "${sibling_adb_ok}" -eq 1 ] && printf '%s' 'device' || printf '%s' 'pending' )"

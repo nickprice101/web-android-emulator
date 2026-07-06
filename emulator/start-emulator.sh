@@ -119,9 +119,9 @@ append_param_if_missing() {
   esac
 }
 
-# Keep emulator rendering stable for native WebRTC production in headless
-# container deployments. These flags are additive and can still be overridden
-# by supplying explicit values in EMULATOR_PARAMS.
+# Keep emulator rendering stable for headless HTTP video capture in container
+# deployments. These flags are additive and can still be overridden by
+# supplying explicit values in EMULATOR_PARAMS.
 append_param_if_missing "-gpu swiftshader_indirect"
 append_param_if_missing "-no-boot-anim"
 append_param_if_missing "-camera-back none"
@@ -136,7 +136,7 @@ append_param_if_missing "-no-sim"
 # environments. When the emulator cannot connect to the PulseAudio server it
 # logs "Could not init 'pa' audio driver" and may stall during audio
 # subsystem initialization, delaying port binding. Disable audio by default
-# since it is not needed for ADB/WebRTC emulator use.
+# since it is not needed for ADB/HTTP emulator use.
 append_param_if_missing "-no-audio"
 export EMULATOR_PARAMS="${EMULATOR_PARAMS_VALUE}"
 
@@ -408,7 +408,6 @@ supports_direct_radio_override() {
 
 launch_direct_emulator() {
   _ports="${EMULATOR_PORTS:-5554,5555}"
-  _grpc_port="${EMULATOR_GRPC_PORT:-8554}"
   _runtime_dir="${EMULATOR_RUNTIME_DIR:-/tmp/android-unknown}"
   _kernel_log="${_runtime_dir}/kernel.log"
   _logcat_log="${_runtime_dir}/logcat.log"
@@ -428,7 +427,6 @@ launch_direct_emulator() {
     "${DIRECT_EMULATOR_BIN}" \
     -avd Pixel2 \
     -ports "${_ports}" \
-    -grpc "${_grpc_port}" \
     -no-window \
     -skip-adb-auth \
     -shell-serial "file:${_kernel_log}" \
@@ -452,7 +450,7 @@ launch_direct_emulator() {
 
   log "Using direct emulator mode; legacy launcher bypassed."
   log "Using direct emulator launch: ${DIRECT_EMULATOR_BIN}"
-  log "Direct emulator ports: ${_ports} (grpc=${_grpc_port})"
+  log "Direct emulator ports: ${_ports}"
   if [ "${_radio_override_applied}" -eq 1 ]; then
     log "Direct emulator radio override: ${EMULATOR_RADIO_DEVICE}"
   else
@@ -486,38 +484,6 @@ if [ "${EMULATOR_LAUNCH_MODE}" = "legacy" ]; then
   fi
 
   log "Using emulator launcher: ${LAUNCHER_PATH}"
-fi
-
-# Copy the emulator's gRPC JWT token to the shared volume so that the
-# bridge-webrtc service can authenticate its gRPC-Web requests.
-# The watcher runs in the background so that exec below can still replace
-# this shell process with the final emulator process.
-TOKEN_WATCHER_MODE="${EMULATOR_TOKEN_WATCHER:-auto}"
-if [ "${TOKEN_WATCHER_MODE}" = "auto" ]; then
-  if [ "${EMULATOR_LAUNCH_MODE}" = "direct" ] || [ "${LAUNCHER_PATH}" = "/android/sdk/launch-emulator.sh" ]; then
-    TOKEN_WATCHER_MODE="enabled"
-  else
-    TOKEN_WATCHER_MODE="disabled"
-  fi
-fi
-
-if [ "${TOKEN_WATCHER_MODE}" = "enabled" ]; then
-  TOKEN_DST_DIR="/run/emu-token"
-  (
-    mkdir -p "${TOKEN_DST_DIR}"
-    while true; do
-      TOKEN_SRC=$(find /root/.android/avd/ /android/avd/ /root/.config/emulator/ -name "emu-grpc-token" 2>/dev/null | head -1)
-      if [ -n "${TOKEN_SRC}" ] && [ -f "${TOKEN_SRC}" ]; then
-        if ! cmp -s "${TOKEN_SRC}" "${TOKEN_DST_DIR}/emu-grpc-token" 2>/dev/null; then
-          cp "${TOKEN_SRC}" "${TOKEN_DST_DIR}/emu-grpc-token"
-          echo "[token-watcher] copied token from ${TOKEN_SRC}"
-        fi
-      fi
-      sleep 2
-    done
-  ) &
-else
-  log "Token watcher disabled for launcher ${LAUNCHER_PATH}"
 fi
 
 # Some emulator versions add iptables or nftables DROP rules for the ADB port

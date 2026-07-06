@@ -22,6 +22,20 @@ def make_python_proc(code):
     )
 
 
+class InstallAbiTests(unittest.TestCase):
+    def test_adb_install_args_include_configured_arm64_abi(self):
+        with patch.object(app_module, "ADB_INSTALL_ABI", "arm64-v8a"):
+            args = app_module.adb_install_args("/tmp/app.apk")
+
+        self.assertEqual(args, ["install", "-r", "-t", "-g", "--abi", "arm64-v8a", "/tmp/app.apk"])
+
+    def test_adb_install_args_can_use_android_default_abi_selection(self):
+        with patch.object(app_module, "ADB_INSTALL_ABI", "auto"):
+            args = app_module.adb_install_args("/tmp/app.apk")
+
+        self.assertEqual(args, ["install", "-r", "-t", "-g", "/tmp/app.apk"])
+
+
 class InputEventEndpointTests(unittest.TestCase):
     def test_input_event_accepts_tap_ratios_from_http_video_surface(self):
         adb_calls = []

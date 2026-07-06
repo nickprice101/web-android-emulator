@@ -2,8 +2,8 @@ ARG EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/30-google-x6
 FROM ${EMULATOR_IMAGE}
 ARG EMULATOR_IMAGE
 
-ARG EMULATOR_SYSTEM_IMAGE=system-images;android-35;google_apis;arm64-v8a
-ARG EMULATOR_PLATFORM=platforms;android-35
+ARG EMULATOR_SYSTEM_IMAGE=system-images;android-36;google_apis;x86_64
+ARG EMULATOR_PLATFORM=platforms;android-36
 ARG EMULATOR_PACKAGE_VERSION=36.5.10
 ARG EMULATOR_PACKAGE_URL=https://dl.google.com/android/repository/emulator-linux_x64-15081367.zip
 ARG EMULATOR_PACKAGE_SHA1=9f03296214df837c608d0d101e5e03ebcebb4343

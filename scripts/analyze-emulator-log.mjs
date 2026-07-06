@@ -12,15 +12,15 @@ const absolutePath = resolve(inputPath);
 const logText = readFileSync(absolutePath, "utf8");
 
 const findings = {
-  directWrapperPatchedApi34: /\[start-emulator\]\s+\[avd-patch\].*android-34\/google_apis\/x86_64\//.test(logText),
+  directWrapperPatchedSelectedImage: /\[start-emulator\]\s+\[avd-patch\].*system-images\/android-\d+\/google_apis\/[^/\s]+\//.test(logText),
   wrapperSelectedLegacyLauncher: /\[start-emulator\] Using emulator launcher: \/android\/sdk\/launch-emulator\.sh/.test(logText),
   legacyLauncherReportedApi30:
     /version: AndroidVersion\.ApiLevel=30/.test(logText) ||
     /version: Pkg\.Dependencies=emulator#30\.0\.4/.test(logText),
   directModeEnabled: /\[start-emulator\] Using direct emulator mode; legacy launcher bypassed\./.test(logText),
-  directLaunchReportedApi34:
-    /\[start-emulator\]\s+Pkg\.Dependencies=emulator#34\./.test(logText) ||
-    /\[start-emulator\]\s+AndroidVersion\.ApiLevel=34/.test(logText),
+  directLaunchReportedSelectedApi:
+    /\[start-emulator\]\s+Pkg\.Dependencies=emulator#35\./.test(logText) ||
+    /\[start-emulator\]\s+AndroidVersion\.ApiLevel=35/.test(logText),
   directLaunchLoggedRadioNull:
     /\[start-emulator\] Direct emulator radio device: null/.test(logText) ||
     /\[start-emulator\] Direct emulator radio override: null/.test(logText) ||
@@ -43,8 +43,8 @@ const findings = {
     /\[start-emulator\] WARNING: adb command unavailable/.test(logText),
   adbHostServerFailure: /AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 5037/.test(logText),
   shellUnsetVariableCrash: /start-emulator\.sh:\s*\d+:\s*_emulator_version: parameter not set/.test(logText),
-  modemIpv6Failure: /qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1/.test(logText),
-  invalidRadioOption: /qemu-system-x86_64-headless: -radio: invalid option/.test(logText),
+  modemIpv6Failure: /qemu-system-[^:\s]+: .*id=modem: address resolution failed for ::1/.test(logText),
+  invalidRadioOption: /qemu-system-[^:\s]+: -radio: invalid option/.test(logText),
   directAdbBridgeForwarderStarted: /\[start-emulator\] Started direct adb bridge forwarder on .*:5555 -> 127\.0\.0\.1:5555\./.test(logText),
   adbPortGuardHeartbeatCount: (logText.match(/\[adb-port-guard\] alive: iter=/g) || []).length,
   repeatedRestartLoop:
@@ -56,18 +56,18 @@ let rootCause = "unclassified";
 let explanation = "No known emulator restart-loop signature matched this log.";
 
 if (
-  findings.directWrapperPatchedApi34 &&
+  findings.directWrapperPatchedSelectedImage &&
   findings.wrapperSelectedLegacyLauncher &&
   findings.legacyLauncherReportedApi30 &&
   findings.modemIpv6Failure
 ) {
   rootCause = "legacy-launcher-overrode-patched-avd";
   explanation =
-    "The wrapper patched API 34 AVD configs, then /android/sdk/launch-emulator.sh still resolved API 30 and hit the modem ::1 crash.";
+    "The wrapper patched the selected AVD system image, then /android/sdk/launch-emulator.sh still resolved API 30 and hit the modem ::1 crash.";
 } else if (
-  findings.directWrapperPatchedApi34 &&
+  findings.directWrapperPatchedSelectedImage &&
   findings.directModeEnabled &&
-  findings.directLaunchReportedApi34 &&
+  findings.directLaunchReportedSelectedApi &&
   findings.directLaunchRadioOverrideDisabled &&
   findings.modemIpv6Failure &&
   !findings.ipv6LiteralResolutionVerified
@@ -76,19 +76,19 @@ if (
   explanation =
     "Direct launch was configured correctly, but the container namespace still could not resolve the literal ::1 modem socket address for QEMU, so the emulator crashed in the IPv6 addrconfig path and restarted.";
 } else if (
-  findings.directWrapperPatchedApi34 &&
+  findings.directWrapperPatchedSelectedImage &&
   findings.directModeEnabled &&
-  findings.directLaunchReportedApi34 &&
+  findings.directLaunchReportedSelectedApi &&
   findings.modemIpv6Failure &&
   !findings.directLaunchLoggedRadioNull
 ) {
   rootCause = "direct-launch-left-internal-modem-enabled";
   explanation =
-    "Direct launch reached API 34, but the wrapper still left the internal modem backend enabled, so QEMU created id=modem on ::1 and the container restarted.";
+    "Direct launch reached the selected API level, but the wrapper still left the internal modem backend enabled, so QEMU created id=modem on ::1 and the container restarted.";
 } else if (
-  findings.directWrapperPatchedApi34 &&
+  findings.directWrapperPatchedSelectedImage &&
   findings.directModeEnabled &&
-  findings.directLaunchReportedApi34 &&
+  findings.directLaunchReportedSelectedApi &&
   findings.directLaunchLoggedRadioNull &&
   findings.invalidRadioOption
 ) {
@@ -96,25 +96,25 @@ if (
   explanation =
     "Direct launch attempted to force a radio override, but the bundled emulator build rejected -radio entirely, so QEMU exited before the guest could boot.";
 } else if (
-  findings.directWrapperPatchedApi34 &&
+  findings.directWrapperPatchedSelectedImage &&
   findings.directLaunchAdbServerStarted &&
-  findings.directLaunchReportedApi34 &&
+  findings.directLaunchReportedSelectedApi &&
   findings.shellUnsetVariableCrash
 ) {
   rootCause = "direct-launch-unset-version-variable";
   explanation =
     "Direct launch was selected correctly, but the wrapper unset the cached emulator version before the radio-override gate referenced it under set -u, so the shell exited and the container restarted.";
 } else if (
-  findings.directWrapperPatchedApi34 &&
+  findings.directWrapperPatchedSelectedImage &&
   findings.directModeEnabled &&
-  findings.directLaunchReportedApi34 &&
+  findings.directLaunchReportedSelectedApi &&
   findings.directLaunchLoggedRadioNull &&
   findings.adbHostServerFailure &&
   findings.missingAdbBinary
 ) {
   rootCause = "direct-launch-missing-adb-host-server";
   explanation =
-    "Direct launch reached API 34 and disabled the modem backend, but the runtime lacked a usable adb binary, so the emulator could not connect to the host adb server on port 5037 and the container restarted.";
+    "Direct launch reached the selected API level and disabled the modem backend, but the runtime lacked a usable adb binary, so the emulator could not connect to the host adb server on port 5037 and the container restarted.";
 } else if (findings.duplicateAvdLockFatal) {
   rootCause = "duplicate-avd-lock";
   explanation =

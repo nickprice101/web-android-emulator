@@ -195,7 +195,13 @@ export PATH="${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/emulator:${P
 EMULATOR_LAUNCH_MODE="${EMULATOR_LAUNCH_MODE:-direct}"
 EMULATOR_RADIO_DEVICE="${EMULATOR_RADIO_DEVICE:-null}"
 EMULATOR_USE_RADIO_OVERRIDE="${EMULATOR_USE_RADIO_OVERRIDE:-0}"
+EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE:-system-images;android-35;google_apis;arm64-v8a}"
+EMULATOR_PLATFORM="${EMULATOR_PLATFORM:-platforms;android-35}"
 mkdir -p "${ANDROID_USER_HOME}" "${ANDROID_AVD_HOME}"
+
+emulator_system_image_sysdir() {
+  printf '%s/' "$(printf '%s' "${EMULATOR_SYSTEM_IMAGE}" | tr ';' '/')"
+}
 
 ensure_pixel2_avd_aliases() {
   _sdk="${ANDROID_SDK_ROOT:-/android/sdk}"
@@ -312,9 +318,10 @@ if [ -x "${_emulator_bin}" ]; then
 fi
 DIRECT_EMULATOR_VERSION="${_emulator_version}"
 _system_image_props=""
+_system_image_sysdir="$(emulator_system_image_sysdir)"
 for _props_path in \
-    "${ANDROID_SDK_ROOT}/system-images/android-34/google_apis/x86_64/source.properties" \
-    "${ANDROID_SDK_ROOT}/system-images/android-34/google_apis/x86_64/build.prop"; do
+    "${ANDROID_SDK_ROOT}/${_system_image_sysdir}source.properties" \
+    "${ANDROID_SDK_ROOT}/${_system_image_sysdir}build.prop"; do
   if [ -f "${_props_path}" ]; then
     _system_image_props="${_props_path}"
     break
@@ -334,9 +341,9 @@ if [ -n "${_system_image_props}" ]; then
     esac
   done < "${_system_image_props}"
 else
-  log "  system image props: not found under ${ANDROID_SDK_ROOT}/system-images/android-34"
+  log "  system image props: not found under ${ANDROID_SDK_ROOT}/${_system_image_sysdir}"
 fi
-unset _emulator_bin _emulator_version _system_image_props _props_path _prop_line
+unset _emulator_bin _emulator_version _system_image_props _system_image_sysdir _props_path _prop_line
 
 # Apply critical AVD config.ini patches before the emulator is launched.
 #
@@ -346,9 +353,9 @@ unset _emulator_bin _emulator_version _system_image_props _props_path _prop_line
 #     -no-sim flag passed to the emulator binary does NOT suppress this chardev;
 #     only the AVD config.ini key prevents it.
 #
-# (b) image.sysdir.1  — ensures the AVD uses the API 34 system image rather
-#     than any pre-existing API 30 image the base image may have bundled at a
-#     non-standard path (e.g. /Pixel2.avd/).  The build-time avdmanager patch
+# (b) image.sysdir.1  — ensures the AVD uses the selected system image rather
+#     than any pre-existing image the base image may have bundled at a
+#     non-standard path (e.g. /Pixel2.avd/). The build-time avdmanager patch
 #     targets $HOME/.android/avd/Pixel2.avd/config.ini, but some base images
 #     also maintain a second copy at /Pixel2.avd/config.ini that is the
 #     authoritative file read by launch-emulator.sh at runtime.  Patching all
@@ -356,21 +363,21 @@ unset _emulator_bin _emulator_version _system_image_props _props_path _prop_line
 _patch_single_avd_config() {
   _cfg="$1"
   _sdk="${ANDROID_SDK_ROOT:-/android/sdk}"
-  _api34_sysdir="system-images/android-34/google_apis/x86_64/"
+  _image_sysdir="$(emulator_system_image_sysdir)"
   sed -i '/^hw\.gsmModem=/d' "${_cfg}" 2>/dev/null || true
   sed -i '/^hw\.ramSize=/d' "${_cfg}" 2>/dev/null || true
   printf 'hw.gsmModem=%s\n' 'no' >> "${_cfg}"
   printf 'hw.ramSize=%s\n' "${EMULATOR_RAM_SIZE_MB}" >> "${_cfg}"
-  if [ -d "${_sdk}/${_api34_sysdir}" ]; then
+  if [ -d "${_sdk}/${_image_sysdir}" ]; then
     sed -i '/^image\.sysdir\.1=/d' "${_cfg}" 2>/dev/null || true
-    printf 'image.sysdir.1=%s\n' "${_api34_sysdir}" >> "${_cfg}"
-    log "  [avd-patch] ${_cfg}: set hw.gsmModem=no, hw.ramSize=${EMULATOR_RAM_SIZE_MB}, image.sysdir.1=${_api34_sysdir}"
+    printf 'image.sysdir.1=%s\n' "${_image_sysdir}" >> "${_cfg}"
+    log "  [avd-patch] ${_cfg}: set hw.gsmModem=no, hw.ramSize=${EMULATOR_RAM_SIZE_MB}, image.sysdir.1=${_image_sysdir}"
   else
-    log "  [avd-patch] ${_cfg}: set hw.gsmModem=no, hw.ramSize=${EMULATOR_RAM_SIZE_MB} (API 34 sysdir not found at ${_sdk}/${_api34_sysdir}, sysdir unchanged)"
+    log "  [avd-patch] ${_cfg}: set hw.gsmModem=no, hw.ramSize=${EMULATOR_RAM_SIZE_MB} (system image sysdir not found at ${_sdk}/${_image_sysdir}, sysdir unchanged)"
   fi
 }
 
-log "Patching AVD config.ini files (hw.gsmModem=no + ${EMULATOR_RAM_SIZE_MB} MB RAM + API 34 system image):"
+log "Patching AVD config.ini files (hw.gsmModem=no + ${EMULATOR_RAM_SIZE_MB} MB RAM + ${EMULATOR_SYSTEM_IMAGE} system image):"
 _avd_patched=0
 for _cfg_candidate in \
     "${ANDROID_AVD_HOME}/Pixel2.avd/config.ini" \

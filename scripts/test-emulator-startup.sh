@@ -53,9 +53,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EMULATOR_IMAGE_TAG="${EMULATOR_IMAGE_TAG:-google-emu-emulator:test-smoke}"
 BUILD_IMAGE="${BUILD_IMAGE:-1}"
 EMULATOR_IMAGE_BUILD_ARG="${EMULATOR_IMAGE_BUILD_ARG:-us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297}"
-EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64}"
-EMULATOR_PLATFORM="${EMULATOR_PLATFORM:-platforms;android-34}"
-EXPECTED_GUEST_API="${EXPECTED_GUEST_API:-34}"
+EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE:-system-images;android-35;google_apis;arm64-v8a}"
+EMULATOR_PLATFORM="${EMULATOR_PLATFORM:-platforms;android-35}"
+EXPECTED_GUEST_API="${EXPECTED_GUEST_API:-35}"
 EXPECTED_RADIO_OVERRIDE_MODE="${EXPECTED_RADIO_OVERRIDE_MODE:-disabled}"
 EXPECTED_EMULATOR_RAM_SIZE_MB="${EXPECTED_EMULATOR_RAM_SIZE_MB:-6144}"
 ADB_READY_TIMEOUT="${ADB_READY_TIMEOUT:-240}"
@@ -215,6 +215,8 @@ docker run -d \
   --device /dev/kvm:/dev/kvm \
   --shm-size 6g \
   -e EMULATOR_RAM_SIZE_MB="${EXPECTED_EMULATOR_RAM_SIZE_MB}" \
+  -e EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE}" \
+  -e EMULATOR_PLATFORM="${EMULATOR_PLATFORM}" \
   -e EMULATOR_PARAMS="-no-metrics -no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -read-only -no-boot-anim -camera-back none -camera-front none -no-snapshot-save" \
   -e ADBKEY="PLACEHOLDER_ADB_KEY" \
   "${EMULATOR_IMAGE_TAG}" 2>&1 | head -1
@@ -360,7 +362,7 @@ if grep -Eq 'version: AndroidVersion\.ApiLevel=30|Pkg\.Dependencies=emulator#30\
   fail "Container logs still show the base launcher resolving an API 30 guest"
 fi
 if grep -Eq '\[start-emulator\]\s+emulator binary version\s+: Android emulator version 30\.' "${RUNTIME_LOG_PATH}"; then
-  fail "Container logs still show the stale emulator 30.x binary with the API 34 guest image"
+  fail "Container logs still show the stale emulator 30.x binary with the API ${EXPECTED_GUEST_API} guest image"
 fi
 if grep -Fq 'Your emulator is out of date, please update by launching Android Studio:' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the emulator binary is still outdated for the installed guest image"
@@ -392,7 +394,7 @@ fi
 if grep -Eq 'AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 5037' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the emulator failing to reach the host adb server on port 5037"
 fi
-if grep -Eq 'qemu-system-x86_64-headless: -radio: invalid option' "${RUNTIME_LOG_PATH}"; then
+if grep -Eq 'qemu-system-[^[:space:]:]+: -radio: invalid option' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the unsupported -radio option crash"
 fi
 if grep -Fq 'WARNING - ACTION REQUIRED' "${RUNTIME_LOG_PATH}"; then
@@ -419,7 +421,7 @@ fi
 if grep -Eq 'start-emulator\.sh: [0-9]+: _emulator_version: parameter not set' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the direct-launch wrapper crashing on an unset emulator-version variable"
 fi
-if grep -Eq 'qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1' "${RUNTIME_LOG_PATH}"; then
+if grep -Eq 'qemu-system-[^[:space:]:]+: .*id=modem: address resolution failed for ::1' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the fatal QEMU modem ::1 resolution failure"
 fi
 if grep -Eq '\[start-emulator\] Using emulator launcher: /android/sdk/launch-emulator\.sh' "${RUNTIME_LOG_PATH}"; then

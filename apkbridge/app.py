@@ -38,6 +38,7 @@ SCRCPY_STREAM_LOCK_WAIT_SECONDS = max(0.0, float(os.environ.get("SCRCPY_STREAM_L
 SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS = max(
     0.05, float(os.environ.get("SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS", "0.1"))
 )
+ADB_INSTALL_ABI = os.environ.get("ADB_INSTALL_ABI", "").strip()
 SCRCPY_STREAM_LOCK_PATH = Path(
     os.environ.get("SCRCPY_STREAM_LOCK_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-scrcpy-video.lock"))
 )
@@ -106,6 +107,14 @@ def adb_popen(*args):
         stderr=subprocess.PIPE,
         bufsize=0,
     )
+
+
+def adb_install_args(apk_path):
+    args = ["install", "-r", "-t", "-g"]
+    if ADB_INSTALL_ABI and ADB_INSTALL_ABI.lower() not in {"auto", "none", "default"}:
+        args.extend(["--abi", ADB_INSTALL_ABI])
+    args.append(str(apk_path))
+    return args
 
 
 def scrcpy_stream_lock_retry_delay(deadline):
@@ -441,7 +450,7 @@ def install():
             tmp_path = tmp.name
         detected_pkg = detect_package_name(tmp_path)
         final_pkg = pkg or detected_pkg
-        out = adb("install", "-r", "-t", "-g", tmp_path)
+        out = adb(*adb_install_args(tmp_path))
         if not final_pkg:
             final_pkg = infer_installed_package(before_packages)
         return jsonify(
@@ -449,6 +458,7 @@ def install():
                 "ok": True,
                 "message": out,
                 "package": final_pkg,
+                "install_abi": ADB_INSTALL_ABI or "auto",
                 "launch": launch_package(final_pkg) if final_pkg else None,
             }
         )
@@ -471,7 +481,7 @@ def install_built():
         pkg = data.get("package", "").strip()
         detected_pkg = detect_package_name(apk)
         final_pkg = pkg or detected_pkg
-        out = adb("install", "-r", "-t", "-g", str(apk))
+        out = adb(*adb_install_args(apk))
         if not final_pkg:
             final_pkg = infer_installed_package(before_packages)
         return jsonify(
@@ -479,6 +489,7 @@ def install_built():
                 "ok": True,
                 "message": out,
                 "package": final_pkg,
+                "install_abi": ADB_INSTALL_ABI or "auto",
                 "launch": launch_package(final_pkg) if final_pkg else None,
             }
         )

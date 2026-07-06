@@ -18,8 +18,9 @@ services:
     environment:
       ADBKEY: |
         PLACEHOLDER_ADB_KEY
-      EMULATOR_GPU_MODE: "${EMULATOR_GPU_MODE:-host}"
-      EMULATOR_PARAMS: "-no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
+      EMULATOR_GPU_MODE: "${EMULATOR_GPU_MODE:-swiftshader_indirect}"
+      EMULATOR_AVD_READ_ONLY: "${EMULATOR_AVD_READ_ONLY:-1}"
+      EMULATOR_PARAMS: "-no-metrics -no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
     expose:
       - "5555"
     ports:

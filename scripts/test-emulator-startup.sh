@@ -211,7 +211,7 @@ docker run -d \
   --privileged \
   --device /dev/kvm:/dev/kvm \
   --shm-size 2g \
-  -e EMULATOR_PARAMS="-no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save" \
+  -e EMULATOR_PARAMS="-no-metrics -no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -read-only -no-boot-anim -camera-back none -camera-front none -no-snapshot-save" \
   -e ADBKEY="PLACEHOLDER_ADB_KEY" \
   "${EMULATOR_IMAGE_TAG}" 2>&1 | head -1
 
@@ -390,6 +390,18 @@ if grep -Eq 'AdbHostServer\.cpp:102: Unable to connect to adb daemon on port: 50
 fi
 if grep -Eq 'qemu-system-x86_64-headless: -radio: invalid option' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the unsupported -radio option crash"
+fi
+if grep -Fq 'WARNING - ACTION REQUIRED' "${RUNTIME_LOG_PATH}"; then
+  fail "Container logs still show the emulator metrics opt-in warning"
+fi
+if grep -Fq 'Running multiple emulators with the same AVD is an experimental feature' "${RUNTIME_LOG_PATH}"; then
+  fail "Container logs still show the duplicate-AVD lock fatal"
+fi
+if grep -Fq 'Your GPU cannot be used for hardware rendering' "${RUNTIME_LOG_PATH}"; then
+  fail "Container logs still show the emulator trying to use unsupported host GPU rendering"
+fi
+if ! grep -Fq '[start-emulator] Direct emulator AVD read-only mode: ' "${RUNTIME_LOG_PATH}"; then
+  fail "Container logs do not show the expected AVD read-only mode setting"
 fi
 if grep -Eq 'WARNING: IPv6 literal ::1 still does not resolve after provisioning dummy IPv6 interface' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the IPv6 modem-resolution preflight still failing"

@@ -29,6 +29,10 @@ const findings = {
     /\[start-emulator\] Direct emulator radio override: disabled/.test(logText),
   directLaunchAdbServerStarted:
     /\[start-emulator\] ADB server is running on port 5037 for direct emulator launch/.test(logText),
+  metricsPromptWarning: /WARNING - ACTION REQUIRED/.test(logText),
+  unsupportedHostGpu: /Your GPU cannot be used for hardware rendering/.test(logText),
+  vulkanIncompatibleDriver: /VK_ERROR_INCOMPATIBLE_DRIVER/.test(logText),
+  duplicateAvdLockFatal: /Running multiple emulators with the same AVD is an experimental feature/.test(logText),
   ipv6LiteralResolutionVerified:
     /\[start-emulator\] Verified IPv6 literal ::1 resolves for qemu modem sockets\./.test(logText) ||
     /\[start-emulator\] Provisioned dummy IPv6 interface to satisfy AI_ADDRCONFIG for ::1 modem socket resolution\./.test(logText),
@@ -111,6 +115,14 @@ if (
   rootCause = "direct-launch-missing-adb-host-server";
   explanation =
     "Direct launch reached API 34 and disabled the modem backend, but the runtime lacked a usable adb binary, so the emulator could not connect to the host adb server on port 5037 and the container restarted.";
+} else if (findings.duplicateAvdLockFatal) {
+  rootCause = "duplicate-avd-lock";
+  explanation =
+    "The emulator refused to start because Pixel2 still had an AVD lock or another instance was using it. Start with read-only AVD mode and clear stale lock files before launch.";
+} else if (findings.unsupportedHostGpu || findings.vulkanIncompatibleDriver) {
+  rootCause = "unsupported-host-gpu-rendering";
+  explanation =
+    "The emulator tried to use host GPU rendering, but the container host did not expose a compatible GLES/Vulkan driver. Use swiftshader_indirect for container video streaming.";
 }
 
 const summary = {
@@ -125,6 +137,9 @@ const summary = {
     !findings.shellUnsetVariableCrash &&
     !findings.adbHostServerFailure &&
     !findings.missingAdbBinary &&
+    !findings.duplicateAvdLockFatal &&
+    !findings.unsupportedHostGpu &&
+    !findings.vulkanIncompatibleDriver &&
     !findings.repeatedRestartLoop,
   findings,
 };
@@ -136,7 +151,16 @@ if (rootCause !== "unclassified") {
   process.exit(1);
 }
 
-if (findings.modemIpv6Failure || findings.invalidRadioOption || findings.shellUnsetVariableCrash || findings.ipv6LiteralResolutionFailed || findings.repeatedRestartLoop) {
+if (
+  findings.modemIpv6Failure ||
+  findings.invalidRadioOption ||
+  findings.shellUnsetVariableCrash ||
+  findings.ipv6LiteralResolutionFailed ||
+  findings.duplicateAvdLockFatal ||
+  findings.unsupportedHostGpu ||
+  findings.vulkanIncompatibleDriver ||
+  findings.repeatedRestartLoop
+) {
   console.error("Detected an emulator restart loop, but the exact signature was not classified.");
   process.exit(1);
 }

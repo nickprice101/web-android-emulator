@@ -15,10 +15,12 @@ The frontend defaults to `Guacamole HTTP (30fps)` at `720p`. A toolbar quality s
 * `SCRCPY_MAX_SIZE=720`
 * `SCRCPY_PORT_RANGE=27183:27283`
 
-The emulator container defaults to `EMULATOR_GPU_MODE=host` and maps `/dev/dri`
-so Linux hosts with an Intel iGPU can use emulator host GPU acceleration. Set
-`EMULATOR_GPU_MODE=swiftshader_indirect` if the deployment host does not expose
-a usable render device.
+The emulator container defaults to `EMULATOR_GPU_MODE=swiftshader_indirect` for
+stable headless rendering across container hosts. It still maps `/dev/dri`, so
+deployments with a known-good render device can opt into host acceleration with
+`EMULATOR_GPU_MODE=host`. Startup also passes `-no-metrics` and runs the AVD in
+read-only mode by default to avoid metrics prompts and duplicate-AVD lock
+failures during container restarts.
 
 If scrcpy cannot start before video bytes are produced, `apkbridge` falls back
 to remuxing `adb exec-out screenrecord --output-format=h264 -` into the same

@@ -31,8 +31,8 @@ assert.match(
 );
 assert.match(
   frontendMain,
-  /value: "scrcpy-http", label: "Guacamole HTTP \(24fps\)"/,
-  "stream selector must expose the 24fps HTTP tunnel as the primary mode"
+  /value: "scrcpy-http", label: "Guacamole HTTP \(30fps\)"/,
+  "stream selector must expose the 30fps HTTP tunnel as the primary mode"
 );
 const streamModeOptions = frontendMain.match(/const STREAM_MODE_OPTIONS = \[[\s\S]*?\];/)?.[0] || "";
 assert.ok(streamModeOptions, "frontend must define stream mode options");
@@ -46,7 +46,7 @@ assert.match(
 assert.match(
   frontendMain,
   /max_fps: String\(GUACAMOLE_HTTP_TARGET_FPS\)/,
-  "frontend must request the configured 24fps target from the scrcpy endpoint"
+  "frontend must request the configured 30fps target from the scrcpy endpoint"
 );
 assert.match(
   frontendMain,
@@ -65,7 +65,7 @@ assert.match(frontendNginx, /proxy_buffering off;/, "frontend Nginx must not buf
 assert.match(frontendNginx, /proxy_read_timeout 1h;/, "frontend Nginx must allow long-lived scrcpy responses");
 
 const apkbridgeApp = readRepoFile("apkbridge/app.py");
-assert.match(apkbridgeApp, /SCRCPY_MAX_FPS = .*"24"/, "apkbridge must default scrcpy to 24fps");
+assert.match(apkbridgeApp, /SCRCPY_MAX_FPS = .*"30"/, "apkbridge must default scrcpy to 30fps");
 assert.match(apkbridgeApp, /SCRCPY_VIDEO_BIT_RATE = .*"6000000"/, "apkbridge must default to a tunnel-friendly bitrate");
 const scrcpyCommand = apkbridgeApp.match(/scrcpy_cmd = \[[\s\S]*?\n\s+\]/)?.[0] || "";
 assert.ok(scrcpyCommand, "apkbridge must define a scrcpy command for the HTTP tunnel");
@@ -93,7 +93,10 @@ assert.match(apkbridgeApp, /-flush_packets/, "apkbridge ffmpeg muxing must flush
 const composeConfig = readRepoFile("docker-compose.yml");
 assertNoActiveTurnConfig("docker-compose.yml", composeConfig);
 assertNoWebrtcRuntime("docker-compose.yml", composeConfig);
-assert.match(composeConfig, /SCRCPY_MAX_FPS:\s*"24"/, "compose must pin scrcpy max fps to 24");
+assert.match(composeConfig, /EMULATOR_GPU_MODE:\s*"\$\{EMULATOR_GPU_MODE:-swiftshader_indirect\}"/, "compose must default the emulator to container-safe software GPU rendering");
+assert.match(composeConfig, /EMULATOR_AVD_READ_ONLY:\s*"\$\{EMULATOR_AVD_READ_ONLY:-1\}"/, "compose must default the emulator AVD to read-only startup for duplicate-lock tolerance");
+assert.match(composeConfig, /EMULATOR_PARAMS:.*-no-metrics/, "compose must opt the emulator out of metrics prompts");
+assert.match(composeConfig, /SCRCPY_MAX_FPS:\s*"\$\{SCRCPY_MAX_FPS:-30\}"/, "compose must pin scrcpy max fps to 30");
 assert.match(composeConfig, /SCRCPY_VIDEO_BIT_RATE:/, "compose must expose scrcpy bitrate tuning");
 assert.match(composeConfig, /SCRCPY_PORT_RANGE:/, "compose must expose scrcpy tunnel port range tuning");
 assert.match(composeConfig, /18080:80/, "frontend must own the public UI/API entrypoint");
@@ -109,6 +112,9 @@ assert.match(emulatorDockerfile, /ENTRYPOINT \["\/usr\/local\/bin\/start-emulato
 assert.match(emulatorWrapper, /\[start-emulator\]/, "emulator wrapper logs must use the non-TURN prefix");
 assert.match(emulatorWrapper, /EMULATOR_LAUNCH_MODE="\$\{EMULATOR_LAUNCH_MODE:-direct\}"/, "emulator wrapper must keep direct launch as the default");
 assert.match(emulatorWrapper, /start_direct_adb_bridge_forwarder\(\)/, "emulator wrapper must keep the sibling-container ADB bridge");
+assert.match(emulatorWrapper, /append_param_if_missing "-no-metrics"/, "emulator wrapper must suppress emulator metrics prompts by default");
+assert.match(emulatorWrapper, /EMULATOR_AVD_READ_ONLY="\$\{EMULATOR_AVD_READ_ONLY:-1\}"/, "emulator wrapper must default to duplicate-lock-tolerant read-only AVD startup");
+assert.match(emulatorWrapper, /remove_stale_pixel2_avd_locks\(\)/, "emulator wrapper must clear stale Pixel2 AVD lock files before launch");
 assert.doesNotMatch(emulatorWrapper, /-grpc|emu-grpc-token|TOKEN_WATCHER|gRPC-Web|bridge-webrtc/, "emulator wrapper must not start gRPC/token support for removed WebRTC");
 
 const testbedSh = readRepoFile("scripts/testbed.sh");

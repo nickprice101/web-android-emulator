@@ -143,6 +143,7 @@ case "${EMULATOR_GPU_MODE}" in
   ""|"none"|"disabled") ;;
   *) append_param_value_if_flag_missing "-gpu" "${EMULATOR_GPU_MODE}" ;;
 esac
+append_param_if_missing "-no-metrics"
 append_param_if_missing "-no-boot-anim"
 append_param_if_missing "-camera-back none"
 append_param_if_missing "-camera-front none"
@@ -158,6 +159,17 @@ append_param_if_missing "-no-sim"
 # subsystem initialization, delaying port binding. Disable audio by default
 # since it is not needed for ADB/HTTP emulator use.
 append_param_if_missing "-no-audio"
+EMULATOR_AVD_READ_ONLY="${EMULATOR_AVD_READ_ONLY:-1}"
+case "${EMULATOR_AVD_READ_ONLY}" in
+  1|true|TRUE|yes|YES)
+    append_param_if_missing "-read-only"
+    ;;
+  0|false|FALSE|no|NO|'') ;;
+  *)
+    log "Unsupported EMULATOR_AVD_READ_ONLY='${EMULATOR_AVD_READ_ONLY}'; expected true/false."
+    exit 1
+    ;;
+esac
 export EMULATOR_PARAMS="${EMULATOR_PARAMS_VALUE}"
 
 export ANDROID_USER_HOME="${ANDROID_USER_HOME:-${HOME}/.android}"
@@ -225,9 +237,57 @@ EOF
   log "Pixel2 AVD metadata search path: ANDROID_AVD_HOME=${ANDROID_AVD_HOME}, ANDROID_EMULATOR_HOME=${ANDROID_EMULATOR_HOME}, ANDROID_SDK_HOME=${ANDROID_SDK_HOME}"
 }
 
+remove_stale_pixel2_avd_locks() {
+  if ps -eo args 2>/dev/null | grep -Eq '[e]mulator([[:space:]].*)?[[:space:]]-avd[[:space:]]+Pixel2|[q]emu-system.*Pixel2'; then
+    log "WARNING: detected a running Pixel2 emulator process; leaving AVD lock files intact."
+    return 0
+  fi
+
+  _removed_locks=0
+  _remove_lock_path() {
+    _lock_path="$1"
+    if [ -e "${_lock_path}" ]; then
+      rm -rf "${_lock_path}" 2>/dev/null || true
+      _removed_locks=$((_removed_locks + 1))
+      log "Removed stale Pixel2 AVD lock: ${_lock_path}"
+    fi
+  }
+
+  for _lock_candidate in \
+      "${ANDROID_AVD_HOME}/Pixel2.ini.lock" \
+      "${HOME}/.android/avd/Pixel2.ini.lock" \
+      /Pixel2.ini.lock \
+      "${ANDROID_SDK_ROOT:-/android/sdk}/avd/Pixel2.ini.lock"; do
+    _remove_lock_path "${_lock_candidate}"
+  done
+
+  for _avd_lock_root in \
+      "${ANDROID_AVD_HOME}/Pixel2.avd" \
+      "${HOME}/.android/avd/Pixel2.avd" \
+      /Pixel2.avd \
+      "${ANDROID_SDK_ROOT:-/android/sdk}/avd/Pixel2.avd"; do
+    if [ ! -d "${_avd_lock_root}" ]; then
+      continue
+    fi
+    while IFS= read -r _lock_path; do
+      [ -n "${_lock_path}" ] || continue
+      _remove_lock_path "${_lock_path}"
+    done <<EOF
+$(find "${_avd_lock_root}" -depth -name '*.lock' -print 2>/dev/null || true)
+EOF
+  done
+
+  if [ "${_removed_locks}" -eq 0 ]; then
+    log "No stale Pixel2 AVD lock files found."
+  fi
+
+  unset _removed_locks _lock_candidate _avd_lock_root _lock_path
+}
+
 ensure_ipv6_loopback_host
 ensure_ipv6_loopback_interface
 ensure_pixel2_avd_aliases
+remove_stale_pixel2_avd_locks
 
 # Log the emulator configuration so that API level is immediately visible in
 # container logs and cannot be confused with an old running container.
@@ -472,6 +532,7 @@ launch_direct_emulator() {
   log "Using direct emulator launch: ${DIRECT_EMULATOR_BIN}"
   log "Direct emulator ports: ${_ports}"
   log "Direct emulator GPU mode: ${EMULATOR_GPU_MODE:-emulator default}"
+  log "Direct emulator AVD read-only mode: ${EMULATOR_AVD_READ_ONLY}"
   if [ "${_radio_override_applied}" -eq 1 ]; then
     log "Direct emulator radio override: ${EMULATOR_RADIO_DEVICE}"
   else

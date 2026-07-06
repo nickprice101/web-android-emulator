@@ -57,6 +57,8 @@ http://YOUR_HOST:18080
 
 The default emulator build uses Google's public emulator base image and then installs the pinned Android emulator package plus Android 14 (API 34) platform/system image during build. The Dockerfile creates a `Pixel2` AVD backed by the `pixel_5` profile and starts the emulator through `emulator/start-emulator.sh`.
 
+The emulator defaults to `EMULATOR_RAM_SIZE_MB=6144`, and compose gives the emulator service `shm_size: "6gb"`, so memory-heavy AI apps have more than 4GB of Android guest RAM available. Set `EMULATOR_RAM_SIZE_MB` to a higher value before `docker compose up` if a test app needs more.
+
 To pin a different emulator base image or SDK package, build with:
 
 ```bash

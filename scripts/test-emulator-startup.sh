@@ -25,6 +25,8 @@
 #   EMULATOR_SYSTEM_IMAGE    Android system image package to install.
 #   EMULATOR_PLATFORM        Android platform package to install.
 #   EXPECTED_GUEST_API       Expected Android guest API level.
+#   EXPECTED_EMULATOR_RAM_SIZE_MB
+#                            Expected Android guest RAM in megabytes.
 #   ADB_READY_TIMEOUT        Seconds to wait for the external ADB bridge target
 #                            to report a usable adb transport.
 #   SIBLING_ADB_READY_TIMEOUT
@@ -55,6 +57,7 @@ EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_
 EMULATOR_PLATFORM="${EMULATOR_PLATFORM:-platforms;android-34}"
 EXPECTED_GUEST_API="${EXPECTED_GUEST_API:-34}"
 EXPECTED_RADIO_OVERRIDE_MODE="${EXPECTED_RADIO_OVERRIDE_MODE:-disabled}"
+EXPECTED_EMULATOR_RAM_SIZE_MB="${EXPECTED_EMULATOR_RAM_SIZE_MB:-6144}"
 ADB_READY_TIMEOUT="${ADB_READY_TIMEOUT:-240}"
 SIBLING_ADB_READY_TIMEOUT="${SIBLING_ADB_READY_TIMEOUT:-90}"
 REQUIRE_ADB_BRIDGE="${REQUIRE_ADB_BRIDGE:-1}"
@@ -210,7 +213,8 @@ docker run -d \
   --name "${CONTAINER_NAME}" \
   --privileged \
   --device /dev/kvm:/dev/kvm \
-  --shm-size 2g \
+  --shm-size 6g \
+  -e EMULATOR_RAM_SIZE_MB="${EXPECTED_EMULATOR_RAM_SIZE_MB}" \
   -e EMULATOR_PARAMS="-no-metrics -no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -read-only -no-boot-anim -camera-back none -camera-front none -no-snapshot-save" \
   -e ADBKEY="PLACEHOLDER_ADB_KEY" \
   "${EMULATOR_IMAGE_TAG}" 2>&1 | head -1
@@ -402,6 +406,12 @@ if grep -Fq 'Your GPU cannot be used for hardware rendering' "${RUNTIME_LOG_PATH
 fi
 if ! grep -Fq '[start-emulator] Direct emulator AVD read-only mode: ' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs do not show the expected AVD read-only mode setting"
+fi
+if ! grep -Fq "[start-emulator] Direct emulator RAM: ${EXPECTED_EMULATOR_RAM_SIZE_MB} MB" "${RUNTIME_LOG_PATH}"; then
+  fail "Container logs do not show the expected emulator RAM setting (${EXPECTED_EMULATOR_RAM_SIZE_MB} MB)"
+fi
+if ! grep -Fq "hw.ramSize=${EXPECTED_EMULATOR_RAM_SIZE_MB}" "${RUNTIME_LOG_PATH}"; then
+  fail "Container logs do not show the expected AVD hw.ramSize patch (${EXPECTED_EMULATOR_RAM_SIZE_MB} MB)"
 fi
 if grep -Eq 'WARNING: IPv6 literal ::1 still does not resolve after provisioning dummy IPv6 interface' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs show the IPv6 modem-resolution preflight still failing"

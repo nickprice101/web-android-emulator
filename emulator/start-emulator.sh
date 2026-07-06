@@ -148,6 +148,20 @@ append_param_if_missing "-no-boot-anim"
 append_param_if_missing "-camera-back none"
 append_param_if_missing "-camera-front none"
 append_param_if_missing "-no-snapshot-save"
+EMULATOR_RAM_SIZE_MB="${EMULATOR_RAM_SIZE_MB:-6144}"
+case "${EMULATOR_RAM_SIZE_MB}" in
+  ''|*[!0-9]*)
+    log "Unsupported EMULATOR_RAM_SIZE_MB='${EMULATOR_RAM_SIZE_MB}'; expected a number of megabytes."
+    exit 1
+    ;;
+  *)
+    if [ "${EMULATOR_RAM_SIZE_MB}" -le 4096 ]; then
+      log "Unsupported EMULATOR_RAM_SIZE_MB='${EMULATOR_RAM_SIZE_MB}'; expected more than 4096 MB for AI app testing."
+      exit 1
+    fi
+    append_param_value_if_flag_missing "-memory" "${EMULATOR_RAM_SIZE_MB}"
+    ;;
+esac
 # Disable SIM card emulation. Note: this does NOT prevent QEMU from creating
 # the modem chardev socket (which binds to ::1 and fails when the host has
 # IPv6 disabled). The direct-launch fix is an explicit -radio override, while
@@ -344,17 +358,19 @@ _patch_single_avd_config() {
   _sdk="${ANDROID_SDK_ROOT:-/android/sdk}"
   _api34_sysdir="system-images/android-34/google_apis/x86_64/"
   sed -i '/^hw\.gsmModem=/d' "${_cfg}" 2>/dev/null || true
+  sed -i '/^hw\.ramSize=/d' "${_cfg}" 2>/dev/null || true
   printf 'hw.gsmModem=%s\n' 'no' >> "${_cfg}"
+  printf 'hw.ramSize=%s\n' "${EMULATOR_RAM_SIZE_MB}" >> "${_cfg}"
   if [ -d "${_sdk}/${_api34_sysdir}" ]; then
     sed -i '/^image\.sysdir\.1=/d' "${_cfg}" 2>/dev/null || true
     printf 'image.sysdir.1=%s\n' "${_api34_sysdir}" >> "${_cfg}"
-    log "  [avd-patch] ${_cfg}: set hw.gsmModem=no, image.sysdir.1=${_api34_sysdir}"
+    log "  [avd-patch] ${_cfg}: set hw.gsmModem=no, hw.ramSize=${EMULATOR_RAM_SIZE_MB}, image.sysdir.1=${_api34_sysdir}"
   else
-    log "  [avd-patch] ${_cfg}: set hw.gsmModem=no (API 34 sysdir not found at ${_sdk}/${_api34_sysdir}, sysdir unchanged)"
+    log "  [avd-patch] ${_cfg}: set hw.gsmModem=no, hw.ramSize=${EMULATOR_RAM_SIZE_MB} (API 34 sysdir not found at ${_sdk}/${_api34_sysdir}, sysdir unchanged)"
   fi
 }
 
-log "Patching AVD config.ini files (hw.gsmModem=no + API 34 system image):"
+log "Patching AVD config.ini files (hw.gsmModem=no + ${EMULATOR_RAM_SIZE_MB} MB RAM + API 34 system image):"
 _avd_patched=0
 for _cfg_candidate in \
     "${ANDROID_AVD_HOME}/Pixel2.avd/config.ini" \
@@ -532,6 +548,7 @@ launch_direct_emulator() {
   log "Using direct emulator launch: ${DIRECT_EMULATOR_BIN}"
   log "Direct emulator ports: ${_ports}"
   log "Direct emulator GPU mode: ${EMULATOR_GPU_MODE:-emulator default}"
+  log "Direct emulator RAM: ${EMULATOR_RAM_SIZE_MB} MB"
   log "Direct emulator AVD read-only mode: ${EMULATOR_AVD_READ_ONLY}"
   if [ "${_radio_override_applied}" -eq 1 ]; then
     log "Direct emulator radio override: ${EMULATOR_RADIO_DEVICE}"

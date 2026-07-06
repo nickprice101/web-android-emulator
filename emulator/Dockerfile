@@ -105,8 +105,10 @@ RUN set -eux; \
   _avd_config="${_avd_dir}/config.ini"; \
   if [ -f "${_avd_config}" ]; then \
     sed -i '/^hw\.gsmModem=/d' "${_avd_config}"; \
+    sed -i '/^hw\.ramSize=/d' "${_avd_config}"; \
     printf '%s\n' 'hw.gsmModem=no' >> "${_avd_config}"; \
-    echo "Set hw.gsmModem=no in ${_avd_config} to prevent QEMU modem socket on ::1"; \
+    printf '%s\n' 'hw.ramSize=6144' >> "${_avd_config}"; \
+    echo "Set hw.gsmModem=no and hw.ramSize=6144 in ${_avd_config}"; \
   else \
     echo "WARNING: AVD config not found at ${_avd_config}" >&2; \
     exit 1; \

@@ -393,6 +393,7 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
     let firstBox = "waiting";
     let pendingDebugPatch = null;
     let debugFlushTimer = null;
+    let reader = null;
 
     const flushDebug = () => {
       if (debugFlushTimer) {
@@ -509,7 +510,7 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
         setDetail(`Receiving fragmented MP4 over HTTP from scrcpy at ${GUACAMOLE_HTTP_TARGET_FPS}fps.`);
         onStateChange?.("connected");
         onMessage?.("Connected to Guacamole-style HTTP video tunnel");
-        const reader = response.body.getReader();
+        reader = response.body.getReader();
 
         while (!cancelled) {
           const { value, done } = await reader.read();
@@ -562,6 +563,11 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
     start();
     return () => {
       cancelled = true;
+      if (reader) {
+        reader.cancel().catch(() => {
+          // The fetch may already be aborted or closed.
+        });
+      }
       abortController.abort();
       if (debugFlushTimer) {
         clearTimeout(debugFlushTimer);

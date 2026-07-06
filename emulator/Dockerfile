@@ -2,8 +2,8 @@ ARG EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/30-google-x6
 FROM ${EMULATOR_IMAGE}
 ARG EMULATOR_IMAGE
 
-ARG EMULATOR_SYSTEM_IMAGE=system-images;android-34;google_apis;x86_64
-ARG EMULATOR_PLATFORM=platforms;android-34
+ARG EMULATOR_SYSTEM_IMAGE=system-images;android-35;google_apis;arm64-v8a
+ARG EMULATOR_PLATFORM=platforms;android-35
 ARG EMULATOR_PACKAGE_VERSION=36.5.10
 ARG EMULATOR_PACKAGE_URL=https://dl.google.com/android/repository/emulator-linux_x64-15081367.zip
 ARG EMULATOR_PACKAGE_SHA1=9f03296214df837c608d0d101e5e03ebcebb4343
@@ -12,6 +12,8 @@ ENV ANDROID_USER_HOME=/root/.android \
     ANDROID_EMULATOR_HOME=/root/.android \
     ANDROID_AVD_HOME=/root/.android/avd \
     ANDROID_SDK_HOME=/root \
+    EMULATOR_SYSTEM_IMAGE=${EMULATOR_SYSTEM_IMAGE} \
+    EMULATOR_PLATFORM=${EMULATOR_PLATFORM} \
     PATH=/android/sdk/platform-tools:/android/sdk/emulator:${PATH}
 
 RUN set -eux; \
@@ -118,8 +120,9 @@ RUN set -eux; \
     printf 'path=%s\n' "${_avd_dir}" >> "${_avd_ini}"; \
     printf 'path.rel=%s\n' "Pixel2.avd" >> "${_avd_ini}"; \
   fi; \
+  _image_sysdir="$(printf '%s' "${EMULATOR_SYSTEM_IMAGE}" | tr ';' '/')/"; \
   sed -i '/^image\.sysdir\.1=/d' "${_avd_config}"; \
-  printf 'image.sysdir.1=%s\n' "system-images/android-34/google_apis/x86_64/" >> "${_avd_config}"; \
+  printf 'image.sysdir.1=%s\n' "${_image_sysdir}" >> "${_avd_config}"; \
   rm -rf /Pixel2.avd; \
   ln -s "${_avd_dir}" /Pixel2.avd; \
   rm -f /Pixel2.ini; \

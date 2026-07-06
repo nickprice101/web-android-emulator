@@ -55,7 +55,9 @@ http://YOUR_HOST:18080
 
 ## Emulator Image
 
-The default emulator build uses Google's public emulator base image and then installs the pinned Android emulator package plus Android 14 (API 34) platform/system image during build. The Dockerfile creates a `Pixel2` AVD backed by the `pixel_5` profile and starts the emulator through `emulator/start-emulator.sh`.
+The default emulator build uses Google's public emulator base image and then installs the pinned Android emulator package plus an Android 15 (API 35) Google APIs `arm64-v8a` system image during build. The default platform package is `platforms;android-35`. The Dockerfile creates a `Pixel2` AVD backed by the `pixel_5` profile and starts the emulator through `emulator/start-emulator.sh`.
+
+The selected `EMULATOR_SYSTEM_IMAGE` and `EMULATOR_PLATFORM` are passed into the runtime container too. At startup, `emulator/start-emulator.sh` derives the AVD `image.sysdir.1` path from `EMULATOR_SYSTEM_IMAGE`, so custom SDK packages do not need a hard-coded AVD sysdir patch.
 
 The emulator defaults to `EMULATOR_RAM_SIZE_MB=6144`, and compose gives the emulator service `shm_size: "6gb"`, so memory-heavy AI apps have more than 4GB of Android guest RAM available. Set `EMULATOR_RAM_SIZE_MB` to a higher value before `docker compose up` if a test app needs more.
 
@@ -63,8 +65,8 @@ To pin a different emulator base image or SDK package, build with:
 
 ```bash
 EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297 \
-EMULATOR_SYSTEM_IMAGE=system-images\;android-34\;google_apis\;x86_64 \
-EMULATOR_PLATFORM=platforms\;android-34 \
+EMULATOR_SYSTEM_IMAGE=system-images\;android-35\;google_apis\;arm64-v8a \
+EMULATOR_PLATFORM=platforms\;android-35 \
 docker compose build emulator
 ```
 

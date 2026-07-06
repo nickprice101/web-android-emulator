@@ -237,7 +237,7 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             any(
                 call[0] == "scrcpy"
                 and "--no-window" in call
-                and "--no-playback" in call
+                and "--no-playback" not in call
                 and "--no-audio" in call
                 and "--port" in call
                 and "27183:27283" in call

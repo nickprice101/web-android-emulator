@@ -614,7 +614,6 @@ def scrcpy_video():
                     "--serial",
                     ADB_TARGET,
                     "--no-window",
-                    "--no-playback",
                     "--no-control",
                     "--no-audio",
                     "--port",

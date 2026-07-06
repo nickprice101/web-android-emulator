@@ -1,28 +1,41 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Emulator } from "android-emulator-webrtc/emulator";
 
 const EMULATOR_ASPECT = 1080 / 1920;
-const MIN_RENDERABLE_VIDEO_DIMENSION = 16;
-const NATIVE_WEBRTC_RECOVERY_DELAY_MS = 1500;
-const NATIVE_WEBRTC_MAX_RETRIES = 3;
 const SCRCPY_DEBUG_UPDATE_INTERVAL_MS = 250;
 const GUACAMOLE_HTTP_TARGET_FPS = 24;
 const GUACAMOLE_HTTP_BIT_RATE = 6_000_000;
 const GUACAMOLE_HTTP_MAX_SIZE = 1080;
+const PNG_REFRESH_MS = 1000;
 const STREAM_MODE_OPTIONS = [
   { value: "scrcpy-http", label: "Guacamole HTTP (24fps)" },
   { value: "png", label: "PNG preview" },
 ];
 const STREAM_MODE_VALUES = new Set(STREAM_MODE_OPTIONS.map((option) => option.value));
+const SCRCPY_MP4_MIME_CANDIDATES = [
+  'video/mp4; codecs="avc1.42C029"',
+  'video/mp4; codecs="avc1.42E01E"',
+  'video/mp4; codecs="avc1.4D4029"',
+  'video/mp4; codecs="avc1.640029"',
+  "video/mp4",
+];
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function clampRatio(value) {
   if (!Number.isFinite(value)) {
     return null;
   }
-  return Math.min(1, Math.max(0, value));
+  return clamp(value, 0, 1);
 }
 
-function resolveVideoViewport(container, video) {
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveVideoViewport(container, mediaWidth, mediaHeight) {
   if (!container) {
     return null;
   }
@@ -32,10 +45,7 @@ function resolveVideoViewport(container, video) {
     return null;
   }
 
-  const intrinsicWidth = video?.videoWidth || 0;
-  const intrinsicHeight = video?.videoHeight || 0;
-  const mediaAspect =
-    intrinsicWidth > 0 && intrinsicHeight > 0 ? intrinsicWidth / intrinsicHeight : EMULATOR_ASPECT;
+  const mediaAspect = mediaWidth > 0 && mediaHeight > 0 ? mediaWidth / mediaHeight : EMULATOR_ASPECT;
   const containerAspect = rect.width / rect.height;
 
   let renderWidth = rect.width;
@@ -48,19 +58,17 @@ function resolveVideoViewport(container, video) {
     renderHeight = renderWidth / mediaAspect;
   }
 
-  const offsetX = (rect.width - renderWidth) / 2;
-  const offsetY = (rect.height - renderHeight) / 2;
   return {
     rect,
-    offsetX,
-    offsetY,
+    offsetX: (rect.width - renderWidth) / 2,
+    offsetY: (rect.height - renderHeight) / 2,
     renderWidth,
     renderHeight,
   };
 }
 
-function resolvePointerRatios(event, container, video) {
-  const viewport = resolveVideoViewport(container, video);
+function resolvePointerRatios(event, container, mediaWidth, mediaHeight) {
+  const viewport = resolveVideoViewport(container, mediaWidth, mediaHeight);
   if (!viewport) {
     return null;
   }
@@ -94,1720 +102,75 @@ function mapKeyboardEventToPayload(event) {
     ArrowLeft: { type: "key", key: "ArrowLeft" },
     ArrowRight: { type: "key", key: "ArrowRight" },
   };
+
   if (keyMap[event.key]) {
     return keyMap[event.key];
   }
-
   if (event.key === " " || event.code === "Space") {
     return { type: "key", key: "Space" };
   }
-
   if (event.key.length === 1) {
     return { type: "text", text: event.key };
   }
-
   return null;
 }
 
-function formatClockTime(value) {
-  if (!value) {
-    return "n/a";
-  }
+async function readHttpError(response, label) {
+  const status = `${response.status} ${response.statusText || ""}`.trim();
+  const contentType = response.headers.get("content-type") || "";
   try {
-    return new Date(value).toLocaleTimeString();
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+      return data?.error || data?.message || `${label} failed (${status})`;
+    }
+    const text = await response.text();
+    return text.slice(0, 500) || `${label} failed (${status})`;
   } catch {
-    return String(value);
+    return `${label} failed (${status})`;
   }
 }
 
-function buildVideoStatsSnapshot(video) {
-  if (!video) {
-    return null;
+async function parseJsonResponse(response, label) {
+  if (!response.ok) {
+    throw new Error(await readHttpError(response, label));
   }
-
-  return {
-    readyState: video.readyState,
-    paused: video.paused,
-    ended: video.ended,
-    currentTime: Number(video.currentTime || 0).toFixed(2),
-    videoWidth: video.videoWidth || 0,
-    videoHeight: video.videoHeight || 0,
-    networkState: video.networkState,
-  };
+  return response.json();
 }
 
-function buildInboundVideoStats(reports) {
-  let inbound = null;
-  let track = null;
-  let transport = null;
-  let selectedPair = null;
-
-  reports.forEach((report) => {
-    if (report.type === "inbound-rtp" && report.kind === "video" && !report.isRemote) {
-      inbound = report;
-      return;
+async function fetchWithRetry(url, options = {}, retry = {}) {
+  const maxAttempts = retry.maxAttempts || 1;
+  const baseDelayMs = retry.baseDelayMs || 500;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (retry.isCancelled?.()) {
+      throw new DOMException("Request cancelled", "AbortError");
     }
-    if (report.type === "track" && report.kind === "video") {
-      track = report;
-    }
-  });
-
-  if (inbound?.transportId) {
-    transport = reports.get(inbound.transportId) || null;
-    if (transport?.selectedCandidatePairId) {
-      selectedPair = reports.get(transport.selectedCandidatePairId) || null;
-    }
-  }
-
-  return {
-    packetsReceived: inbound?.packetsReceived ?? 0,
-    bytesReceived: inbound?.bytesReceived ?? 0,
-    framesDecoded: inbound?.framesDecoded ?? track?.framesDecoded ?? 0,
-    framesReceived: inbound?.framesReceived ?? track?.framesReceived ?? 0,
-    framesPerSecond: inbound?.framesPerSecond ?? null,
-    keyFramesDecoded: inbound?.keyFramesDecoded ?? 0,
-    firCount: inbound?.firCount ?? 0,
-    pliCount: inbound?.pliCount ?? 0,
-    nackCount: inbound?.nackCount ?? 0,
-    jitter: inbound?.jitter ?? null,
-    decoderImplementation: inbound?.decoderImplementation || null,
-    frameWidth: track?.frameWidth ?? inbound?.frameWidth ?? 0,
-    frameHeight: track?.frameHeight ?? inbound?.frameHeight ?? 0,
-    selectedCandidatePair: selectedPair
-      ? {
-          state: selectedPair.state || null,
-          currentRoundTripTime: selectedPair.currentRoundTripTime ?? null,
-          availableIncomingBitrate: selectedPair.availableIncomingBitrate ?? null,
-        }
-      : null,
-  };
-}
-
-function countSdpIceCandidates(sdp) {
-  if (!sdp) {
-    return 0;
-  }
-  const matches = String(sdp).match(/^a=candidate:/gm);
-  return matches ? matches.length : 0;
-}
-
-function isLoopbackAddress(address) {
-  return address === "::1" || address === "localhost" || /^127\./.test(address);
-}
-
-function isPrivateAddress(address) {
-  if (!address) {
-    return false;
-  }
-  if (isLoopbackAddress(address)) {
-    return true;
-  }
-  if (/^10\./.test(address) || /^192\.168\./.test(address) || /^169\.254\./.test(address)) {
-    return true;
-  }
-  const match172 = address.match(/^172\.(\d{1,3})\./);
-  if (match172) {
-    const octet = Number(match172[1]);
-    if (octet >= 16 && octet <= 31) {
-      return true;
-    }
-  }
-  return /^(fc|fd|fe80)/i.test(address);
-}
-
-function parseSdpCandidateDiagnostics(sdp) {
-  const summary = {
-    total: 0,
-    relay: 0,
-    srflx: 0,
-    host: 0,
-    publicHost: 0,
-    privateHost: 0,
-    loopbackHost: 0,
-    addresses: [],
-  };
-
-  if (!sdp) {
-    return summary;
-  }
-
-  const lines = String(sdp)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("a=candidate:"));
-
-  for (const line of lines) {
-    const parts = line.slice("a=candidate:".length).split(/\s+/);
-    const address = parts[4] || "";
-    const typeIndex = parts.indexOf("typ");
-    const candidateType = typeIndex >= 0 ? parts[typeIndex + 1] : "";
-
-    summary.total += 1;
-    if (address && !summary.addresses.includes(address)) {
-      summary.addresses.push(address);
-    }
-
-    if (candidateType === "relay") {
-      summary.relay += 1;
-      continue;
-    }
-    if (candidateType === "srflx") {
-      summary.srflx += 1;
-      continue;
-    }
-    if (candidateType === "host") {
-      summary.host += 1;
-      if (isLoopbackAddress(address)) {
-        summary.loopbackHost += 1;
-      } else if (isPrivateAddress(address)) {
-        summary.privateHost += 1;
-      } else {
-        summary.publicHost += 1;
-      }
-    }
-  }
-
-  return summary;
-}
-
-function parseSdpVideoSection(sdp) {
-  if (!sdp) {
-    return null;
-  }
-
-  const lines = String(sdp)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  let current = null;
-  for (const line of lines) {
-    if (line.startsWith("m=")) {
-      const [, kind = "unknown"] = line.slice(2).split(/\s+/);
-      current =
-        kind === "video"
-          ? { kind, direction: "sendrecv", mid: null, trackId: null, codecs: [], candidates: 0 }
-          : null;
-      continue;
-    }
-
-    if (!current) {
-      continue;
-    }
-    if (line.startsWith("a=sendrecv") || line.startsWith("a=sendonly") || line.startsWith("a=recvonly") || line.startsWith("a=inactive")) {
-      current.direction = line.slice(2);
-      continue;
-    }
-    if (line.startsWith("a=mid:")) {
-      current.mid = line.slice("a=mid:".length);
-      continue;
-    }
-    if (line.startsWith("a=msid:")) {
-      const [, trackId = ""] = line.slice("a=msid:".length).split(/\s+/, 2);
-      current.trackId = trackId || null;
-      continue;
-    }
-    if (line.startsWith("a=rtpmap:")) {
-      current.codecs.push(line.slice("a=rtpmap:".length));
-      continue;
-    }
-    if (line.startsWith("a=candidate:")) {
-      current.candidates += 1;
-    }
-  }
-
-  return current;
-}
-
-function formatCandidateTypeSummary(candidateTypes) {
-  if (!candidateTypes) {
-    return "n/a";
-  }
-
-  return [
-    `total ${candidateTypes.total ?? 0}`,
-    `relay ${candidateTypes.relay ?? 0}`,
-    `host ${candidateTypes.host ?? 0}`,
-    `srflx ${candidateTypes.srflx ?? 0}`,
-    `prflx ${candidateTypes.prflx ?? 0}`,
-  ].join(" | ");
-}
-
-function formatBridgeTlsStatus(tls) {
-  if (tls.skipped) {
-    return "skipped";
-  }
-  return tls.ok ? "ok" : `failed (${tls.message || "unknown"})`;
-}
-
-function formatAnswerAttemptSummary(attempts) {
-  const normalizedAttempts = Array.isArray(attempts) ? attempts : [];
-  if (normalizedAttempts.length === 0) {
-    return "No bridge ICE attempts recorded yet.";
-  }
-
-  return normalizedAttempts
-    .map((attempt, index) => {
-      const candidateSummary = formatCandidateTypeSummary(attempt?.diagnostics?.candidateTypes);
-      const errorCount = Array.isArray(attempt?.candidateErrors) ? attempt.candidateErrors.length : 0;
-      return `attempt ${index + 1}: ${attempt?.iceTransportPolicy || "unknown"} | ${candidateSummary} | errors ${errorCount}`;
-    })
-    .join("\n");
-}
-
-function describeCaptureMode(mode) {
-  if (mode === "adb-screenrecord") {
-    return "streaming";
-  }
-  if (mode === "adb-screencap") {
-    return "screen captures";
-  }
-  if (mode === "scrcpy-http") {
-    return "scrcpy HTTP video";
-  }
-  if (mode === "stub") {
-    return "disabled";
-  }
-  return mode || "unknown";
-}
-
-function describeCaptureBackend(mode) {
-  if (mode === "adb-screenrecord") {
-    return "apkbridge /screenrecord";
-  }
-  if (mode === "adb-screencap") {
-    return "apkbridge /frame";
-  }
-  if (mode === "scrcpy-http") {
-    return "apkbridge /scrcpy-video";
-  }
-  if (mode === "stub") {
-    return "stub mode";
-  }
-  return mode || "unknown";
-}
-
-function describeCaptureReason(reason, activeMode) {
-  if (reason === "initial-start") {
-    return activeMode === "adb-screenrecord"
-      ? "The bridge is using the low-latency screenrecord stream."
-      : "The bridge started directly in screen-capture polling mode.";
-  }
-  if (reason === "screenrecord-retry") {
-    return "The bridge is retrying the screen streaming path.";
-  }
-  if (reason === "screenrecord-restored") {
-    return "Screen streaming delivered a frame again, so the bridge switched back to streaming.";
-  }
-  if (reason === "screenrecord-first-frame-timeout") {
-    return "Screen streaming never produced a first frame, so the WebRTC session stayed on the native stream path and failed.";
-  }
-  if (!reason) {
-    return "";
-  }
-  return reason.replace(/-/g, " ");
-}
-
-function describeScreenrecordVerification(screenrecord) {
-  const verification = screenrecord?.verification || null;
-  if (verification === "verified") {
-    return "Screen streaming is verified: the bridge received H.264 data and decoded at least one frame.";
-  }
-  if (verification === "receiving-h264") {
-    return "Screen streaming connected and H.264 bytes are arriving; waiting for the first decoded frame.";
-  }
-  if (verification === "waiting-for-decoded-frame") {
-    return "Screen streaming is receiving H.264 data, but the bridge has not decoded a frame yet and is using an extended grace window.";
-  }
-  if (verification === "pending") {
-    return "Screen streaming is still being verified.";
-  }
-  return "";
-}
-
-function buildCaptureOverlay(sessionInfo, logs, receiverStats) {
-  const requestedMode = sessionInfo?.media?.requestedSource || sessionInfo?.mode || null;
-  const activeMode = sessionInfo?.media?.source || requestedMode || null;
-  const usingFallback = Boolean(sessionInfo?.media?.usingFallback);
-  const activeReason = sessionInfo?.media?.fallbackReason || sessionInfo?.media?.activeReason || null;
-  const screenrecord = sessionInfo?.media?.screenrecord || null;
-  const latestLog = (Array.isArray(logs) ? [...logs].reverse() : []).find((entry) =>
-    ["Capture pipeline started", "Connected to apkbridge screenrecord stream"].includes(
-      entry?.message
-    )
-  );
-  const fpsValue =
-    receiverStats?.framesPerSecond != null && Number.isFinite(receiverStats.framesPerSecond)
-      ? Math.round(receiverStats.framesPerSecond)
-      : null;
-
-  return {
-    requestedLabel: describeCaptureMode(requestedMode),
-    activeLabel: describeCaptureMode(activeMode),
-    backendLabel: describeCaptureBackend(activeMode),
-    verificationLine: describeScreenrecordVerification(screenrecord),
-    usingFallback,
-    statusLine:
-      requestedMode === "adb-screenrecord" &&
-      activeMode === "adb-screenrecord" &&
-      screenrecord?.verification === "verified"
-        ? "verified streaming active"
-        : requestedMode && activeMode && requestedMode !== activeMode
-        ? `requested ${describeCaptureMode(requestedMode)} -> active ${describeCaptureMode(activeMode)}`
-        : `${describeCaptureMode(activeMode)} active`,
-    reasonLine:
-      describeCaptureReason(activeReason, activeMode) ||
-      latestLog?.message ||
-      (activeMode === "adb-screenrecord"
-        ? "The bridge is trying to keep the streaming path active."
-        : "The bridge is polling still frames from the emulator."),
-    fpsLine: fpsValue == null ? null : `${fpsValue} fps in browser`,
-  };
-}
-
-function formatDiagnosticDetails(details) {
-  if (!details) {
-    return "";
-  }
-  try {
-    return JSON.stringify(details);
-  } catch {
-    return String(details);
-  }
-}
-
-function formatRuntimeEvent(entry) {
-  if (!entry) {
-    return "";
-  }
-  return `[${formatClockTime(entry.at)}] ${entry.message}${entry.details ? ` ${formatDiagnosticDetails(entry.details)}` : ""}`;
-}
-
-function formatBridgeLog(entry) {
-  if (!entry) {
-    return "";
-  }
-  const level = entry.level ? entry.level.toUpperCase() : "INFO";
-  return `[${formatClockTime(entry.at)}] ${level} ${entry.message}${entry.details ? ` ${formatDiagnosticDetails(entry.details)}` : ""}`;
-}
-
-function appendBoundedEvent(previous, message, details = null, limit = 40) {
-  const entry = {
-    at: new Date().toISOString(),
-    message,
-    details,
-  };
-  return [...previous, entry].slice(-limit);
-}
-
-function summarizeIceServers(iceServers) {
-  const urls = (Array.isArray(iceServers) ? iceServers : [])
-    .flatMap((server) => (Array.isArray(server?.urls) ? server.urls : server?.urls ? [server.urls] : []))
-    .map((value) => String(value));
-
-  return {
-    count: urls.length,
-    hasTurn: urls.some((value) => value.startsWith("turn:") || value.startsWith("turns:")),
-    hasStun: urls.some((value) => value.startsWith("stun:") || value.startsWith("stuns:")),
-    urls,
-  };
-}
-
-function normalizeIceServerUrls(iceServers) {
-  return summarizeIceServers(iceServers).urls
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .sort();
-}
-
-function haveSameIceServerUrls(left, right) {
-  const leftUrls = normalizeIceServerUrls(left);
-  const rightUrls = normalizeIceServerUrls(right);
-  if (leftUrls.length !== rightUrls.length) {
-    return false;
-  }
-  return leftUrls.every((value, index) => value === rightUrls[index]);
-}
-
-function formatIceServerSummary(summary) {
-  if (!summary) {
-    return "n/a";
-  }
-  return [
-    `urls=${summary.count ?? 0}`,
-    `turn=${summary.hasTurn ? "yes" : "no"}`,
-    `stun=${summary.hasStun ? "yes" : "no"}`,
-    summary.urls?.length ? `first=${summary.urls[0]}` : null,
-  ]
-    .filter(Boolean)
-    .join(" | ");
-}
-
-function buildMissingTurnNotice(summary) {
-  if (!summary || summary.hasTurn) {
-    return "";
-  }
-  return "The emulator's native RTC config did not advertise any TURN server, so coturn will not receive traffic for this session.";
-}
-
-function buildPeerConnectionStats(reports) {
-  let inbound = null;
-  let track = null;
-  let transport = null;
-  let selectedPair = null;
-  let localCandidate = null;
-  let remoteCandidate = null;
-
-  reports.forEach((report) => {
-    if (report.type === "inbound-rtp" && report.kind === "video" && !report.isRemote) {
-      inbound = report;
-      return;
-    }
-    if (report.type === "track" && report.kind === "video") {
-      track = report;
-      return;
-    }
-    if (report.type === "transport" && inbound?.transportId && report.id === inbound.transportId) {
-      transport = report;
-      return;
-    }
-    if (report.type === "candidate-pair" && transport?.selectedCandidatePairId && report.id === transport.selectedCandidatePairId) {
-      selectedPair = report;
-    }
-  });
-
-  if (inbound?.transportId) {
-    transport = reports.get(inbound.transportId) || transport;
-  }
-  if (transport?.selectedCandidatePairId) {
-    selectedPair = reports.get(transport.selectedCandidatePairId) || selectedPair;
-  }
-  if (selectedPair?.localCandidateId) {
-    localCandidate = reports.get(selectedPair.localCandidateId) || null;
-  }
-  if (selectedPair?.remoteCandidateId) {
-    remoteCandidate = reports.get(selectedPair.remoteCandidateId) || null;
-  }
-
-  return {
-    packetsReceived: inbound?.packetsReceived ?? 0,
-    bytesReceived: inbound?.bytesReceived ?? 0,
-    framesReceived: inbound?.framesReceived ?? track?.framesReceived ?? 0,
-    framesDecoded: inbound?.framesDecoded ?? track?.framesDecoded ?? 0,
-    framesPerSecond: inbound?.framesPerSecond ?? null,
-    keyFramesDecoded: inbound?.keyFramesDecoded ?? 0,
-    pliCount: inbound?.pliCount ?? 0,
-    firCount: inbound?.firCount ?? 0,
-    nackCount: inbound?.nackCount ?? 0,
-    jitter: inbound?.jitter ?? null,
-    decoderImplementation: inbound?.decoderImplementation || null,
-    frameWidth: inbound?.frameWidth ?? track?.frameWidth ?? 0,
-    frameHeight: inbound?.frameHeight ?? track?.frameHeight ?? 0,
-    selectedCandidatePair: selectedPair
-      ? {
-          state: selectedPair.state || null,
-          currentRoundTripTime: selectedPair.currentRoundTripTime ?? null,
-          availableIncomingBitrate: selectedPair.availableIncomingBitrate ?? null,
-          localCandidateType: localCandidate?.candidateType || null,
-          remoteCandidateType: remoteCandidate?.candidateType || null,
-          localAddress: localCandidate?.address || null,
-          remoteAddress: remoteCandidate?.address || null,
-          localProtocol: localCandidate?.protocol || null,
-          remoteProtocol: remoteCandidate?.protocol || null,
-        }
-      : null,
-  };
-}
-
-function buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDiagnostics) {
-  const peerStats = nativeDiagnostics?.peerStats || null;
-  const peerStates = nativeDiagnostics?.peerStates || null;
-  const startSummary = nativeDiagnostics?.startIceServers || null;
-  const remoteCandidates = nativeDiagnostics?.remoteCandidateSummary || parseSdpCandidateDiagnostics(nativeDiagnostics?.remoteDescriptionSdp || "");
-  const localCandidates = nativeDiagnostics?.localCandidateSummary || parseSdpCandidateDiagnostics(nativeDiagnostics?.localDescriptionSdp || "");
-  const tinyVideo = isTinyVideoFrame(videoStats);
-  const renderableVideo = hasRenderableVideo(videoStats, peerStats, hasVideoFrame);
-  const packetsReceived = Number(peerStats?.packetsReceived ?? 0);
-  const bytesReceived = Number(peerStats?.bytesReceived ?? 0);
-  const framesReceived = Number(peerStats?.framesReceived ?? 0);
-  const framesDecoded = Number(peerStats?.framesDecoded ?? 0);
-  const selectedPair = peerStats?.selectedCandidatePair || null;
-  const connectionState = peerStates?.connectionState || "";
-  const iceConnectionState = peerStates?.iceConnectionState || "";
-  const peerLikelyActive =
-    connectionState === "connecting" ||
-    connectionState === "connected" ||
-    iceConnectionState === "checking" ||
-    iceConnectionState === "connected" ||
-    iceConnectionState === "completed" ||
-    packetsReceived > 0 ||
-    bytesReceived > 0 ||
-    framesReceived > 0 ||
-    framesDecoded > 0;
-  const transportConnected =
-    connectionState === "connected" ||
-    iceConnectionState === "connected" ||
-    iceConnectionState === "completed" ||
-    Boolean(selectedPair);
-  const transportFailed =
-    emuState === "disconnected" ||
-    emuState === "error" ||
-    connectionState === "failed" ||
-    connectionState === "disconnected" ||
-    connectionState === "closed" ||
-    iceConnectionState === "failed" ||
-    iceConnectionState === "disconnected" ||
-    iceConnectionState === "closed";
-
-  if (renderableVideo) {
-    return {
-      code: "rendering",
-      summary: "The browser has decoded at least one real emulator frame from the native WebRTC stream.",
-    };
-  }
-
-  if ((emuState === "disconnected" || emuState === "error") && !peerLikelyActive) {
-    if (startSummary && !startSummary.hasTurn && !startSummary.hasStun) {
-      return {
-        code: "missing-ice-servers",
-        summary:
-          "The emulator created a native WebRTC session without advertising any STUN or TURN servers, so remote browsers may have no reachable ICE path.",
-      };
-    }
-    return {
-      code: "disconnected",
-      summary: "The native emulator session dropped before the browser rendered a usable frame.",
-    };
-  }
-
-  if (tinyVideo && framesDecoded > 0) {
-    return {
-      code: "placeholder-frame",
-      summary:
-        "Inbound RTP is arriving and the browser decoded frames, but the video element is still stuck on a tiny placeholder frame instead of the emulator surface.",
-    };
-  }
-
-  if (emuState === "connected" && startSummary && !startSummary.hasTurn && !startSummary.hasStun) {
-    return {
-      code: "missing-ice-servers",
-      summary:
-        "The emulator created a native WebRTC session without advertising any STUN or TURN servers, so remote browsers may have no reachable ICE path.",
-    };
-  }
-
-  const hostOnlyRemote =
-    remoteCandidates.total > 0 &&
-    remoteCandidates.relay === 0 &&
-    remoteCandidates.srflx === 0 &&
-    remoteCandidates.publicHost === 0;
-  const hostOnlyLocal =
-    localCandidates.total > 0 &&
-    localCandidates.relay === 0 &&
-    localCandidates.srflx === 0 &&
-    localCandidates.publicHost === 0;
-
-  if (!selectedPair && packetsReceived === 0 && hostOnlyRemote && hostOnlyLocal) {
-    return {
-      code: "unreachable-host-candidates",
-      summary:
-        "The native session only exposed private or loopback ICE candidates and never selected a working pair, so the browser had no reachable media path.",
-    };
-  }
-
-  if (
-    transportFailed &&
-    !selectedPair &&
-    packetsReceived === 0 &&
-    bytesReceived === 0 &&
-    framesReceived === 0 &&
-    framesDecoded === 0 &&
-    (localCandidates.relay ?? 0) > 0 &&
-    (remoteCandidates.relay ?? 0) === 0
-  ) {
-    return {
-      code: "native-relay-connectivity-failed",
-      summary:
-        "The browser gathered TURN relay candidates, but the emulator still only advertised non-relay candidates and never selected a working ICE pair or delivered RTP. This deployment is not establishing native media over the relay path.",
-    };
-  }
-
-  if (emuState === "connected" && transportConnected && packetsReceived === 0 && bytesReceived === 0) {
-    return {
-      code: "no-inbound-rtp",
-      summary:
-        "Signaling completed and the peer connection reported connected, but the browser never received inbound RTP packets from the emulator.",
-    };
-  }
-
-  if ((packetsReceived > 0 || bytesReceived > 0 || framesReceived > 0) && framesDecoded === 0) {
-    return {
-      code: "decode-stalled",
-      summary:
-        "The browser is receiving native WebRTC video packets, but no frames have been decoded yet. This points to a decode, codec, or keyframe problem rather than pure connectivity.",
-    };
-  }
-
-  return {
-    code: "awaiting-first-frame",
-    summary: "Signaling reached the emulator, but the browser has not decoded the first usable emulator frame yet.",
-  };
-}
-
-function hasRenderableVideo(videoStats, receiverStats, hasVideo = false) {
-  const readyState = Number(videoStats?.readyState ?? 0);
-  const videoWidth = Number(videoStats?.videoWidth ?? 0);
-  const videoHeight = Number(videoStats?.videoHeight ?? 0);
-  const framesReceived = Number(receiverStats?.framesReceived ?? 0);
-  const framesDecoded = Number(receiverStats?.framesDecoded ?? 0);
-
-  // A placeholder track (e.g. the emulator's initial 2×2 keep-alive frame) may
-  // increment framesDecoded without delivering a real emulator surface.  Guard
-  // against that by requiring the video element to have settled on real
-  // dimensions before we treat decoded frames as proof of a valid stream.
-  const hasValidDimensions =
-    videoWidth >= MIN_RENDERABLE_VIDEO_DIMENSION &&
-    videoHeight >= MIN_RENDERABLE_VIDEO_DIMENSION;
-
-  return (
-    Boolean(hasVideo) ||
-    (framesDecoded > 0 && hasValidDimensions) ||
-    (framesReceived > 0 &&
-      readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
-      hasValidDimensions)
-  );
-}
-
-function isTinyVideoFrame(videoStats) {
-  const videoWidth = Number(videoStats?.videoWidth ?? 0);
-  const videoHeight = Number(videoStats?.videoHeight ?? 0);
-  return (
-    videoWidth > 0 &&
-    videoHeight > 0 &&
-    videoWidth < MIN_RENDERABLE_VIDEO_DIMENSION &&
-    videoHeight < MIN_RENDERABLE_VIDEO_DIMENSION
-  );
-}
-
-function isNativeUpstreamSendingVideo(peerStats) {
-  if (!peerStats) {
-    return false;
-  }
-
-  return (
-    Number(peerStats.packetsReceived ?? 0) > 0 ||
-    Number(peerStats.bytesReceived ?? 0) > 0 ||
-    Number(peerStats.framesReceived ?? 0) > 0
-  );
-}
-
-function shouldFallbackNativeIceTransport(nativeDiagnostics, nativeFailureReason) {
-  const startSummary = nativeDiagnostics?.startIceServers;
-  const localCandidates = nativeDiagnostics?.localCandidateSummary;
-  const remoteCandidates = nativeDiagnostics?.remoteCandidateSummary;
-  const selectedPair = nativeDiagnostics?.peerStats?.selectedCandidatePair || null;
-  const packetsReceived = Number(nativeDiagnostics?.peerStats?.packetsReceived ?? 0);
-  const bytesReceived = Number(nativeDiagnostics?.peerStats?.bytesReceived ?? 0);
-
-  if (!startSummary?.hasTurn || selectedPair) {
-    return false;
-  }
-
-  if (!["disconnected", "no-inbound-rtp", "unreachable-host-candidates"].includes(nativeFailureReason?.code || "")) {
-    return false;
-  }
-
-  const localRelayOnly =
-    (localCandidates?.total ?? 0) > 0 &&
-    (localCandidates?.relay ?? 0) > 0 &&
-    (localCandidates?.host ?? 0) === 0 &&
-    (localCandidates?.srflx ?? 0) === 0 &&
-    (localCandidates?.publicHost ?? 0) === 0;
-  const remoteNoRelay = (remoteCandidates?.total ?? 0) > 0 && (remoteCandidates?.relay ?? 0) === 0;
-  const noInboundMedia = packetsReceived === 0 && bytesReceived === 0;
-
-  return localRelayOnly && remoteNoRelay && noInboundMedia;
-}
-
-function buildCustomWebrtcOverlay(webrtcDiagnostics) {
-  const bridgeOverlay = buildCaptureOverlay(
-    webrtcDiagnostics?.sessionInfo,
-    webrtcDiagnostics?.logs,
-    webrtcDiagnostics?.receiverStats
-  );
-  const sessionState = webrtcDiagnostics?.sessionInfo?.state || "initializing";
-  const sessionMessage = webrtcDiagnostics?.sessionMessage || "";
-  const videoReady = hasRenderableVideo(
-    webrtcDiagnostics?.videoStats,
-    webrtcDiagnostics?.receiverStats,
-    webrtcDiagnostics?.hasVideo
-  );
-  const disconnected = ["failed", "disconnected", "closed", "expired", "media-failed"].includes(sessionState);
-
-  if (videoReady) {
-    return {
-      requestedLabel: "custom WebRTC",
-      activeLabel: "custom WebRTC",
-      backendLabel: "bridge-webrtc /bridge/api/session",
-      verificationLine: "The browser has decoded emulator video from the repository's custom WebRTC bridge.",
-      usingFallback: false,
-      statusLine: "custom WebRTC rendering",
-      reasonLine: sessionMessage || "Decoded emulator frames are reaching the browser video element.",
-      fpsLine: bridgeOverlay.fpsLine,
-    };
-  }
-
-  if (disconnected) {
-    return {
-      requestedLabel: "custom WebRTC",
-      activeLabel: "custom WebRTC",
-      backendLabel: "bridge-webrtc /bridge/api/session",
-      verificationLine:
-        bridgeOverlay.verificationLine || "The browser never rendered a decoded frame before the WebRTC session dropped.",
-      usingFallback: false,
-      statusLine: "custom WebRTC disconnected",
-      reasonLine: sessionMessage || "The bridge session disconnected before the browser rendered a frame.",
-      fpsLine: bridgeOverlay.fpsLine,
-    };
-  }
-
-  return {
-    requestedLabel: "custom WebRTC",
-    activeLabel: "custom WebRTC",
-    backendLabel: "bridge-webrtc /bridge/api/session",
-    verificationLine:
-      bridgeOverlay.verificationLine || "Negotiation completed, but the browser is still waiting for the first decoded frame.",
-    usingFallback: false,
-    statusLine: "custom WebRTC awaiting first frame",
-    reasonLine: sessionMessage || "The bridge session exists, but the browser has not rendered a frame yet.",
-    fpsLine: bridgeOverlay.fpsLine,
-  };
-}
-
-function buildNativeWebrtcOverlay(emuState, videoStats, hasVideoFrame, nativeDiagnostics) {
-  const videoReady = hasRenderableVideo(videoStats, nativeDiagnostics?.peerStats, hasVideoFrame);
-  const tinyVideo = isTinyVideoFrame(videoStats);
-  const videoSize =
-    videoStats?.videoWidth > 0 && videoStats?.videoHeight > 0
-      ? `${videoStats.videoWidth}x${videoStats.videoHeight}`
-      : "unknown";
-  const readyState = Number(videoStats?.readyState ?? 0);
-  const peerStats = nativeDiagnostics?.peerStats || null;
-  const failure = buildNativeFailureReason(emuState, videoStats, hasVideoFrame, nativeDiagnostics);
-  const verificationParts = [`Browser video readyState ${readyState} | size ${videoSize}`];
-  if (peerStats) {
-    verificationParts.push(
-      `RTP packets ${peerStats.packetsReceived ?? 0} | decoded ${peerStats.framesDecoded ?? 0}`
-    );
-  }
-  const verificationLine = verificationParts.join(" | ");
-
-  if (videoReady) {
-    return {
-      backendLabel: "native emulator WebRTC / gRPC-Web",
-      statusLine: "native WebRTC rendering",
-      reasonLine: "The browser decoded at least one frame from the emulator's direct WebRTC stream.",
-      verificationLine,
-    };
-  }
-
-  if (emuState === "disconnected" || emuState === "error") {
-    return {
-      backendLabel: "native emulator WebRTC / gRPC-Web",
-      statusLine: "native WebRTC disconnected",
-      reasonLine: failure.summary,
-      verificationLine:
-        verificationLine +
-        " | If TURN used to work and now shows no allocations, inspect the emulator's native ICE/TURN advertisement rather than the old bridge path.",
-    };
-  }
-
-  if (tinyVideo) {
-    return {
-      backendLabel: "native emulator WebRTC / gRPC-Web",
-      statusLine: "native WebRTC placeholder frame",
-      reasonLine: failure.summary,
-      verificationLine,
-    };
-  }
-
-  if (emuState === "connected") {
-    return {
-      backendLabel: "native emulator WebRTC / gRPC-Web",
-      statusLine: "native WebRTC awaiting first frame",
-      reasonLine: failure.summary,
-      verificationLine,
-    };
-  }
-
-  return {
-    backendLabel: "native emulator WebRTC / gRPC-Web",
-    statusLine: "native WebRTC connecting",
-    reasonLine: failure.summary,
-    verificationLine,
-  };
-}
-
-function waitForIceGatheringComplete(peer, timeoutMs = 10000) {
-  if (!peer) {
-    return Promise.reject(new Error("RTCPeerConnection is not available"));
-  }
-
-  if (peer.iceGatheringState === "complete") {
-    return Promise.resolve();
-  }
-
-  return new Promise((resolve) => {
-    const timeout = window.setTimeout(() => {
-      // Proceed with whatever candidates have been gathered so far rather than
-      // aborting the session.  Host candidates are collected almost instantly;
-      // if STUN/TURN gathering is slow the offer will still work with the
-      // candidates that are already in peer.localDescription.
-      cleanup();
-      resolve();
-    }, timeoutMs);
-
-    function cleanup() {
-      window.clearTimeout(timeout);
-      peer.removeEventListener("icegatheringstatechange", onChange);
-    }
-
-    function onChange() {
-      if (peer.iceGatheringState === "complete") {
-        cleanup();
-        resolve();
-      }
-    }
-
-    peer.addEventListener("icegatheringstatechange", onChange);
-  });
-}
-
-/**
- * Fetch a URL, retrying on transient network errors (TypeError — e.g. Chrome's
- * "Failed to fetch" when the server is briefly unreachable).  HTTP error
- * responses are surfaced immediately without retrying because they carry
- * meaningful status codes that should not be masked.
- *
- * @param {string} url - The URL to fetch.
- * @param {RequestInit|undefined} options - Standard fetch options.
- * @param {object} [retryOptions]
- * @param {number} [retryOptions.maxAttempts=3] - Maximum number of attempts.
- * @param {number} [retryOptions.baseDelayMs=800] - Base delay in ms; each retry
- *   uses `baseDelayMs * attemptNumber` (linear back-off).
- * @param {() => boolean} [retryOptions.isCancelled] - Return true to abort
- *   retrying early (e.g. when the enclosing React effect has been cleaned up).
- * @returns {Promise<Response>} - Resolves with the first successful Response.
- * @throws {TypeError} - Rethrows the last network error after all attempts.
- */
-async function fetchWithRetry(url, options, { maxAttempts = 3, baseDelayMs = 800, isCancelled = () => false } = {}) {
-  let lastError;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      return await fetch(url, options);
+      const response = await fetch(url, options);
+      const retryable = [500, 502, 503, 504].includes(response.status);
+      if (response.ok || !retryable || attempt === maxAttempts) {
+        return response;
+      }
+      try {
+        await response.body?.cancel();
+      } catch {
+        // Ignore body cancellation failures between retry attempts.
+      }
     } catch (error) {
-      if (!(error instanceof TypeError)) {
+      if (attempt === maxAttempts || options.signal?.aborted || retry.isCancelled?.()) {
         throw error;
       }
-      lastError = error;
-      // Either stop retrying because the caller has been cancelled, or apply
-      // backoff before the next attempt.  Both checks are inside the catch
-      // block so they are only reached after a network-level failure.
-      if (isCancelled()) {
-        throw lastError;
-      }
-      if (attempt < maxAttempts - 1) {
-        await new Promise((resolve) => setTimeout(resolve, baseDelayMs * (attempt + 1)));
-        if (isCancelled()) {
-          throw lastError;
-        }
-      }
     }
+    await delay(baseDelayMs * attempt);
   }
-  throw lastError;
+  throw new Error(`${url} failed after ${maxAttempts} attempts`);
 }
 
-async function parseJsonResponse(resp, label) {
-  const text = await resp.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    const snippet = text.slice(0, 200);
-    if (snippet.includes("no healthy upstream")) {
-      throw new Error(
-        `${label} is unavailable because Envoy could not route to the bridge-webrtc upstream. This is separate from /api/health and usually means the custom bridge route is unavailable, unresolved, or not marked healthy yet.`
-      );
-    }
-    throw new Error(`${label} returned non-JSON: ${snippet}`);
+function selectScrcpyMimeType() {
+  if (!window.MediaSource || typeof window.MediaSource.isTypeSupported !== "function") {
+    return SCRCPY_MP4_MIME_CANDIDATES[0];
   }
-  if (!resp.ok) {
-    throw new Error(data.error || data.message || `${label} failed (${resp.status})`);
-  }
-  return data;
+  return SCRCPY_MP4_MIME_CANDIDATES.find((candidate) => window.MediaSource.isTypeSupported(candidate)) || "";
 }
-
-async function readHttpError(resp, label) {
-  const text = await resp.text().catch(() => "");
-  try {
-    const data = JSON.parse(text);
-    return data.error || data.message || `${label} failed (${resp.status})`;
-  } catch {
-    return text.slice(0, 200) || `${label} failed (${resp.status})`;
-  }
-}
-
-function mapBridgeSessionState(sessionState, hasVideo, videoStats, receiverStats) {
-  if (hasRenderableVideo(videoStats, receiverStats, hasVideo)) {
-    return "connected";
-  }
-
-  if (["failed", "disconnected", "closed", "expired", "media-failed"].includes(sessionState)) {
-    return "disconnected";
-  }
-
-  return "connecting";
-}
-
-function CustomWebrtcPane({ active, width, height, onStateChange, onMessage, inputRef, onDiagnosticsChange }) {
-  const containerRef = useRef(null);
-  const videoRef = useRef(null);
-  const peerRef = useRef(null);
-  const sessionRef = useRef(null);
-  const eventSourceRef = useRef(null);
-  const gestureRef = useRef(null);
-  const [bridgeState, setBridgeState] = useState("idle");
-  const [sessionState, setSessionState] = useState("idle");
-  const [sessionInfo, setSessionInfo] = useState(null);
-  const [notes, setNotes] = useState([]);
-  const [sessionMessage, setSessionMessage] = useState("");
-  const [logs, setLogs] = useState([]);
-  const [hasVideo, setHasVideo] = useState(false);
-  const [runtimeEvents, setRuntimeEvents] = useState([]);
-  const [videoStats, setVideoStats] = useState(null);
-  const [receiverStats, setReceiverStats] = useState(null);
-  const [answerSdp, setAnswerSdp] = useState("");
-  const [offerSummary, setOfferSummary] = useState("Offer not created yet.");
-  const [focusActive, setFocusActive] = useState(false);
-
-  const sendSessionInput = useCallback(
-    async (payload) => {
-      if (!sessionRef.current) {
-        throw new Error("WebRTC session is not ready yet.");
-      }
-
-      const response = await fetch(`/bridge/api/session/${sessionRef.current}/input`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      return parseJsonResponse(response, "/bridge/api/session/:id/input");
-    },
-    []
-  );
-
-  const appendRuntimeEvent = useCallback((message, details = null) => {
-    const entry = {
-      at: new Date().toISOString(),
-      message,
-      details,
-    };
-    setRuntimeEvents((previous) => [...previous, entry].slice(-20));
-  }, []);
-
-  useEffect(() => {
-    if (!inputRef) {
-      return undefined;
-    }
-    inputRef.current = sendSessionInput;
-    return () => {
-      if (inputRef.current === sendSessionInput) {
-        inputRef.current = null;
-      }
-    };
-  }, [inputRef, sendSessionInput]);
-
-  useEffect(() => {
-    onStateChange(mapBridgeSessionState(sessionState, hasVideo, videoStats, receiverStats));
-  }, [hasVideo, onStateChange, receiverStats, sessionState, videoStats]);
-
-  useEffect(() => {
-    if (!active) {
-      return undefined;
-    }
-
-    let cancelled = false;
-
-    async function start() {
-      try {
-        setBridgeState("checking");
-        setSessionState("initializing");
-        setSessionInfo(null);
-        setSessionMessage("Loading custom bridge configuration...");
-        setHasVideo(false);
-        setLogs([]);
-        setRuntimeEvents([]);
-        setVideoStats(null);
-        setReceiverStats(null);
-        setAnswerSdp("");
-        onStateChange("connecting");
-
-        const config = await parseJsonResponse(
-          await fetchWithRetry("/bridge/api/config", undefined, { isCancelled: () => cancelled }),
-          "/bridge/api/config"
-        );
-        if (cancelled) {
-          return;
-        }
-
-        setBridgeState("ready");
-        setNotes(Array.isArray(config.notes) ? config.notes : []);
-        setSessionMessage("Creating browser offer...");
-
-        const peer = new RTCPeerConnection(config.rtcConfiguration || {});
-        peerRef.current = peer;
-        peer.addTransceiver("video", { direction: "recvonly" });
-        appendRuntimeEvent("Created browser RTCPeerConnection", {
-          iceServers: (config.rtcConfiguration?.iceServers || []).length,
-        });
-
-        peer.ontrack = (event) => {
-          const stream = event.streams?.[0] || new MediaStream([event.track]);
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.play().catch((error) => {
-              appendRuntimeEvent("Video element play() rejected", {
-                error: error.message,
-              });
-            });
-          }
-          // Do not call setHasVideo(true) here.  ontrack fires when the SDP is
-          // applied, before any video frames have arrived.  The video element's
-          // onLoadedMetadata handler (below) sets hasVideo once the browser has
-          // decoded the first frame and knows the stream dimensions, which is the
-          // correct moment to hide the "Preparing stream" overlay.
-          appendRuntimeEvent("Browser received remote video track", {
-            trackId: event.track?.id || null,
-            streams: (event.streams || []).map((streamEntry) => streamEntry.id),
-            muted: Boolean(event.track?.muted),
-            readyState: event.track?.readyState || "unknown",
-          });
-          if (event.track) {
-            event.track.onmute = () => appendRuntimeEvent("Remote video track muted", { trackId: event.track.id });
-            event.track.onunmute = () => appendRuntimeEvent("Remote video track unmuted", { trackId: event.track.id });
-            event.track.onended = () => appendRuntimeEvent("Remote video track ended", { trackId: event.track.id });
-          }
-          setSessionMessage(
-            event.streams?.length
-              ? "Remote emulator video track attached."
-              : "Remote emulator video track attached from a streamless bridge track."
-          );
-        };
-
-        peer.onconnectionstatechange = () => {
-          setSessionState(peer.connectionState || "unknown");
-          appendRuntimeEvent("Peer connection state changed", { state: peer.connectionState || "unknown" });
-        };
-        peer.onsignalingstatechange = () =>
-          appendRuntimeEvent("Signaling state changed", { state: peer.signalingState || "unknown" });
-        peer.oniceconnectionstatechange = () =>
-          appendRuntimeEvent("ICE connection state changed", { state: peer.iceConnectionState || "unknown" });
-        peer.onicegatheringstatechange = () =>
-          appendRuntimeEvent("ICE gathering state changed", { state: peer.iceGatheringState || "unknown" });
-        peer.onicecandidateerror = (event) =>
-          appendRuntimeEvent("ICE candidate error", {
-            address: event.address || null,
-            port: event.port || null,
-            url: event.url || null,
-            errorCode: event.errorCode || null,
-            errorText: event.errorText || null,
-          });
-
-        const offer = await peer.createOffer();
-        await peer.setLocalDescription(offer);
-        setSessionMessage("Gathering browser ICE candidates...");
-        await waitForIceGatheringComplete(peer);
-        const localOffer = peer.localDescription || offer;
-        const localOfferCandidates = countSdpIceCandidates(localOffer.sdp);
-        setOfferSummary(`type=${localOffer.type} | candidates=${localOfferCandidates}`);
-        appendRuntimeEvent("Browser SDP offer created", {
-          type: localOffer.type,
-          iceCandidates: localOfferCandidates,
-        });
-
-        const sessionResp = await fetchWithRetry(
-          "/bridge/api/session",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type: localOffer.type,
-              sdp: localOffer.sdp,
-            }),
-          },
-          { isCancelled: () => cancelled }
-        );
-
-        const sessionText = await sessionResp.text();
-        let session;
-        try {
-          session = JSON.parse(sessionText);
-        } catch {
-          throw new Error(`Bridge session returned non-JSON: ${sessionText.slice(0, 200)}`);
-        }
-
-        if (session.id) {
-          sessionRef.current = session.id;
-        }
-        setSessionInfo(session);
-        setSessionState(session.state || "created");
-        setSessionMessage(session.message || "Session created.");
-        setAnswerSdp(session.answer?.sdp || "");
-        if (Array.isArray(session.recentLogs)) {
-          setLogs(session.recentLogs.slice(-20));
-        }
-
-        if (session.eventStreamUrl) {
-          const source = new EventSource(session.eventStreamUrl);
-          eventSourceRef.current = source;
-          source.addEventListener("status", (event) => {
-            try {
-              const payload = JSON.parse(event.data);
-              setSessionInfo(payload);
-              if (payload.state) {
-                setSessionState(payload.state);
-              }
-              if (payload.message) {
-                setSessionMessage(payload.message);
-              }
-              if (Array.isArray(payload.recentLogs)) {
-                setLogs(payload.recentLogs.slice(-20));
-              }
-            } catch {
-              // ignore malformed status events
-            }
-          });
-          source.addEventListener("log", (event) => {
-            try {
-              const payload = JSON.parse(event.data);
-              setLogs((previous) => [...previous, payload].slice(-20));
-            } catch {
-              // ignore malformed log events
-            }
-          });
-        }
-
-        if (!sessionResp.ok) {
-          throw new Error(session.error || `Bridge session failed (${sessionResp.status})`);
-        }
-
-        if (!session.answer?.sdp || !session.answer?.type) {
-          throw new Error("Bridge session created but no SDP answer was returned.");
-        }
-
-        await peer.setRemoteDescription(session.answer);
-        appendRuntimeEvent("Bridge SDP answer applied in browser", {
-          type: session.answer.type,
-          hasVideoSection: Boolean(session.answerDiagnostics?.hasVideoSection),
-          sendCapableVideo: Boolean(session.answerDiagnostics?.hasSendonlyOrSendrecvVideo),
-          iceCandidates: session.answerDiagnostics?.totalIceCandidates ?? null,
-        });
-        setSessionState(session.state || "answer-applied");
-        onMessage(session.message || "Custom WebRTC signaling completed. Waiting for media.");
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        setBridgeState("error");
-        setSessionState("failed");
-        setSessionMessage(error.message);
-        onStateChange("disconnected");
-        onMessage(`Custom WebRTC bridge: ${error.message}`);
-      }
-    }
-
-    start();
-
-    return () => {
-      cancelled = true;
-      gestureRef.current = null;
-      eventSourceRef.current?.close();
-      eventSourceRef.current = null;
-
-      if (sessionRef.current) {
-        fetch(`/bridge/api/session/${sessionRef.current}`, { method: "DELETE" }).catch(() => {});
-        sessionRef.current = null;
-      }
-
-      if (peerRef.current) {
-        peerRef.current.close();
-        peerRef.current = null;
-      }
-    };
-  }, [active, appendRuntimeEvent, onMessage, onStateChange]);
-
-  useEffect(() => {
-    if (!active) {
-      return undefined;
-    }
-
-    const video = videoRef.current;
-    if (!video) {
-      return undefined;
-    }
-
-    const handlers = {
-      loadedmetadata: () =>
-        appendRuntimeEvent("Video element loaded metadata", {
-          width: video.videoWidth || 0,
-          height: video.videoHeight || 0,
-        }),
-      loadeddata: () =>
-        appendRuntimeEvent("Video element loaded current frame data", {
-          readyState: video.readyState,
-        }),
-      canplay: () =>
-        appendRuntimeEvent("Video element can play", {
-          readyState: video.readyState,
-        }),
-      playing: () => appendRuntimeEvent("Video element started playing"),
-      waiting: () => appendRuntimeEvent("Video element waiting for data"),
-      stalled: () => appendRuntimeEvent("Video element stalled"),
-      suspend: () => appendRuntimeEvent("Video element suspended"),
-      resize: () =>
-        appendRuntimeEvent("Video element resized", {
-          width: video.videoWidth || 0,
-          height: video.videoHeight || 0,
-        }),
-      error: () =>
-        appendRuntimeEvent("Video element error", {
-          code: video.error?.code || null,
-          message: video.error?.message || null,
-        }),
-    };
-
-    Object.entries(handlers).forEach(([eventName, handler]) => video.addEventListener(eventName, handler));
-    return () => {
-      Object.entries(handlers).forEach(([eventName, handler]) => video.removeEventListener(eventName, handler));
-    };
-  }, [active, appendRuntimeEvent]);
-
-  useEffect(() => {
-    if (!active) {
-      return undefined;
-    }
-
-    let cancelled = false;
-
-    async function collectStats() {
-      const peer = peerRef.current;
-      if (!peer) {
-        return;
-      }
-
-      try {
-        const reports = await peer.getStats();
-        if (cancelled) {
-          return;
-        }
-        setReceiverStats(buildInboundVideoStats(reports));
-      } catch (error) {
-        if (!cancelled) {
-          appendRuntimeEvent("Failed to read RTCPeerConnection stats", { error: error.message });
-        }
-      }
-    }
-
-    const refreshVideo = () => setVideoStats(buildVideoStatsSnapshot(videoRef.current));
-
-    collectStats();
-    refreshVideo();
-    const statsId = setInterval(collectStats, 1500);
-    const videoId = setInterval(refreshVideo, 1000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(statsId);
-      clearInterval(videoId);
-    };
-  }, [active, appendRuntimeEvent]);
-
-  const answerSummary = useMemo(() => {
-    const diagnostics = sessionInfo?.answerDiagnostics;
-    const videoSection = diagnostics?.mediaSections?.find((section) => section.kind === "video") || parseSdpVideoSection(answerSdp);
-    if (!videoSection) {
-      return "Answer SDP not available yet.";
-    }
-    return [
-      `video=${videoSection.direction}`,
-      `mid=${videoSection.mid || "n/a"}`,
-      `candidates=${videoSection.iceCandidates ?? videoSection.candidates ?? 0}`,
-      `codecs=${videoSection.codecs.length}`,
-      videoSection.trackId ? `track=${videoSection.trackId}` : null,
-    ]
-      .filter(Boolean)
-      .join(" | ");
-  }, [answerSdp, sessionInfo]);
-
-  const answerAttemptSummary = useMemo(() => {
-    return formatAnswerAttemptSummary(sessionInfo?.answerAttempts);
-  }, [sessionInfo]);
-
-  const captureOverlay = useMemo(() => {
-    return buildCaptureOverlay(sessionInfo, logs, receiverStats);
-  }, [logs, receiverStats, sessionInfo]);
-
-  const firstFrameDiagnostics = useMemo(() => {
-    const screenrecord = sessionInfo?.media?.screenrecord || null;
-    const ffmpeg = sessionInfo?.media?.ffmpeg || null;
-    return [
-      `bridge session=${sessionInfo?.state || "n/a"} | peer=${sessionInfo?.peerConnectionState || "n/a"} | ice=${sessionInfo?.iceConnectionState || "n/a"} | gather=${sessionInfo?.iceGatheringState || "n/a"}`,
-      `screenrecord verification=${screenrecord?.verification || "n/a"} | chunks=${screenrecord?.chunksReceived ?? 0} | bytes=${screenrecord?.bytesReceived ?? 0}`,
-      `screenrecord connected=${formatClockTime(screenrecord?.connectedAt)} | firstChunk=${formatClockTime(screenrecord?.firstChunkAt)} | lastChunk=${formatClockTime(screenrecord?.lastChunkAt)}`,
-      `screenrecord chunk sizes first=${screenrecord?.firstChunkSize ?? 0} | last=${screenrecord?.lastChunkSize ?? 0} | max=${screenrecord?.largestChunkSize ?? 0}`,
-      `ffmpeg pid=${ffmpeg?.pid ?? "n/a"} | started=${formatClockTime(ffmpeg?.startedAt)} | firstStdout=${formatClockTime(ffmpeg?.firstStdoutAt)} | lastStdout=${formatClockTime(ffmpeg?.lastStdoutAt)}`,
-      `ffmpeg stdout chunks=${ffmpeg?.stdoutChunks ?? 0} | bytes=${ffmpeg?.stdoutBytes ?? 0} | rawBuffer=${ffmpeg?.rawBufferLength ?? 0}/${ffmpeg?.frameSize ?? 0}`,
-      `video readyState=${videoStats?.readyState ?? "n/a"} | size=${videoStats?.videoWidth ?? 0}x${videoStats?.videoHeight ?? 0} | paused=${videoStats?.paused ?? "n/a"} | currentTime=${videoStats?.currentTime ?? "0.00"}`,
-      `receiver packets=${receiverStats?.packetsReceived ?? 0} | framesReceived=${receiverStats?.framesReceived ?? 0} | framesDecoded=${receiverStats?.framesDecoded ?? 0} | fps=${receiverStats?.framesPerSecond ?? "n/a"}`,
-    ].join("\n");
-  }, [receiverStats, sessionInfo, videoStats]);
-
-  const ffmpegStderrSummary = useMemo(() => {
-    const lines = sessionInfo?.media?.ffmpeg?.stderrLines;
-    return Array.isArray(lines) && lines.length > 0 ? lines.join("\n") : "No ffmpeg stderr yet.";
-  }, [sessionInfo]);
-
-  const runtimeEventSummary = useMemo(() => {
-    return runtimeEvents.length > 0 ? runtimeEvents.map(formatRuntimeEvent).join("\n") : "No browser runtime events yet.";
-  }, [runtimeEvents]);
-
-  const bridgeLogSummary = useMemo(() => {
-    return logs.length > 0 ? logs.map(formatBridgeLog).join("\n") : "No bridge logs yet.";
-  }, [logs]);
-
-  useEffect(() => {
-    if (!onDiagnosticsChange) {
-      return;
-    }
-
-    onDiagnosticsChange({
-      bridgeState,
-      sessionState,
-      sessionMessage,
-      sessionInfo,
-      hasVideo,
-      logs,
-      captureOverlay,
-      runtimeEvents,
-      videoStats,
-      receiverStats,
-      answerSdp,
-      answerSummary,
-      answerAttemptSummary,
-      firstFrameDiagnostics,
-      ffmpegStderrSummary,
-      offerSummary,
-      runtimeEventSummary,
-      bridgeLogSummary,
-    });
-  }, [
-    answerSdp,
-    answerAttemptSummary,
-    answerSummary,
-    bridgeState,
-    bridgeLogSummary,
-    captureOverlay,
-    ffmpegStderrSummary,
-    firstFrameDiagnostics,
-    logs,
-    offerSummary,
-    onDiagnosticsChange,
-    receiverStats,
-    runtimeEventSummary,
-    runtimeEvents,
-    sessionInfo,
-    sessionMessage,
-    sessionState,
-    videoStats,
-  ]);
-
-  const handlePointerDown = useCallback((event) => {
-    if (!active) {
-      return;
-    }
-
-    event.currentTarget.focus?.();
-    const ratios = resolvePointerRatios(event, containerRef.current, videoRef.current);
-    if (!ratios) {
-      gestureRef.current = null;
-      return;
-    }
-
-    gestureRef.current = {
-      startXRatio: ratios.xRatio,
-      startYRatio: ratios.yRatio,
-      pointerId: event.pointerId,
-      startedAt: Date.now(),
-      moved: false,
-    };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  }, [active]);
-
-  const handlePointerMove = useCallback((event) => {
-    const gesture = gestureRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const ratios = resolvePointerRatios(event, containerRef.current, videoRef.current);
-    if (!ratios) {
-      return;
-    }
-
-    if (Math.abs(ratios.xRatio - gesture.startXRatio) >= 0.015 || Math.abs(ratios.yRatio - gesture.startYRatio) >= 0.015) {
-      gesture.moved = true;
-    }
-  }, []);
-
-  const clearGesture = useCallback((event) => {
-    if (gestureRef.current?.pointerId === event.pointerId) {
-      gestureRef.current = null;
-    }
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-  }, []);
-
-  const handlePointerUp = useCallback(async (event) => {
-    const gesture = gestureRef.current;
-    gestureRef.current = null;
-    if (!gesture) {
-      return;
-    }
-
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    const end = resolvePointerRatios(event, containerRef.current, videoRef.current);
-    if (!end) {
-      return;
-    }
-
-    const endXRatio = end.xRatio;
-    const endYRatio = end.yRatio;
-    const deltaX = endXRatio - gesture.startXRatio;
-    const deltaY = endYRatio - gesture.startYRatio;
-    const durationMs = Date.now() - gesture.startedAt;
-
-    try {
-      if (!gesture.moved && Math.abs(deltaX) < 0.015 && Math.abs(deltaY) < 0.015) {
-        await sendSessionInput({
-          type: "tap",
-          xRatio: gesture.startXRatio,
-          yRatio: gesture.startYRatio,
-        });
-        onMessage("Tap delivered through custom WebRTC bridge");
-      } else {
-        await sendSessionInput({
-          type: "swipe",
-          startXRatio: gesture.startXRatio,
-          startYRatio: gesture.startYRatio,
-          endXRatio,
-          endYRatio,
-          durationMs: Math.max(120, durationMs),
-        });
-        onMessage("Swipe delivered through custom WebRTC bridge");
-      }
-    } catch (error) {
-      onMessage(`Custom WebRTC input failed: ${error.message}`);
-    }
-  }, [onMessage, sendSessionInput]);
-
-  const handleKeyDown = useCallback(async (event) => {
-    const payload = mapKeyboardEventToPayload(event);
-    if (!payload) {
-      return;
-    }
-
-    event.preventDefault();
-    try {
-      await sendSessionInput(payload);
-      if (payload.type === "key") {
-        onMessage(`Sent ${payload.key} through custom WebRTC bridge`);
-      } else if (payload.type === "text") {
-        onMessage(`Typed "${payload.text}" through custom WebRTC bridge`);
-      }
-    } catch (error) {
-      onMessage(`Custom WebRTC input failed: ${error.message}`);
-    }
-  }, [onMessage, sendSessionInput]);
-
-  return (
-    <div
-      style={{
-        width,
-        height,
-        borderRadius: 18,
-        background: "#05070b",
-        color: "#d7dfed",
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-        border: "1px solid #202634",
-      }}
-    >
-      <div
-        style={{
-          padding: "10px 12px",
-          borderBottom: "1px solid #202634",
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 12,
-          fontSize: 12,
-        }}
-      >
-        <span>Custom WebRTC bridge (low latency)</span>
-        <span>
-          bridge: {bridgeState} | session: {sessionState} | capture: {captureOverlay.activeLabel}
-        </span>
-      </div>
-
-      <div
-        ref={containerRef}
-        style={{ flex: 1, position: "relative", background: "#000" }}
-        tabIndex={0}
-        role="application"
-        aria-label="Android emulator screen"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={clearGesture}
-        onLostPointerCapture={clearGesture}
-        onKeyDown={handleKeyDown}
-        onFocus={() => setFocusActive(true)}
-        onBlur={() => setFocusActive(false)}
-      >
-        <video
-          data-testid="custom-webrtc-video"
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          onLoadedMetadata={() => setHasVideo(true)}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "contain",
-            display: "block",
-            background: "#000",
-          }}
-        />
-        {!hasVideo && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              pointerEvents: "none",
-            }}
-          >
-            <div
-              style={{
-                maxWidth: 420,
-                padding: 16,
-                background: "rgba(10, 12, 18, 0.9)",
-                border: "1px solid #3b465b",
-                borderRadius: 14,
-                fontSize: 12,
-                lineHeight: 1.6,
-              }}
-            >
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Preparing low-latency stream</div>
-              <div>{sessionMessage || "Waiting for custom bridge media..."}</div>
-              <div style={{ marginTop: 8, color: "#9db0cc" }}>
-                Capture: {captureOverlay.statusLine}. {captureOverlay.reasonLine}
-              </div>
-              {notes.length > 0 && (
-                <div style={{ marginTop: 10 }}>
-                  {notes.map((note) => (
-                    <div key={note}>- {note}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        {hasVideo && !focusActive && (
-          <div
-            style={{
-              position: "absolute",
-              left: 12,
-              right: 12,
-              bottom: 12,
-              padding: "8px 10px",
-              borderRadius: 10,
-              background: "rgba(9, 17, 28, 0.82)",
-              border: "1px solid rgba(59, 70, 91, 0.9)",
-              color: "#d7dfed",
-              fontSize: 12,
-              pointerEvents: "none",
-            }}
-          >
-            Click the stream to control it. Drag to swipe, type to send text, and use arrow keys, Enter, Backspace, or Esc.
-          </div>
-        )}
-        <div
-          style={{
-            position: "absolute",
-            left: 12,
-            right: 12,
-            bottom: 12,
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            pointerEvents: "none",
-          }}
-        >
-          <div
-            style={{
-              maxWidth: "60%",
-              padding: "8px 10px",
-              background: "rgba(6, 8, 12, 0.78)",
-              borderRadius: 10,
-              fontSize: 11,
-              color: "#d7dfed",
-            }}
-          >
-            {sessionMessage || "Connecting..."}
-          </div>
-          <div
-            style={{
-              minWidth: 260,
-              padding: "8px 10px",
-              background: "rgba(6, 8, 12, 0.78)",
-              borderRadius: 10,
-              fontSize: 11,
-              color: "#d7dfed",
-            }}
-          >
-            <div>capture: {captureOverlay.activeLabel}{captureOverlay.usingFallback ? " (fallback)" : ""}</div>
-            <div>{captureOverlay.statusLine}</div>
-            <div>{captureOverlay.reasonLine}</div>
-            <div>
-              frames: {sessionInfo?.media?.framesDelivered ?? 0}
-              {sessionInfo?.media?.width && sessionInfo?.media?.height
-                ? ` | ${sessionInfo.media.width}x${sessionInfo.media.height}`
-                : ""}
-              {captureOverlay.fpsLine ? ` | ${captureOverlay.fpsLine}` : ""}
-            </div>
-            <div>backend: {captureOverlay.backendLabel}</div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-  );
-}
-
 
 function appendMediaBuffer(sourceBuffer, chunk) {
   return new Promise((resolve, reject) => {
@@ -1825,7 +188,12 @@ function appendMediaBuffer(sourceBuffer, chunk) {
     };
     sourceBuffer.addEventListener("updateend", onUpdateEnd, { once: true });
     sourceBuffer.addEventListener("error", onError, { once: true });
-    sourceBuffer.appendBuffer(chunk);
+    try {
+      sourceBuffer.appendBuffer(chunk);
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
   });
 }
 
@@ -1869,12 +237,124 @@ function buildScrcpyDebugSnapshot(video, mediaSource, sourceBuffer) {
   };
 }
 
-function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagnosticsChange }) {
+function stateColor(value) {
+  if (value === "connected" || value === "ready") {
+    return "#3fb950";
+  }
+  if (value === "connecting" || value === "checking" || value === "initializing") {
+    return "#d29922";
+  }
+  return "#f85149";
+}
+
+function ApiVideoInputSurface({
+  containerRef,
+  mediaWidth,
+  mediaHeight,
+  onInput,
+  onMessage,
+  children,
+}) {
+  const gestureRef = useRef(null);
+
+  const handlePointerDown = useCallback(
+    (event) => {
+      event.currentTarget.focus?.();
+      const ratios = resolvePointerRatios(event, containerRef.current, mediaWidth, mediaHeight);
+      if (!ratios) return;
+      gestureRef.current = { ...ratios, pointerId: event.pointerId, startedAt: Date.now(), moved: false };
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    },
+    [containerRef, mediaHeight, mediaWidth]
+  );
+
+  const handlePointerMove = useCallback(
+    (event) => {
+      const gesture = gestureRef.current;
+      if (!gesture || gesture.pointerId !== event.pointerId) return;
+      const ratios = resolvePointerRatios(event, containerRef.current, mediaWidth, mediaHeight);
+      if (!ratios) return;
+      if (Math.abs(ratios.xRatio - gesture.xRatio) >= 0.015 || Math.abs(ratios.yRatio - gesture.yRatio) >= 0.015) {
+        gesture.moved = true;
+      }
+    },
+    [containerRef, mediaHeight, mediaWidth]
+  );
+
+  const clearGesture = useCallback((event) => {
+    if (gestureRef.current?.pointerId === event.pointerId) gestureRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }, []);
+
+  const handlePointerUp = useCallback(
+    async (event) => {
+      const gesture = gestureRef.current;
+      gestureRef.current = null;
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      if (!gesture) return;
+      const end = resolvePointerRatios(event, containerRef.current, mediaWidth, mediaHeight);
+      if (!end) return;
+      try {
+        if (!gesture.moved && Math.abs(end.xRatio - gesture.xRatio) < 0.015 && Math.abs(end.yRatio - gesture.yRatio) < 0.015) {
+          await onInput({ type: "tap", xRatio: gesture.xRatio, yRatio: gesture.yRatio });
+          onMessage?.("Tap delivered through HTTP input");
+        } else {
+          await onInput({
+            type: "swipe",
+            startXRatio: gesture.xRatio,
+            startYRatio: gesture.yRatio,
+            endXRatio: end.xRatio,
+            endYRatio: end.yRatio,
+            durationMs: Math.max(120, Date.now() - gesture.startedAt),
+          });
+          onMessage?.("Swipe delivered through HTTP input");
+        }
+      } catch (error) {
+        onMessage?.(`Input failed: ${error.message}`);
+      }
+    },
+    [containerRef, mediaHeight, mediaWidth, onInput, onMessage]
+  );
+
+  const handleKeyDown = useCallback(
+    async (event) => {
+      const payload = mapKeyboardEventToPayload(event);
+      if (!payload) return;
+      event.preventDefault();
+      try {
+        await onInput(payload);
+        onMessage?.(payload.type === "key" ? `Sent ${payload.key} through HTTP input` : "Text delivered through HTTP input");
+      } catch (error) {
+        onMessage?.(`Input failed: ${error.message}`);
+      }
+    },
+    [onInput, onMessage]
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ flex: 1, position: "relative", background: "#000" }}
+      tabIndex={0}
+      role="application"
+      aria-label="Android emulator display"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={clearGesture}
+      onLostPointerCapture={clearGesture}
+      onKeyDown={handleKeyDown}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagnosticsChange, onInput }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
-  const gestureRef = useRef(null);
   const [status, setStatus] = useState("connecting");
-  const [detail, setDetail] = useState(`Opening Guacamole-style HTTPS tunnel from scrcpy at ${GUACAMOLE_HTTP_TARGET_FPS}fps...`);
+  const [detail, setDetail] = useState(`Opening HTTP tunnel from scrcpy at ${GUACAMOLE_HTTP_TARGET_FPS}fps...`);
   const [hasVideo, setHasVideo] = useState(false);
   const [debug, setDebug] = useState({
     bytesReceived: 0,
@@ -1884,6 +364,7 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
     lastChunkBytes: 0,
     response: "pending",
     contentType: "pending",
+    mimeType: "pending",
     mediaSource: "closed",
     sourceBufferUpdating: false,
     videoReadyState: 0,
@@ -1899,18 +380,6 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
     onDiagnosticsChange?.(debug);
   }, [debug, onDiagnosticsChange]);
 
-  const sendInput = useCallback(async (payload) => {
-    const response = await fetch("/api/input-event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text.slice(0, 160) || `input failed (${response.status})`);
-    }
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
     const abortController = new AbortController();
@@ -1924,6 +393,7 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
     let firstBox = "waiting";
     let pendingDebugPatch = null;
     let debugFlushTimer = null;
+
     const flushDebug = () => {
       if (debugFlushTimer) {
         clearTimeout(debugFlushTimer);
@@ -1940,10 +410,9 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
         ...patch,
       }));
     };
+
     const updateDebug = (patch = {}, { immediate = false } = {}) => {
-      if (cancelled) {
-        return;
-      }
+      if (cancelled) return;
       pendingDebugPatch = {
         ...(pendingDebugPatch || {}),
         ...patch,
@@ -1956,8 +425,23 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
         debugFlushTimer = setTimeout(flushDebug, SCRCPY_DEBUG_UPDATE_INTERVAL_MS);
       }
     };
-    const recordVideoEvent = (event) => updateDebug({ lastEvent: `video:${event.type}` });
-    const recordVideoError = () => updateDebug({ lastEvent: "video:error", lastError: video?.error?.message || `media error ${video?.error?.code || "unknown"}` });
+
+    const recordVideoEvent = (event) => {
+      if (event.type === "loadeddata" || event.type === "playing") {
+        setHasVideo(true);
+      }
+      updateDebug({ lastEvent: `video:${event.type}` }, { immediate: event.type === "error" });
+    };
+    const recordVideoError = () => {
+      updateDebug(
+        {
+          lastEvent: "video:error",
+          lastError: video?.error?.message || `media error ${video?.error?.code || "unknown"}`,
+        },
+        { immediate: true }
+      );
+    };
+
     if (video) {
       video.src = objectUrl;
       video.addEventListener("loadedmetadata", recordVideoEvent);
@@ -1971,14 +455,23 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
 
     async function start() {
       try {
+        if (!window.MediaSource) {
+          throw new Error("MediaSource is not available in this browser");
+        }
         await new Promise((resolve, reject) => {
           mediaSource.addEventListener("sourceopen", resolve, { once: true });
           mediaSource.addEventListener("error", () => reject(new Error("MediaSource failed to open")), { once: true });
         });
         if (cancelled) return;
-        sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+
+        const mimeType = selectScrcpyMimeType();
+        if (!mimeType) {
+          throw new Error("No supported MP4/H.264 MediaSource type was found");
+        }
+        sourceBuffer = mediaSource.addSourceBuffer(mimeType);
         sourceBuffer.mode = "segments";
-        updateDebug({ lastEvent: "mediasource:open" }, { immediate: true });
+        updateDebug({ lastEvent: "mediasource:open", mimeType }, { immediate: true });
+
         const params = new URLSearchParams({
           cache: String(Date.now()),
           max_fps: String(GUACAMOLE_HTTP_TARGET_FPS),
@@ -1997,49 +490,63 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
             isCancelled: () => cancelled || abortController.signal.aborted,
           }
         );
-        updateDebug({
-          response: `${response.status} ${response.statusText || ""}`.trim(),
-          contentType: response.headers.get("content-type") || "missing",
-          lastEvent: "fetch:headers",
-        }, { immediate: true });
+        updateDebug(
+          {
+            response: `${response.status} ${response.statusText || ""}`.trim(),
+            contentType: response.headers.get("content-type") || "missing",
+            lastEvent: "fetch:headers",
+          },
+          { immediate: true }
+        );
         if (!response.ok) {
           throw new Error(await readHttpError(response, "/api/scrcpy-video"));
         }
         if (!response.body) {
           throw new Error("scrcpy video stream returned no readable body");
         }
+
         setStatus("streaming");
-        setDetail(`Receiving fragmented MP4 over HTTPS from scrcpy at ${GUACAMOLE_HTTP_TARGET_FPS}fps.`);
+        setDetail(`Receiving fragmented MP4 over HTTP from scrcpy at ${GUACAMOLE_HTTP_TARGET_FPS}fps.`);
         onStateChange?.("connected");
         onMessage?.("Connected to Guacamole-style HTTP video tunnel");
         const reader = response.body.getReader();
+
         while (!cancelled) {
           const { value, done } = await reader.read();
           if (done) break;
-          if (value?.byteLength) {
-            chunksReceived += 1;
-            bytesReceived += value.byteLength;
-            if (firstBox === "waiting") {
-              firstBox = readMp4BoxType(value);
+          if (!value?.byteLength) continue;
+
+          chunksReceived += 1;
+          bytesReceived += value.byteLength;
+          if (firstBox === "waiting") {
+            firstBox = readMp4BoxType(value);
+          }
+          updateDebug({
+            bytesReceived,
+            chunksReceived,
+            firstBox,
+            lastChunkBytes: value.byteLength,
+            lastEvent: "fetch:chunk",
+          });
+
+          await appendMediaBuffer(sourceBuffer, value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+          chunksAppended += 1;
+
+          if (video) {
+            if (video.paused) {
+              video.play().catch((error) => {
+                updateDebug({ lastError: error.message || "video play failed" });
+              });
             }
-            updateDebug({
-              bytesReceived,
-              chunksReceived,
-              firstBox,
-              lastChunkBytes: value.byteLength,
-              lastEvent: "fetch:chunk",
-            });
-            await appendMediaBuffer(sourceBuffer, value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
-            chunksAppended += 1;
-            const buffered = video?.buffered;
-            if (video && buffered?.length) {
+            const buffered = video.buffered;
+            if (buffered?.length) {
               const end = buffered.end(buffered.length - 1);
               if (end - video.currentTime > 0.8) {
                 video.currentTime = Math.max(0, end - 0.25);
               }
             }
-            updateDebug({ chunksAppended, lastEvent: "mediasource:append" });
           }
+          updateDebug({ chunksAppended, lastEvent: "mediasource:append" });
         }
       } catch (error) {
         if (!cancelled && error.name !== "AbortError") {
@@ -2058,7 +565,6 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
       abortController.abort();
       if (debugFlushTimer) {
         clearTimeout(debugFlushTimer);
-        debugFlushTimer = null;
       }
       if (video) {
         video.removeEventListener("loadedmetadata", recordVideoEvent);
@@ -2074,353 +580,192 @@ function ScrcpyHttpVideoPane({ width, height, onStateChange, onMessage, onDiagno
     };
   }, [onMessage, onStateChange]);
 
-  const handlePointerDown = useCallback((event) => {
-    event.currentTarget.focus?.();
-    const ratios = resolvePointerRatios(event, containerRef.current, videoRef.current);
-    if (!ratios) return;
-    gestureRef.current = { ...ratios, pointerId: event.pointerId, startedAt: Date.now(), moved: false };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  }, []);
-
-  const handlePointerMove = useCallback((event) => {
-    const gesture = gestureRef.current;
-    if (!gesture || gesture.pointerId !== event.pointerId) return;
-    const ratios = resolvePointerRatios(event, containerRef.current, videoRef.current);
-    if (!ratios) return;
-    if (Math.abs(ratios.xRatio - gesture.xRatio) >= 0.015 || Math.abs(ratios.yRatio - gesture.yRatio) >= 0.015) {
-      gesture.moved = true;
-    }
-  }, []);
-
-  const clearGesture = useCallback((event) => {
-    if (gestureRef.current?.pointerId === event.pointerId) gestureRef.current = null;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-  }, []);
-
-  const handlePointerUp = useCallback(async (event) => {
-    const gesture = gestureRef.current;
-    gestureRef.current = null;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    if (!gesture) return;
-    const end = resolvePointerRatios(event, containerRef.current, videoRef.current);
-    if (!end) return;
-    try {
-      if (!gesture.moved && Math.abs(end.xRatio - gesture.xRatio) < 0.015 && Math.abs(end.yRatio - gesture.yRatio) < 0.015) {
-        await sendInput({ type: "tap", xRatio: gesture.xRatio, yRatio: gesture.yRatio });
-        onMessage?.("Tap delivered through scrcpy HTTP video mode");
-      } else {
-        await sendInput({ type: "swipe", startXRatio: gesture.xRatio, startYRatio: gesture.yRatio, endXRatio: end.xRatio, endYRatio: end.yRatio, durationMs: Math.max(120, Date.now() - gesture.startedAt) });
-        onMessage?.("Swipe delivered through scrcpy HTTP video mode");
-      }
-    } catch (error) {
-      onMessage?.(`Scrcpy input failed: ${error.message}`);
-    }
-  }, [onMessage, sendInput]);
-
-  const handleKeyDown = useCallback(async (event) => {
-    const payload = mapKeyboardEventToPayload(event);
-    if (!payload) return;
-    event.preventDefault();
-    try {
-      await sendInput(payload);
-      onMessage?.("Keyboard input delivered through scrcpy HTTP video mode");
-    } catch (error) {
-      onMessage?.(`Scrcpy input failed: ${error.message}`);
-    }
-  }, [onMessage, sendInput]);
-
   const inlineDebugSummary = `${formatBytes(debug.bytesReceived)} / ${debug.chunksReceived} chunks`;
 
   return (
-    <div aria-description={inlineDebugSummary} style={{ width, height, borderRadius: 18, background: "#05070b", color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid #202634" }}>
+    <div
+      aria-description={inlineDebugSummary}
+      style={{ width, height, borderRadius: 8, background: "#05070b", color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid #202634" }}
+    >
       <div style={{ padding: "10px 12px", borderBottom: "1px solid #202634", display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12 }}>
         <span>Guacamole-style HTTP tunnel</span>
-        <span>transport: HTTPS fetch | target: {GUACAMOLE_HTTP_TARGET_FPS}fps | status: {status}</span>
+        <span>transport: HTTP fetch | target: {GUACAMOLE_HTTP_TARGET_FPS}fps | status: {status}</span>
       </div>
-      <div ref={containerRef} style={{ flex: 1, position: "relative", background: "#000" }} tabIndex={0} role="application" aria-label="Android emulator scrcpy video" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={clearGesture} onLostPointerCapture={clearGesture} onKeyDown={handleKeyDown}>
-        <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={() => setHasVideo(true)} onPlaying={() => setHasVideo(true)} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", background: "#000" }} />
+      <ApiVideoInputSurface
+        containerRef={containerRef}
+        mediaWidth={videoRef.current?.videoWidth || width}
+        mediaHeight={videoRef.current?.videoHeight || height}
+        onInput={onInput}
+        onMessage={onMessage}
+      >
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", background: "#000" }}
+        />
         {!hasVideo && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-            <div style={{ maxWidth: 420, padding: 16, background: "rgba(10, 12, 18, 0.9)", border: "1px solid #3b465b", borderRadius: 14, fontSize: 13, lineHeight: 1.5 }}>
+            <div style={{ maxWidth: 420, padding: 16, background: "rgba(10, 12, 18, 0.9)", border: "1px solid #3b465b", borderRadius: 8, fontSize: 13, lineHeight: 1.5 }}>
               <strong>Guacamole-style HTTP video</strong>
               <div style={{ marginTop: 8 }}>{detail}</div>
-              <div style={{ marginTop: 8, color: "#a8b3c7" }}>No WebRTC relay or ICE negotiation is used for this video path.</div>
             </div>
           </div>
         )}
+      </ApiVideoInputSurface>
+    </div>
+  );
+}
+
+function PngPreviewPane({ width, height, deviceInfo, onStateChange, onMessage, onInput }) {
+  const containerRef = useRef(null);
+  const [src, setSrc] = useState(`/api/frame?cache=${Date.now()}`);
+  const [hasImage, setHasImage] = useState(false);
+  const screen = deviceInfo?.screen || null;
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      if (!cancelled) {
+        setSrc(`/api/frame?cache=${Date.now()}`);
+      }
+    };
+    refresh();
+    const timer = setInterval(refresh, PNG_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  return (
+    <div style={{ width, height, borderRadius: 8, background: "#05070b", color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid #202634" }}>
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid #202634", display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12 }}>
+        <span>PNG preview</span>
+        <span>refresh: {Math.round(1000 / PNG_REFRESH_MS)}fps</span>
       </div>
+      <ApiVideoInputSurface
+        containerRef={containerRef}
+        mediaWidth={screen?.width || width}
+        mediaHeight={screen?.height || height}
+        onInput={onInput}
+        onMessage={onMessage}
+      >
+        <img
+          src={src}
+          alt="Android emulator screen"
+          draggable={false}
+          onLoad={() => {
+            setHasImage(true);
+            onStateChange?.("connected");
+          }}
+          onError={() => {
+            setHasImage(false);
+            onStateChange?.("error");
+            onMessage?.("PNG preview failed to fetch /api/frame");
+          }}
+          style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", background: "#000", userSelect: "none" }}
+        />
+        {!hasImage && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+            <div style={{ maxWidth: 360, padding: 16, background: "rgba(10, 12, 18, 0.9)", border: "1px solid #3b465b", borderRadius: 8, fontSize: 13 }}>
+              Waiting for PNG frame...
+            </div>
+          </div>
+        )}
+      </ApiVideoInputSurface>
     </div>
   );
 }
 
 function App() {
-  const emuRef = useRef(null);
-  const wrapRef = useRef(null);
   const displaySurfaceRef = useRef(null);
   const browserSectionRef = useRef(null);
-  const webrtcInputRef = useRef(null);
   const isResizingRef = useRef(false);
-  const isLogResizingRef = useRef(false);
-
-  const [emuState, setEmuState] = useState("connecting");
-  const [apiState, setApiState] = useState("checking");
+  const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
+  const [displayPercent, setDisplayPercent] = useState(64);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("Starting...");
-  const [builtPath, setBuiltPath] = useState("");
+  const [message, setMessage] = useState("Connecting to Guacamole-style HTTP video tunnel...");
   const [packageName, setPackageName] = useState("");
-  const [browserOpen, setBrowserOpen] = useState(false);
-  const [browserPath, setBrowserPath] = useState("");
-  const [browserData, setBrowserData] = useState({ directories: [], apks: [], cwd: "", parent: null });
+  const [apkPath, setApkPath] = useState("");
+  const [emuState, setEmuState] = useState("connecting");
+  const [bridgeState, setBridgeState] = useState("checking");
+  const [deviceInfo, setDeviceInfo] = useState(null);
+  const [streamMode, setStreamMode] = useState("scrcpy-http");
+  const [scrcpyDiagnostics, setScrcpyDiagnostics] = useState(null);
+  const [logs, setLogs] = useState([]);
   const [logFilter, setLogFilter] = useState("");
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [fatalOnly, setFatalOnly] = useState(false);
   const [logsPaused, setLogsPaused] = useState(false);
-  const [logLimit, setLogLimit] = useState(100);
-  const [logEntries, setLogEntries] = useState([]);
-  const [logPaneHeight, setLogPaneHeight] = useState(260);
-  const lastSeenLogRef = useRef(null);
-  const [leftPanePercent, setLeftPanePercent] = useState(35);
-  const [streamMode, setStreamMode] = useState("scrcpy-http");
-  const [webrtcNotice, setWebrtcNotice] = useState("");
-  const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
-  const [deviceInfo, setDeviceInfo] = useState(null);
-  const [webrtcDiagnostics, setWebrtcDiagnostics] = useState(null);
-  const [scrcpyDiagnostics, setScrcpyDiagnostics] = useState(null);
-  const [nativeVideoStats, setNativeVideoStats] = useState(null);
-  const [nativeHasVideoFrame, setNativeHasVideoFrame] = useState(false);
-  const [nativeDiagnostics, setNativeDiagnostics] = useState({
-    runtimeEvents: [],
-    startIceServers: null,
-    localDescriptionSdp: "",
-    remoteDescriptionSdp: "",
-    localCandidateSummary: null,
-    remoteCandidateSummary: null,
-    peerStates: null,
-    peerStats: null,
-    lastError: null,
-  });
-  const [nativeWebrtcKey, setNativeWebrtcKey] = useState(0);
-  const [nativeRetryCount, setNativeRetryCount] = useState(0);
-  const [nativeIceTransportMode, setNativeIceTransportMode] = useState("all");
-  const [emulatorToken, setEmulatorToken] = useState(null);
-  const emulatorTokenFetchedRef = useRef(false);
-  const webrtcFailureRef = useRef(false);
-  const nativeFailureSinceRef = useRef(null);
-  const nativeFailureSignatureRef = useRef(null);
-  const nativePeerCleanupRef = useRef(() => {});
-  const nativeJsepPatchedRef = useRef(null);
-  const nativeRootCauseRef = useRef(null);
-  const nativeFallbackIceServersRef = useRef([]);
-  const captureOverlay =
-    streamMode === "custom-webrtc"
-      ? buildCustomWebrtcOverlay(webrtcDiagnostics)
-      : buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
-  const nativeWebrtcOverlay = buildNativeWebrtcOverlay(emuState, nativeVideoStats, nativeHasVideoFrame, nativeDiagnostics);
-  const bridgeCaptureOverlay =
-    webrtcDiagnostics?.captureOverlay ||
-    buildCaptureOverlay(webrtcDiagnostics?.sessionInfo, webrtcDiagnostics?.logs, webrtcDiagnostics?.receiverStats);
-  const firstFrameDiagnostics = webrtcDiagnostics?.firstFrameDiagnostics || "First-frame diagnostics are not available yet.";
-  const offerSummary = webrtcDiagnostics?.offerSummary || "Offer not created yet.";
-  const answerSummary = webrtcDiagnostics?.answerSummary || "Answer SDP not available yet.";
-  const answerAttemptSummary = webrtcDiagnostics?.answerAttemptSummary || "No answer attempts yet.";
-  const runtimeEventSummary = webrtcDiagnostics?.runtimeEventSummary || "No browser runtime events yet.";
-  const bridgeLogSummary = webrtcDiagnostics?.bridgeLogSummary || "No bridge logs yet.";
-  const ffmpegStderrSummary = webrtcDiagnostics?.ffmpegStderrSummary || "No ffmpeg stderr yet.";
-  const nativeFailureReason = buildNativeFailureReason(emuState, nativeVideoStats, nativeHasVideoFrame, nativeDiagnostics);
-  const nativeMissingTurnNotice = buildMissingTurnNotice(nativeDiagnostics.startIceServers);
-  const nativeUpstreamSending = isNativeUpstreamSendingVideo(nativeDiagnostics.peerStats);
-  const activePeerStats =
-    streamMode === "custom-webrtc" ? webrtcDiagnostics?.receiverStats || null : nativeDiagnostics?.peerStats || null;
-  const activeVideoStats =
-    streamMode === "custom-webrtc" ? webrtcDiagnostics?.videoStats || null : nativeVideoStats || null;
-  const activeTransport =
-    streamMode === "scrcpy-http"
-      ? "scrcpy-http"
-      : streamMode === "custom-webrtc"
-        ? "custom-bridge-webrtc"
-        : "native-emulator-webrtc";
-  const nativeRuntimeEventSummary =
-    nativeDiagnostics.runtimeEvents.length > 0
-      ? nativeDiagnostics.runtimeEvents.map(formatRuntimeEvent).join("\n")
-      : "No native WebRTC runtime events yet.";
-  const nativeFirstFrameDiagnostics = [
-    `emu=${emuState} | browserVideo=${nativeVideoStats?.readyState ?? "n/a"} | size=${nativeVideoStats?.videoWidth ?? 0}x${nativeVideoStats?.videoHeight ?? 0}`,
-    `start ice servers: ${formatIceServerSummary(nativeDiagnostics.startIceServers)}`,
-    nativeMissingTurnNotice || "turn advertisement: present or not yet known",
-    `local candidates: ${formatCandidateTypeSummary(nativeDiagnostics.localCandidateSummary)}`,
-    `remote candidates: ${formatCandidateTypeSummary(nativeDiagnostics.remoteCandidateSummary)}`,
-    `peer states: connection=${nativeDiagnostics.peerStates?.connectionState || "n/a"} | ice=${nativeDiagnostics.peerStates?.iceConnectionState || "n/a"} | signaling=${nativeDiagnostics.peerStates?.signalingState || "n/a"} | gathering=${nativeDiagnostics.peerStates?.iceGatheringState || "n/a"}`,
-    `peer stats: packets=${nativeDiagnostics.peerStats?.packetsReceived ?? 0} | bytes=${nativeDiagnostics.peerStats?.bytesReceived ?? 0} | framesReceived=${nativeDiagnostics.peerStats?.framesReceived ?? 0} | framesDecoded=${nativeDiagnostics.peerStats?.framesDecoded ?? 0} | fps=${nativeDiagnostics.peerStats?.framesPerSecond ?? "n/a"}`,
-    nativeDiagnostics.peerStats?.selectedCandidatePair
-      ? `selected pair: ${nativeDiagnostics.peerStats.selectedCandidatePair.localCandidateType || "n/a"} ${nativeDiagnostics.peerStats.selectedCandidatePair.localAddress || "n/a"} -> ${nativeDiagnostics.peerStats.selectedCandidatePair.remoteCandidateType || "n/a"} ${nativeDiagnostics.peerStats.selectedCandidatePair.remoteAddress || "n/a"} | state=${nativeDiagnostics.peerStats.selectedCandidatePair.state || "n/a"}`
-      : "selected pair: none",
-    `diagnosis: ${nativeFailureReason.summary}`,
-    nativeDiagnostics.lastError ? `last error: ${nativeDiagnostics.lastError}` : "last error: none",
-  ].join("\n");
+  const [logRows, setLogRows] = useState(100);
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const [browserPath, setBrowserPath] = useState("");
+  const [browserData, setBrowserData] = useState(null);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return undefined;
-    }
-
-    window.__EMU_E2E__ = {
-      apiState,
-      emulatorState: emuState,
-      lastMessage: message,
-      activeTransport,
-      activeVideoStats,
-      nativeIceTransportMode,
-      nativeHasVideoFrame,
-      nativeUpstreamSending,
-      startIceServers: nativeDiagnostics?.startIceServers || null,
-      nativeVideoStats,
-      selectedCandidatePair: activePeerStats?.selectedCandidatePair || null,
-      streamMode,
-    };
-
-    return () => {
-      delete window.__EMU_E2E__;
-    };
-  }, [
-    apiState,
-    emuState,
-    message,
-    activePeerStats,
-    activeTransport,
-    activeVideoStats,
-    nativeDiagnostics,
-    nativeIceTransportMode,
-    nativeHasVideoFrame,
-    nativeUpstreamSending,
-    nativeVideoStats,
-    streamMode,
-  ]);
-
-  const handleWebrtcMessage = useCallback((nextMessage) => {
-    setMessage(nextMessage);
-    setWebrtcNotice(nextMessage);
+    const handleResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   useEffect(() => {
-    const onResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  useEffect(() => {
-    lastSeenLogRef.current = null;
-    setLogEntries([]);
-  }, [logFilter, errorsOnly, fatalOnly, logLimit]);
-
-  const loadLogs = useCallback(async (forceRefresh = false) => {
-    if (logsPaused && !forceRefresh) return;
-    try {
-      const query = new URLSearchParams({
-        limit: String(logLimit),
-        filter: logFilter,
-        errors_only: errorsOnly ? "1" : "0",
-        include_crash: "1",
-        fatal_only: fatalOnly ? "1" : "0",
-      });
-      const data = await parseJsonResponse(
-        await fetchWithRetry(`/api/logcat?${query.toString()}`, undefined, {
-          maxAttempts: 3,
-          baseDelayMs: 500,
-        }),
-        "/api/logcat"
-      );
-      const incoming = Array.isArray(data.entries) ? data.entries : [];
-      const lastSeen = lastSeenLogRef.current;
-      let nextEntries = incoming;
-
-      if (lastSeen !== null) {
-        const lastSeenIdx = incoming.lastIndexOf(lastSeen);
-        nextEntries = lastSeenIdx >= 0 ? incoming.slice(lastSeenIdx + 1) : incoming;
-      }
-
-      if (incoming.length > 0) {
-        lastSeenLogRef.current = incoming[incoming.length - 1];
-      }
-
-      if (nextEntries.length > 0) {
-        setLogEntries((prev) => [...prev, ...nextEntries]);
-      }
-    } catch (error) {
-      setMessage(`Log stream error: ${error.message}`);
-    }
-  }, [errorsOnly, fatalOnly, logFilter, logLimit, logsPaused]);
-
-  useEffect(() => {
-    loadLogs();
-    const id = setInterval(loadLogs, 2500);
-    return () => clearInterval(id);
-  }, [loadLogs]);
-
-  useEffect(() => {
-    if (logsPaused) {
-      loadLogs(true);
-    }
-  }, [loadLogs, logsPaused, logLimit]);
-
-  useEffect(() => {
-    function onMove(event) {
-      if (isResizingRef.current) {
-        const width = window.innerWidth || 1;
-        const next = (event.clientX / width) * 100;
-        setLeftPanePercent(Math.max(20, Math.min(60, next)));
-      }
-      if (isLogResizingRef.current) {
-        const viewportHeight = window.innerHeight || 1;
-        const maxLogHeight = Math.max(180, Math.round(viewportHeight * 0.65));
-        setLogPaneHeight((prev) => {
-          const next = prev - event.movementY;
-          return Math.max(120, Math.min(maxLogHeight, next));
-        });
-      }
-    }
-
-    function onUp() {
+    const handleMouseMove = (event) => {
+      if (!isResizingRef.current) return;
+      setDisplayPercent(clamp((event.clientX / Math.max(1, window.innerWidth)) * 100, 38, 82));
+    };
+    const handleMouseUp = () => {
       isResizingRef.current = false;
-      isLogResizingRef.current = false;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
-    }
-
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
     };
   }, []);
 
   useEffect(() => {
+    window.__EMU_E2E__ = {
+      activeTransport: streamMode,
+      scrcpyDiagnostics,
+      emulatorState: emuState,
+      bridgeApiState: bridgeState,
+      deviceInfo,
+    };
+  }, [bridgeState, deviceInfo, emuState, scrcpyDiagnostics, streamMode]);
+
+  useEffect(() => {
+    let cancelled = false;
     async function checkHealth() {
       try {
-        const health = await parseJsonResponse(await fetch("/api/health"), "/api/health");
-        if (health.ok) {
-          setApiState("ready");
-          setMessage("Bridge API ready");
-        } else {
-          setApiState("error");
-          setMessage("Bridge API: device not connected");
+        const data = await parseJsonResponse(await fetch("/api/health"), "/api/health");
+        if (cancelled) return;
+        setBridgeState(data.ok ? "ready" : "error");
+      } catch {
+        if (!cancelled) {
+          setBridgeState("error");
         }
-      } catch (error) {
-        setApiState("error");
-        setMessage(`Bridge API error: ${error.message}`);
       }
     }
     checkHealth();
+    const timer = setInterval(checkHealth, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-
     async function loadDeviceInfo() {
       try {
-        const info = await parseJsonResponse(await fetch("/api/device-info"), "/api/device-info");
+        const data = await parseJsonResponse(await fetch("/api/device-info"), "/api/device-info");
         if (!cancelled) {
-          setDeviceInfo(info);
+          setDeviceInfo(data);
         }
       } catch {
         if (!cancelled) {
@@ -2428,813 +773,62 @@ function App() {
         }
       }
     }
-
     loadDeviceInfo();
-    const id = setInterval(loadDeviceInfo, 10000);
+    const timer = setInterval(loadDeviceInfo, 10000);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      clearInterval(timer);
     };
   }, []);
 
-  // Fetch the emulator gRPC JWT token from the bridge so we can pass it to the
-  // native Emulator component.  The token is generated by the emulator at
-  // startup and written to a shared volume that the bridge reads from.  Poll
-  // until we get it so the Emulator component can authenticate its gRPC-Web
-  // requests and avoid 403 PERMISSION_DENIED errors.
   useEffect(() => {
+    if (logsPaused) return undefined;
     let cancelled = false;
-
-    async function fetchToken() {
+    async function loadLogs() {
+      const params = new URLSearchParams({
+        limit: String(logRows),
+        filter: logFilter,
+        errors_only: errorsOnly ? "1" : "0",
+        fatal_only: fatalOnly ? "1" : "0",
+      });
       try {
-        const data = await parseJsonResponse(
-          await fetch("/bridge/api/emulator-token"),
-          "/bridge/api/emulator-token"
-        );
-        if (!cancelled && data?.token) {
-          setEmulatorToken((prev) => {
-            if (prev !== data.token) {
-              emulatorTokenFetchedRef.current = true;
-              return data.token;
-            }
-            return prev;
-          });
+        const data = await parseJsonResponse(await fetch(`/api/logcat?${params.toString()}`), "/api/logcat");
+        if (!cancelled) {
+          setLogs(data.entries || []);
         }
-      } catch {
-        // Token not yet available; retry on next interval.
+      } catch (error) {
+        if (!cancelled) {
+          setLogs([`Log stream error: ${error.message}`]);
+        }
       }
     }
-
-    fetchToken();
-    const id = setInterval(() => {
-      if (emulatorTokenFetchedRef.current) {
-        clearInterval(id);
-        return;
-      }
-      fetchToken();
-    }, 2000);
+    loadLogs();
+    const timer = setInterval(loadLogs, 2000);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      clearInterval(timer);
     };
+  }, [errorsOnly, fatalOnly, logFilter, logRows, logsPaused]);
+
+  const sendInput = useCallback(async (payload) => {
+    const response = await fetch("/api/input-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(await readHttpError(response, "/api/input-event"));
+    }
   }, []);
 
-  useEffect(() => {
-    if (streamMode !== "native-webrtc") {
-      nativePeerCleanupRef.current();
-      nativePeerCleanupRef.current = () => {};
-      nativeJsepPatchedRef.current = null;
-      nativeRootCauseRef.current = null;
-      nativeFallbackIceServersRef.current = [];
-      setNativeDiagnostics({
-        runtimeEvents: [],
-        startIceServers: null,
-        localDescriptionSdp: "",
-        remoteDescriptionSdp: "",
-        localCandidateSummary: null,
-        remoteCandidateSummary: null,
-        peerStates: null,
-        peerStats: null,
-        lastError: null,
-      });
-      return;
-    }
-
-    setNativeDiagnostics({
-      runtimeEvents: [],
-      startIceServers: null,
-      localDescriptionSdp: "",
-      remoteDescriptionSdp: "",
-      localCandidateSummary: null,
-      remoteCandidateSummary: null,
-      peerStates: null,
-      peerStats: null,
-      lastError: null,
-    });
-    nativeRootCauseRef.current = null;
-  }, [streamMode, nativeWebrtcKey]);
-
-  useLayoutEffect(() => {
-    if (streamMode !== "native-webrtc") {
-      return undefined;
-    }
-
-    let active = true;
-    let lastPeer = null;
-    let detachPeerListeners = () => {};
-
-    const pushNativeEvent = (messageText, details = null) => {
-      if (!active) {
-        return;
-      }
-      setNativeDiagnostics((previous) => ({
-        ...previous,
-        runtimeEvents: appendBoundedEvent(previous.runtimeEvents, messageText, details),
-      }));
-    };
-
-    const updatePeerStats = async (peer) => {
-      if (!peer) {
-        return;
-      }
-      try {
-        const reports = await peer.getStats();
-        if (!active || peer !== lastPeer) {
-          return;
-        }
-        setNativeDiagnostics((previous) => ({
-          ...previous,
-          peerStats: buildPeerConnectionStats(reports),
-        }));
-      } catch (error) {
-        pushNativeEvent("Failed to read native RTCPeerConnection stats", { error: error.message });
-      }
-    };
-
-    const attachPeerListeners = (peer) => {
-      const syncPeerState = () => {
-        setNativeDiagnostics((previous) => ({
-          ...previous,
-          peerStates: {
-            connectionState: peer.connectionState || "unknown",
-            iceConnectionState: peer.iceConnectionState || "unknown",
-            signalingState: peer.signalingState || "unknown",
-            iceGatheringState: peer.iceGatheringState || "unknown",
-          },
-          localDescriptionSdp: peer.localDescription?.sdp || previous.localDescriptionSdp,
-          remoteDescriptionSdp: peer.remoteDescription?.sdp || previous.remoteDescriptionSdp,
-          localCandidateSummary: peer.localDescription?.sdp
-            ? parseSdpCandidateDiagnostics(peer.localDescription.sdp)
-            : previous.localCandidateSummary,
-          remoteCandidateSummary: peer.remoteDescription?.sdp
-            ? parseSdpCandidateDiagnostics(peer.remoteDescription.sdp)
-            : previous.remoteCandidateSummary,
-        }));
-      };
-
-      const onConnectionStateChange = () => {
-        syncPeerState();
-        pushNativeEvent("Native peer connection state changed", { state: peer.connectionState || "unknown" });
-      };
-      const onIceConnectionStateChange = () => {
-        syncPeerState();
-        pushNativeEvent("Native ICE connection state changed", { state: peer.iceConnectionState || "unknown" });
-      };
-      const onSignalingStateChange = () => {
-        syncPeerState();
-        pushNativeEvent("Native signaling state changed", { state: peer.signalingState || "unknown" });
-      };
-      const onIceGatheringStateChange = () => {
-        syncPeerState();
-        pushNativeEvent("Native ICE gathering state changed", { state: peer.iceGatheringState || "unknown" });
-      };
-      const onIceCandidate = (event) => {
-        if (!event.candidate) {
-          pushNativeEvent("Native browser ICE gathering completed");
-          return;
-        }
-        pushNativeEvent("Native browser ICE candidate gathered", { candidate: event.candidate.candidate || "" });
-        syncPeerState();
-      };
-      const onIceCandidateError = (event) =>
-        pushNativeEvent("Native ICE candidate error", {
-          address: event.address || null,
-          port: event.port || null,
-          url: event.url || null,
-          errorCode: event.errorCode || null,
-          errorText: event.errorText || null,
-        });
-      const onTrack = (event) =>
-        pushNativeEvent("Native peer received remote track", {
-          kind: event.track?.kind || "unknown",
-          id: event.track?.id || null,
-          muted: Boolean(event.track?.muted),
-          readyState: event.track?.readyState || "unknown",
-        });
-
-      peer.addEventListener("connectionstatechange", onConnectionStateChange);
-      peer.addEventListener("iceconnectionstatechange", onIceConnectionStateChange);
-      peer.addEventListener("signalingstatechange", onSignalingStateChange);
-      peer.addEventListener("icegatheringstatechange", onIceGatheringStateChange);
-      peer.addEventListener("icecandidate", onIceCandidate);
-      peer.addEventListener("icecandidateerror", onIceCandidateError);
-      peer.addEventListener("track", onTrack);
-      syncPeerState();
-      updatePeerStats(peer);
-
-      detachPeerListeners = () => {
-        peer.removeEventListener("connectionstatechange", onConnectionStateChange);
-        peer.removeEventListener("iceconnectionstatechange", onIceConnectionStateChange);
-        peer.removeEventListener("signalingstatechange", onSignalingStateChange);
-        peer.removeEventListener("icegatheringstatechange", onIceGatheringStateChange);
-        peer.removeEventListener("icecandidate", onIceCandidate);
-        peer.removeEventListener("icecandidateerror", onIceCandidateError);
-        peer.removeEventListener("track", onTrack);
-      };
-    };
-
-    let fallbackIceFetchPromise = null;
-    const fetchFallbackIceServers = async () => {
-      if (fallbackIceFetchPromise) {
-        return fallbackIceFetchPromise;
-      }
-      fallbackIceFetchPromise = (async () => {
-        try {
-          const config = await parseJsonResponse(
-            await fetchWithRetry("/bridge/api/config", undefined, { isCancelled: () => !active }),
-            "/bridge/api/config"
-          );
-          if (!active) {
-            return [];
-          }
-          const bridgeIceServers = Array.isArray(config?.rtcConfiguration?.iceServers)
-            ? config.rtcConfiguration.iceServers
-            : [];
-          nativeFallbackIceServersRef.current = bridgeIceServers;
-          const summary = summarizeIceServers(bridgeIceServers);
-          pushNativeEvent("Loaded bridge ICE fallback configuration", {
-            iceServers: summary.count,
-            hasTurn: summary.hasTurn,
-            hasStun: summary.hasStun,
-          });
-          return bridgeIceServers;
-        } catch (error) {
-          if (active) {
-            nativeFallbackIceServersRef.current = [];
-            pushNativeEvent("Unable to load bridge ICE fallback configuration", {
-              error: error?.message || String(error),
-            });
-          }
-          return [];
-        } finally {
-          fallbackIceFetchPromise = null;
-        }
-      })();
-      return fallbackIceFetchPromise;
-    };
-
-    const patchJsep = (jsep) => {
-      if (!jsep || nativeJsepPatchedRef.current === jsep) {
-        return;
-      }
-      nativeJsepPatchedRef.current = jsep;
-
-      const originalHandleStart = jsep._handleStart?.bind(jsep);
-      const originalHandleSignal = jsep._handleSignal?.bind(jsep);
-      const originalDisconnect = jsep.disconnect?.bind(jsep);
-      if (!originalHandleStart || !originalHandleSignal || !originalDisconnect) {
-        return;
-      }
-
-      jsep._handleStart = (signal) => {
-        try {
-          const startIceServers = Array.isArray(signal?.start?.iceServers) ? signal.start.iceServers : [];
-          const startSummary = summarizeIceServers(startIceServers);
-          const startMissingIce = signal?.start && !startSummary.hasTurn && !startSummary.hasStun;
-          let fallbackIceServers = Array.isArray(nativeFallbackIceServersRef.current)
-            ? nativeFallbackIceServersRef.current
-            : [];
-
-          if (fallbackIceServers.length === 0) {
-            // Keep start handling synchronous. The upstream JSEP driver expects
-            // _handleStart() to construct the peer connection immediately before
-            // processing SDP/candidates that can arrive in the same signal tick.
-            // Fetch fallback ICE in the background for future retries.
-            fetchFallbackIceServers();
-          }
-          const fallbackSummary = summarizeIceServers(fallbackIceServers);
-          const shouldPreferRelay = startSummary.hasTurn && nativeIceTransportMode === "relay";
-
-          const rewrittenBrowserIceServers = null;
-          const injectedIceServers = null;
-          const baseSignal = signal;
-
-          // When the emulator advertises relay-only transport but we are in a
-          // mixed-ICE retry (nativeIceTransportMode === "all"), the emulator's
-          // iceTransportPolicy must also be relaxed to "all". Without this
-          // override the browser peer connection is still constrained to relay
-          // candidates only, which fails for the same reason as the original
-          // relay-only attempt.
-          const shouldOverrideRelayToAll =
-            Boolean(baseSignal?.start) &&
-            nativeIceTransportMode !== "relay" &&
-            baseSignal.start.iceTransportPolicy === "relay";
-
-          const patchedSignal =
-            baseSignal?.start && shouldPreferRelay && baseSignal.start.iceTransportPolicy !== "relay"
-              ? {
-                  ...baseSignal,
-                  start: {
-                    ...baseSignal.start,
-                    iceTransportPolicy: "relay",
-                  },
-                }
-              : shouldOverrideRelayToAll
-              ? {
-                  ...baseSignal,
-                  start: {
-                    ...baseSignal.start,
-                    iceTransportPolicy: "all",
-                  },
-                }
-              : baseSignal;
-
-          pushNativeEvent("Native emulator advertised RTC configuration", {
-            iceServers: startSummary.count,
-            hasTurn: startSummary.hasTurn,
-            hasStun: startSummary.hasStun,
-            injectedIce: Boolean(injectedIceServers),
-            browserTurnRewrite: Boolean(rewrittenBrowserIceServers),
-            requestedTransportMode: nativeIceTransportMode,
-            iceTransportPolicy:
-              patchedSignal?.start?.iceTransportPolicy || signal?.start?.iceTransportPolicy || "all",
-          });
-          setNativeDiagnostics((previous) => ({
-            ...previous,
-            startIceServers: startSummary,
-          }));
-          if (startMissingIce || fallbackSummary.count > 0) {
-            pushNativeEvent("Native WebRTC left on emulator-provided local ICE configuration", {
-              startMissingIce,
-              ignoredFallbackIceServers: fallbackSummary.count,
-            });
-          }
-          if (patchedSignal !== baseSignal) {
-            if (shouldPreferRelay) {
-              pushNativeEvent("Forcing native browser ICE transport policy to relay because TURN is configured");
-            } else {
-              pushNativeEvent(
-                "Overriding emulator relay-only ICE transport policy to allow mixed candidates for retry",
-                { requestedTransportMode: nativeIceTransportMode }
-              );
-            }
-          }
-          if (startSummary.hasTurn && nativeIceTransportMode !== "relay") {
-            pushNativeEvent("Native browser is allowing mixed ICE candidates after a failed relay-only attempt", {
-              requestedTransportMode: nativeIceTransportMode,
-            });
-          }
-          originalHandleStart(patchedSignal);
-        } catch (error) {
-          pushNativeEvent("Native start signal patch failed", {
-            error: error?.message || String(error),
-          });
-          originalHandleStart(signal);
-        }
-      };
-
-      jsep._handleSignal = (signal) => {
-        if (signal?.sdp?.sdp) {
-          const kind = signal.sdp.type || "offer";
-          pushNativeEvent(`Native emulator sent ${kind} SDP`, {
-            candidates: countSdpIceCandidates(signal.sdp.sdp),
-          });
-          setNativeDiagnostics((previous) => ({
-            ...previous,
-            remoteDescriptionSdp: signal.sdp.sdp,
-            remoteCandidateSummary: parseSdpCandidateDiagnostics(signal.sdp.sdp),
-          }));
-        }
-        if (signal?.candidate?.candidate) {
-          pushNativeEvent("Native emulator sent ICE candidate", {
-            candidate: signal.candidate.candidate,
-          });
-        }
-        originalHandleSignal(signal);
-      };
-
-      jsep.disconnect = () => {
-        pushNativeEvent("Native JSEP session disconnected");
-        originalDisconnect();
-      };
-
-      nativePeerCleanupRef.current = () => {
-        detachPeerListeners();
-        jsep._handleStart = originalHandleStart;
-        jsep._handleSignal = originalHandleSignal;
-        jsep.disconnect = originalDisconnect;
-      };
-    };
-
-    const scanOnce = () => {
-      const emulator = emuRef.current;
-      const jsep = emulator?.jsep || null;
-      if (jsep) {
-        patchJsep(jsep);
-      }
-      const peer = jsep?.peerConnection || null;
-      if (peer && peer !== lastPeer) {
-        detachPeerListeners();
-        lastPeer = peer;
-        pushNativeEvent("Attached native WebRTC diagnostics to browser peer connection");
-        attachPeerListeners(peer);
-      }
-      if (peer) {
-        updatePeerStats(peer);
-        setNativeDiagnostics((previous) => ({
-          ...previous,
-          localDescriptionSdp: peer.localDescription?.sdp || previous.localDescriptionSdp,
-          remoteDescriptionSdp: peer.remoteDescription?.sdp || previous.remoteDescriptionSdp,
-          localCandidateSummary: peer.localDescription?.sdp
-            ? parseSdpCandidateDiagnostics(peer.localDescription.sdp)
-            : previous.localCandidateSummary,
-          remoteCandidateSummary: peer.remoteDescription?.sdp
-            ? parseSdpCandidateDiagnostics(peer.remoteDescription.sdp)
-            : previous.remoteCandidateSummary,
-        }));
-      }
-    };
-
-    // Patch the native JSEP driver before the emulator view's passive effects
-    // start streaming so the initial "start" signal cannot bypass our ICE
-    // server injection / relay preference logic.
-    fetchFallbackIceServers();
-    scanOnce();
-    const scan = window.setInterval(scanOnce, 500);
-
-    return () => {
-      active = false;
-      window.clearInterval(scan);
-      detachPeerListeners();
-      nativePeerCleanupRef.current();
-    };
-  }, [nativeIceTransportMode, streamMode, nativeWebrtcKey]);
-
-  useEffect(() => {
-    if (streamMode !== "native-webrtc") {
-      setNativeVideoStats(null);
-      setNativeHasVideoFrame(false);
-      nativeFailureSinceRef.current = null;
-      nativeFailureSignatureRef.current = null;
-      return undefined;
-    }
-
-    let active = true;
-    let video = null;
-    let detachVideoListeners = () => {};
-
-    const updateVideoStats = () => {
-      if (!active || !video) {
-        return;
-      }
-      const snapshot = buildVideoStatsSnapshot(video);
-      setNativeVideoStats(snapshot);
-      if (
-        snapshot &&
-        snapshot.videoWidth >= MIN_RENDERABLE_VIDEO_DIMENSION &&
-        snapshot.videoHeight >= MIN_RENDERABLE_VIDEO_DIMENSION
-      ) {
-        setNativeHasVideoFrame(true);
-      }
-    };
-
-    const attachVideoListeners = (nextVideo) => {
-      const events = ["loadedmetadata", "loadeddata", "canplay", "playing", "resize", "waiting", "stalled", "suspend", "emptied", "error"];
-      events.forEach((eventName) => nextVideo.addEventListener(eventName, updateVideoStats));
-      updateVideoStats();
-      detachVideoListeners = () => {
-        events.forEach((eventName) => nextVideo.removeEventListener(eventName, updateVideoStats));
-      };
-    };
-
-    const poll = window.setInterval(() => {
-      const nextVideo = displaySurfaceRef.current?.querySelector("video") || null;
-      if (!nextVideo) {
-        return;
-      }
-      if (nextVideo !== video) {
-        detachVideoListeners();
-        video = nextVideo;
-        attachVideoListeners(nextVideo);
-      }
-      updateVideoStats();
-    }, 500);
-
-    return () => {
-      active = false;
-      window.clearInterval(poll);
-      detachVideoListeners();
-    };
-  }, [streamMode]);
-
-  useEffect(() => {
-    if (streamMode !== "native-webrtc") {
-      return undefined;
-    }
-
-    let active = true;
-    let video = null;
-    let detachVideoListeners = () => {};
-
-    const pushVideoEvent = (messageText, details = null) => {
-      if (!active) {
-        return;
-      }
-      setNativeDiagnostics((previous) => ({
-        ...previous,
-        runtimeEvents: appendBoundedEvent(previous.runtimeEvents, messageText, details),
-      }));
-    };
-
-    const attachVideoListeners = (nextVideo) => {
-      const handlers = {
-        loadedmetadata: () =>
-          pushVideoEvent("Native video element loaded metadata", {
-            width: nextVideo.videoWidth || 0,
-            height: nextVideo.videoHeight || 0,
-          }),
-        loadeddata: () =>
-          pushVideoEvent("Native video element loaded current frame data", {
-            readyState: nextVideo.readyState,
-          }),
-        canplay: () =>
-          pushVideoEvent("Native video element can play", {
-            readyState: nextVideo.readyState,
-          }),
-        playing: () => pushVideoEvent("Native video element started playing"),
-        waiting: () => pushVideoEvent("Native video element waiting for data"),
-        stalled: () => pushVideoEvent("Native video element stalled"),
-        suspend: () => pushVideoEvent("Native video element suspended"),
-        emptied: () => pushVideoEvent("Native video element emptied"),
-        resize: () =>
-          pushVideoEvent("Native video element resized", {
-            width: nextVideo.videoWidth || 0,
-            height: nextVideo.videoHeight || 0,
-          }),
-        error: () =>
-          pushVideoEvent("Native video element error", {
-            code: nextVideo.error?.code || null,
-            message: nextVideo.error?.message || null,
-          }),
-      };
-
-      Object.entries(handlers).forEach(([eventName, handler]) => nextVideo.addEventListener(eventName, handler));
-      detachVideoListeners = () => {
-        Object.entries(handlers).forEach(([eventName, handler]) => nextVideo.removeEventListener(eventName, handler));
-      };
-    };
-
-    const poll = window.setInterval(() => {
-      const nextVideo = displaySurfaceRef.current?.querySelector("video") || null;
-      if (!nextVideo) {
-        return;
-      }
-      if (nextVideo !== video) {
-        detachVideoListeners();
-        video = nextVideo;
-        attachVideoListeners(nextVideo);
-      }
-    }, 500);
-
-    return () => {
-      active = false;
-      window.clearInterval(poll);
-      detachVideoListeners();
-    };
-  }, [streamMode]);
-
-  useEffect(() => {
-    if (streamMode !== "native-webrtc") {
-      nativeFailureSinceRef.current = null;
-      nativeFailureSignatureRef.current = null;
-      return;
-    }
-
-    if (hasRenderableVideo(nativeVideoStats, nativeDiagnostics?.peerStats, nativeHasVideoFrame)) {
-      nativeFailureSinceRef.current = null;
-      nativeFailureSignatureRef.current = null;
-      if (nativeRetryCount !== 0) {
-        setNativeRetryCount(0);
-      }
-      return;
-    }
-
-    const retryableReasons = new Set([
-      "placeholder-frame",
-      "no-inbound-rtp",
-      "decode-stalled",
-      "disconnected",
-      "native-relay-connectivity-failed",
-    ]);
-    if (!retryableReasons.has(nativeFailureReason.code)) {
-      nativeFailureSinceRef.current = null;
-      nativeFailureSignatureRef.current = null;
-      return;
-    }
-
-    const packetsReceived = Number(nativeDiagnostics.peerStats?.packetsReceived ?? 0);
-    const framesDecoded = Number(nativeDiagnostics.peerStats?.framesDecoded ?? 0);
-    const candidatePairState =
-      nativeDiagnostics.peerStats?.selectedCandidatePair?.state ||
-      nativeDiagnostics.peerStates?.iceConnectionState ||
-      "none";
-    const signature = [
-      nativeFailureReason.code,
-      emuState,
-      candidatePairState,
-      packetsReceived,
-      framesDecoded,
-      nativeVideoStats?.videoWidth || 0,
-      nativeVideoStats?.videoHeight || 0,
-    ].join("|");
-
-    const now = Date.now();
-    if (nativeFailureSignatureRef.current !== signature) {
-      nativeFailureSignatureRef.current = signature;
-      nativeFailureSinceRef.current = now;
-      return;
-    }
-
-    if (!nativeFailureSinceRef.current || now - nativeFailureSinceRef.current < NATIVE_WEBRTC_RECOVERY_DELAY_MS) {
-      return;
-    }
-
-    nativeFailureSinceRef.current = null;
-    nativeFailureSignatureRef.current = null;
-
-    if (nativeFailureReason.code === "native-relay-connectivity-failed") {
-      const failoverMessage =
-        "Native WebRTC reached browser TURN relay candidates but still never established media from the emulator. Switching to the custom WebRTC bridge for a reliable video stream.";
-      handleStreamModeChange("custom-webrtc");
-      setWebrtcNotice(failoverMessage);
-      setMessage(failoverMessage);
-      return;
-    }
-
-    if (nativeRetryCount >= NATIVE_WEBRTC_MAX_RETRIES) {
-      const shouldFailOverToCustomWebrtc = new Set([
-        "missing-ice-servers",
-        "disconnected",
-        "no-inbound-rtp",
-        "unreachable-host-candidates",
-        "native-relay-connectivity-failed",
-      ]).has(nativeFailureReason.code);
-      if (shouldFailOverToCustomWebrtc) {
-        const failoverMessage = `Native WebRTC could not recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries. Switching to the custom WebRTC bridge so the browser can keep streaming over the repository-managed relay path.`;
-        handleStreamModeChange("custom-webrtc");
-        setWebrtcNotice(failoverMessage);
-        setMessage(failoverMessage);
-        return;
-      }
-
-      const failMessage = `Native WebRTC could not recover from "${nativeFailureReason.summary}" after ${nativeRetryCount} retries. Use the Stream dropdown to switch to a different mode.`;
-      setWebrtcNotice(failMessage);
-      setMessage(failMessage);
-      nativeFailureSinceRef.current = null;
-      nativeFailureSignatureRef.current = null;
-      return;
-    }
-
-    if (nativeIceTransportMode === "relay" && shouldFallbackNativeIceTransport(nativeDiagnostics, nativeFailureReason)) {
-      const fallbackMessage =
-        "Native WebRTC relay-only ICE failed because the emulator only advertised host/srflx candidates. Retrying with mixed ICE to recover video.";
-      setMessage(fallbackMessage);
-      setWebrtcNotice(fallbackMessage);
-      setEmuState("connecting");
-      setNativeVideoStats(null);
-      setNativeHasVideoFrame(false);
-      setNativeIceTransportMode("all");
-      setNativeRetryCount((count) => count + 1);
-      setNativeWebrtcKey((value) => value + 1);
-      return;
-    }
-
-    setMessage(
-      `Native WebRTC hit "${nativeFailureReason.summary}" and is restarting session ${nativeRetryCount + 1}/${NATIVE_WEBRTC_MAX_RETRIES}...`
-    );
-    setEmuState("connecting");
-    setNativeVideoStats(null);
-    setNativeHasVideoFrame(false);
-    setNativeRetryCount((count) => count + 1);
-    setNativeWebrtcKey((value) => value + 1);
-  }, [
-    emuState,
-    nativeDiagnostics,
-    nativeFailureReason,
-    nativeHasVideoFrame,
-    nativeIceTransportMode,
-    nativeRetryCount,
-    nativeVideoStats,
-    streamMode,
-  ]);
-
-  useEffect(() => {
-    if (streamMode !== "native-webrtc") {
-      nativeRootCauseRef.current = null;
-      return;
-    }
-
-    if (nativeFailureReason.code === "missing-ice-servers") {
-      const nextNotice = `${nativeFailureReason.summary} The emulator did not advertise TURN, so coturn will not receive any traffic for this session.`;
-      if (nativeRootCauseRef.current === nextNotice) {
-        return;
-      }
-      nativeRootCauseRef.current = nextNotice;
-      setWebrtcNotice(nextNotice);
-      setMessage(nextNotice);
-      return;
-    }
-
-    const definitiveReasons = new Set([
-      "missing-ice-servers",
-      "unreachable-host-candidates",
-      "native-relay-connectivity-failed",
-      "no-inbound-rtp",
-      "decode-stalled",
-      "placeholder-frame",
-    ]);
-
-    if (!definitiveReasons.has(nativeFailureReason.code)) {
-      return;
-    }
-
-    const packetsReceived = Number(nativeDiagnostics.peerStats?.packetsReceived ?? 0);
-    const framesDecoded = Number(nativeDiagnostics.peerStats?.framesDecoded ?? 0);
-    const candidatePairState =
-      nativeDiagnostics.peerStats?.selectedCandidatePair?.state ||
-      nativeDiagnostics.peerStates?.iceConnectionState ||
-      "none";
-    const detailSummary = `ICE ${candidatePairState} | packets ${packetsReceived} | decoded ${framesDecoded}`;
-    const nextNotice = `Native WebRTC diagnosis: ${nativeFailureReason.summary} ${detailSummary}`;
-
-    if (nativeRootCauseRef.current === nextNotice) {
-      return;
-    }
-
-    nativeRootCauseRef.current = nextNotice;
-    setWebrtcNotice(nextNotice);
-    setMessage(nextNotice);
-  }, [nativeDiagnostics, nativeFailureReason, streamMode]);
-
-  useEffect(() => {
-    if (streamMode === "custom-webrtc") {
-      webrtcFailureRef.current = false;
-    }
-  }, [streamMode]);
-
-  useEffect(() => {
-    if (streamMode !== "custom-webrtc" || webrtcFailureRef.current) {
-      return;
-    }
-
-    const answerSdp = webrtcDiagnostics?.answerSdp || "";
-    const candidateDiagnostics = parseSdpCandidateDiagnostics(answerSdp);
-    const packetsReceived = webrtcDiagnostics?.receiverStats?.packetsReceived ?? 0;
-    const framesReceived = webrtcDiagnostics?.receiverStats?.framesReceived ?? 0;
-    const framesDecoded = webrtcDiagnostics?.receiverStats?.framesDecoded ?? 0;
-    const sessionState = webrtcDiagnostics?.sessionInfo?.state || "";
-    const peerState = webrtcDiagnostics?.sessionInfo?.peerConnectionState || "";
-    const iceState = webrtcDiagnostics?.sessionInfo?.iceConnectionState || "";
-    const browserVideoReadyState = Number(webrtcDiagnostics?.videoStats?.readyState ?? 0);
-    const hardFailedStates = ["failed", "closed", "expired", "media-failed"];
-    const transportFailed =
-      hardFailedStates.includes(sessionState) ||
-      hardFailedStates.includes(peerState) ||
-      hardFailedStates.includes(iceState);
-    const hostOnlyFailure =
-      candidateDiagnostics.total > 0 &&
-      candidateDiagnostics.relay === 0 &&
-      candidateDiagnostics.publicHost === 0 &&
-      packetsReceived === 0 &&
-      framesReceived === 0 &&
-      framesDecoded === 0 &&
-      browserVideoReadyState < HTMLMediaElement.HAVE_CURRENT_DATA &&
-      transportFailed;
-
-    if (!hostOnlyFailure) {
-      return;
-    }
-
-    webrtcFailureRef.current = true;
-    const shownAddresses = candidateDiagnostics.addresses.slice(0, 3).join(", ");
-    const failureMessage = [
-      "Custom WebRTC failed because the bridge answer only exposed private or loopback ICE candidates",
-      shownAddresses ? `(${shownAddresses})` : "",
-      "and no relay candidate, so the browser had no reachable media path. If coturn logs show 403 Forbidden IP for a 172.16-31.x, 192.168.x, or 10.x peer, allow that private bridge subnet on the TURN server or fix relay allocation so those host candidates are never used.",
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    setWebrtcNotice(failureMessage);
-    setMessage(failureMessage);
-    setEmuState("error");
-  }, [streamMode, webrtcDiagnostics]);
-
-  const stateColor = (state) =>
-    state === "connected" || state === "ready"
-      ? "#3fb950"
-      : state === "connecting" || state === "checking" || state === "initializing"
-        ? "#d29922"
-        : "#f85149";
-
-  async function callApi(path, options = {}) {
+  async function executeApi(url, options = {}) {
     setBusy(true);
     try {
-      const data = await parseJsonResponse(await fetch(path, options), path);
+      const data = await parseJsonResponse(await fetch(url, options), url);
       setMessage(data.launch || data.message || JSON.stringify(data));
       return data;
     } catch (error) {
-      setMessage(`${path} failed: ${error.message}`);
+      setMessage(`${url} failed: ${error.message}`);
       throw error;
     } finally {
       setBusy(false);
@@ -3243,17 +837,8 @@ function App() {
 
   async function sendKey(name) {
     try {
-      if (streamMode === "scrcpy-http") {
-        await callApi("/api/input-event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "key", key: name }),
-        });
-        setMessage(`Sent ${name} through Guacamole-style HTTP input`);
-        return;
-      }
-
-      emuRef.current?.sendKey?.(name);
+      await sendInput({ type: "key", key: name });
+      setMessage(`Sent ${name} through Guacamole-style HTTP input`);
     } catch (error) {
       setMessage(`Key send failed: ${error.message}`);
     }
@@ -3263,10 +848,10 @@ function App() {
     const file = event.target.files?.[0];
     if (!file) return;
     setMessage(`Installing ${file.name}...`);
-    const formData = new FormData();
-    formData.append("apk", file);
-    formData.append("package", packageName);
-    const data = await callApi("/api/install", { method: "POST", body: formData });
+    const form = new FormData();
+    form.append("apk", file);
+    form.append("package", packageName);
+    const data = await executeApi("/api/install", { method: "POST", body: form });
     if (data.package) {
       setPackageName(data.package);
       setMessage(`Ready to launch. Installed ${file.name} as ${data.package}`);
@@ -3276,23 +861,23 @@ function App() {
     event.target.value = "";
   }
 
-  async function installBuiltApk(path, initialPackage = "") {
-    setMessage(`Installing ${path}...`);
-    const data = await callApi("/api/install-built", {
+  async function installBuilt(relativePath, packageHint = "") {
+    setMessage(`Installing ${relativePath}...`);
+    const data = await executeApi("/api/install-built", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ relative_path: path, package: initialPackage || packageName }),
+      body: JSON.stringify({ relative_path: relativePath, package: packageHint || packageName }),
     });
     if (data.package) {
       setPackageName(data.package);
-      setMessage(`Ready to launch. Installed ${path} as ${data.package}`);
+      setMessage(`Ready to launch. Installed ${relativePath} as ${data.package}`);
     } else {
-      setMessage(`Ready to launch. Installed ${path}`);
+      setMessage(`Ready to launch. Installed ${relativePath}`);
     }
   }
 
-  async function launchApp() {
-    await callApi("/api/launch", {
+  async function launchPackage() {
+    await executeApi("/api/launch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ package: packageName }),
@@ -3300,57 +885,45 @@ function App() {
   }
 
   async function wakeDevice() {
-    await callApi("/api/wake", { method: "POST" });
+    await executeApi("/api/wake", { method: "POST" });
   }
 
   async function rebootDevice() {
-    await callApi("/api/reboot", { method: "POST" });
+    await executeApi("/api/reboot", { method: "POST" });
   }
 
   async function browse(path = "") {
     try {
-      const data = await parseJsonResponse(
-        await fetch(`/api/browse-apks?path=${encodeURIComponent(path)}`),
-        "/api/browse-apks"
-      );
+      const data = await parseJsonResponse(await fetch(`/api/browse-apks?path=${encodeURIComponent(path)}`), "/api/browse-apks");
       setBrowserData(data);
       setBrowserPath(data.cwd || "");
       setBrowserOpen(true);
-      requestAnimationFrame(() => {
-        browserSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+      requestAnimationFrame(() => browserSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch (error) {
       setMessage(`Browse error: ${error.message}`);
     }
   }
 
   async function selectApk(path) {
-    setBuiltPath(path);
+    setApkPath(path);
     setBrowserOpen(false);
     setMessage(`Selected ${path}. Checking package details...`);
     let detectedPackage = "";
     try {
-      const details = await parseJsonResponse(
-        await fetch(`/api/apk-package?path=${encodeURIComponent(path)}`),
-        "/api/apk-package"
-      );
-      if (details.package) {
-        detectedPackage = details.package;
-        setPackageName(details.package);
-        setMessage(`Selected ${path} (${details.package}). Installing...`);
+      const data = await parseJsonResponse(await fetch(`/api/apk-package?path=${encodeURIComponent(path)}`), "/api/apk-package");
+      if (data.package) {
+        detectedPackage = data.package;
+        setPackageName(data.package);
+        setMessage(`Selected ${path} (${data.package}). Installing...`);
       }
     } catch (error) {
       setMessage(`Selected ${path}. Package lookup failed: ${error.message}. Installing anyway...`);
     }
-    try {
-      await installBuiltApk(path, detectedPackage);
-    } catch {
-      // installBuiltApk already reports the error via message state
-    }
+    await installBuilt(path, detectedPackage);
   }
 
   function fullscreen() {
-    wrapRef.current?.requestFullscreen?.();
+    displaySurfaceRef.current?.requestFullscreen?.();
   }
 
   function reconnect() {
@@ -3359,56 +932,32 @@ function App() {
 
   function handleStreamModeChange(nextMode) {
     const resolvedMode = STREAM_MODE_VALUES.has(nextMode) ? nextMode : "scrcpy-http";
-    setWebrtcDiagnostics(null);
-    nativeFailureSinceRef.current = null;
-    nativeFailureSignatureRef.current = null;
-    nativeRootCauseRef.current = null;
-    setNativeRetryCount(0);
-    setNativeIceTransportMode("all");
-    setWebrtcNotice("");
-    if (resolvedMode === "scrcpy-http") {
-      setEmuState("connecting");
-      setMessage("Connecting to Guacamole-style HTTP video tunnel...");
-    } else {
-      setMessage("Switching to PNG preview mode...");
-    }
+    setScrcpyDiagnostics(null);
+    setEmuState("connecting");
+    setMessage(resolvedMode === "scrcpy-http" ? "Connecting to Guacamole-style HTTP video tunnel..." : "Switching to PNG preview mode...");
     setStreamMode(resolvedMode);
   }
 
-  const layout = useMemo(() => {
-    const deviceAspect =
-      deviceInfo?.screen?.width && deviceInfo?.screen?.height
-        ? deviceInfo.screen.width / deviceInfo.screen.height
-        : EMULATOR_ASPECT;
-    const leftPanel = Math.max(220, Math.round((viewport.width * leftPanePercent) / 100));
-    const availableHeight = Math.max(240, viewport.height - 48);
-    const availableWidth = Math.max(180, leftPanel - 32);
-
-    let height = availableHeight;
-    let width = Math.round(height * deviceAspect);
-
-    if (width > availableWidth) {
-      width = availableWidth;
-      height = Math.round(width / deviceAspect);
+  const displaySize = useMemo(() => {
+    const screen = deviceInfo?.screen || {};
+    const aspect = screen.width && screen.height ? screen.width / screen.height : EMULATOR_ASPECT;
+    const maxWidth = Math.max(220, Math.round((viewport.width * displayPercent) / 100) - 32);
+    const maxHeight = Math.max(240, viewport.height - 64);
+    let displayHeight = maxHeight;
+    let displayWidth = Math.round(displayHeight * aspect);
+    if (displayWidth > maxWidth) {
+      displayWidth = maxWidth;
+      displayHeight = Math.round(displayWidth / aspect);
     }
-
-    return { width, height };
-  }, [deviceInfo, viewport, leftPanePercent]);
+    return {
+      width: Math.max(180, displayWidth),
+      height: Math.max(240, displayHeight),
+    };
+  }, [deviceInfo, displayPercent, viewport]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          alignItems: "center",
-          padding: "8px 10px",
-          borderBottom: "1px solid #2b313d",
-          background: "#171a21",
-          flexShrink: 0,
-        }}
-      >
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", background: "#11141a", color: "#d7dfed", fontFamily: "Segoe UI, Arial, sans-serif" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #2b313d", background: "#171a21", flexShrink: 0 }}>
         <button onClick={() => sendKey("GoBack")} title="Back" aria-label="Back">Back</button>
         <button onClick={() => sendKey("GoHome")} title="Home" aria-label="Home">Home</button>
         <button onClick={() => sendKey("AppSwitch")} title="Recents" aria-label="Recents">Recents</button>
@@ -3428,77 +977,30 @@ function App() {
           </select>
         </label>
         <input type="file" accept=".apk,application/vnd.android.package-archive" onChange={uploadApk} disabled={busy} />
-        <input
-          type="text"
-          value={builtPath}
-          placeholder="APK path under workspace"
-          style={{ width: 200 }}
-          readOnly
-        />
+        <input type="text" value={apkPath} placeholder="APK path under workspace" style={{ width: 200 }} readOnly />
       </div>
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
-        <div
-          ref={wrapRef}
-          style={{
-            width: `${leftPanePercent}%`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 8,
-            overflow: "hidden",
-            userSelect: "none",
-            WebkitUserSelect: "none",
-          }}
-        >
-          <div
-            ref={displaySurfaceRef}
-            onMouseDown={(event) => event.preventDefault()}
-            onDragStart={(event) => event.preventDefault()}
-            style={{
-              width: layout.width,
-              height: layout.height,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              overflow: "hidden",
-              borderRadius: 18,
-              background: "#000",
-              userSelect: "none",
-              WebkitUserSelect: "none",
-            }}
-          >
-            {streamMode === "scrcpy-http" ? (
-              <ScrcpyHttpVideoPane
-                width={layout.width}
-                height={layout.height}
-                onStateChange={(state) => setEmuState(state)}
-                onMessage={setMessage}
-                onDiagnosticsChange={setScrcpyDiagnostics}
-              />
-            ) : (
-              <Emulator
-                key={`png-${nativeWebrtcKey}`}
-                ref={emuRef}
-                uri={window.location.origin}
-                view="png"
-                muted={true}
-                width={layout.width}
-                height={layout.height}
-                token={emulatorToken || undefined}
-                onStateChange={(state) => setEmuState(state)}
-                onError={(error) => {
-                  const text = String(error);
-                  setNativeDiagnostics((previous) => ({
-                    ...previous,
-                    lastError: text,
-                    runtimeEvents: appendBoundedEvent(previous.runtimeEvents, "Native emulator component error", { error: text }),
-                  }));
-                  setMessage(`Emulator error: ${text}`);
-                }}
-              />
-            )}
-          </div>
+        <div ref={displaySurfaceRef} style={{ width: `${displayPercent}%`, display: "flex", alignItems: "center", justifyContent: "center", padding: 8, overflow: "hidden", userSelect: "none" }}>
+          {streamMode === "scrcpy-http" ? (
+            <ScrcpyHttpVideoPane
+              width={displaySize.width}
+              height={displaySize.height}
+              onStateChange={setEmuState}
+              onMessage={setMessage}
+              onDiagnosticsChange={setScrcpyDiagnostics}
+              onInput={sendInput}
+            />
+          ) : (
+            <PngPreviewPane
+              width={displaySize.width}
+              height={displaySize.height}
+              deviceInfo={deviceInfo}
+              onStateChange={setEmuState}
+              onMessage={setMessage}
+              onInput={sendInput}
+            />
+          )}
         </div>
 
         <div
@@ -3507,122 +1009,54 @@ function App() {
             document.body.style.cursor = "col-resize";
             document.body.style.userSelect = "none";
           }}
-          style={{
-            width: 6,
-            cursor: "col-resize",
-            background: "#2b313d",
-            flexShrink: 0,
-          }}
+          style={{ width: 6, cursor: "col-resize", background: "#2b313d", flexShrink: 0 }}
         />
 
-        <div
-          style={{
-            width: `${100 - leftPanePercent}%`,
-            background: "#171a21",
-            padding: 14,
-            overflow: "auto",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+        <div style={{ width: `${100 - displayPercent}%`, background: "#171a21", padding: 14, overflow: "auto", flexShrink: 0 }}>
+          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Package name</div>
             <div style={{ display: "flex", gap: 8 }}>
-              <input
-                type="text"
-                value={packageName}
-                onChange={(event) => setPackageName(event.target.value)}
-                placeholder="com.example.app"
-                style={{ flex: 1 }}
-              />
-              <button onClick={launchApp} disabled={busy || !packageName}>Launch</button>
+              <input type="text" value={packageName} onChange={(event) => setPackageName(event.target.value)} placeholder="com.example.app" style={{ flex: 1 }} />
+              <button onClick={launchPackage} disabled={busy || !packageName}>Launch</button>
             </div>
           </div>
 
           <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-            <div style={{ flex: 1, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+            <div style={{ flex: 1, padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
               <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Emulator state</div>
-              <div data-testid="emulator-state-value" style={{ color: stateColor(emuState), fontWeight: 600 }}>
-                {emuState}
-              </div>
+              <div data-testid="emulator-state-value" style={{ color: stateColor(emuState), fontWeight: 600 }}>{emuState}</div>
             </div>
-            <div style={{ flex: 1, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+            <div style={{ flex: 1, padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
               <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Bridge API</div>
-              <div data-testid="bridge-api-state-value" style={{ color: stateColor(apiState), fontWeight: 600 }}>
-                {apiState}
-              </div>
+              <div data-testid="bridge-api-state-value" style={{ color: stateColor(bridgeState), fontWeight: 600 }}>{bridgeState}</div>
             </div>
           </div>
 
-          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Last message</div>
-            <div data-testid="last-message" style={{ whiteSpace: "pre-wrap", fontFamily: "monospace", fontSize: 12 }}>
-              {message}
-            </div>
+            <div data-testid="last-message" style={{ whiteSpace: "pre-wrap", fontFamily: "Consolas, monospace", fontSize: 12 }}>{message}</div>
           </div>
 
-          {webrtcNotice && (
-            <div
-              style={{
-                marginBottom: 12,
-                padding: 12,
-                border: "1px solid #6b4f1d",
-                borderRadius: 12,
-                background: "#2a2112",
-                color: "#f3d9a4",
-                fontSize: 12,
-                lineHeight: 1.5,
-              }}
-            >
-              {webrtcNotice}
-            </div>
-          )}
-
-          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Display diagnostics</div>
             <div style={{ fontSize: 12, color: "#a8b3c7", lineHeight: 1.6 }}>
-              <div>
-                Emulator screen:{" "}
-                {deviceInfo?.screen?.width && deviceInfo?.screen?.height
-                  ? `${deviceInfo.screen.width}x${deviceInfo.screen.height}`
-                  : "unavailable"}
-              </div>
-              <div>
-                Video frame:{" "}
-                {streamMode === "scrcpy-http"
-                  ? `Guacamole-style scrcpy MP4 over ordinary HTTPS fetch (${GUACAMOLE_HTTP_TARGET_FPS}fps target)`
-                  : "PNG preview over the emulator HTTP endpoint"}
-              </div>
-              <div>HTTP tunneling stays front and center here for corporate-firewall-friendly emulator access.</div>
+              <div>Emulator screen: {deviceInfo?.screen?.width && deviceInfo?.screen?.height ? `${deviceInfo.screen.width}x${deviceInfo.screen.height}` : "unavailable"}</div>
+              <div>Video frame: {streamMode === "scrcpy-http" ? `Guacamole-style scrcpy MP4 over ordinary HTTP fetch (${GUACAMOLE_HTTP_TARGET_FPS}fps target)` : "PNG preview over the emulator HTTP endpoint"}</div>
+              <div>Input path: keyboard, mouse, and touch events are posted through /api/input-event</div>
             </div>
           </div>
 
-
           {streamMode === "scrcpy-http" && (
-            <div
-              data-testid="scrcpy-http-diagnostics"
-              style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}
-            >
+            <div data-testid="scrcpy-http-diagnostics" style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
               <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Scrcpy HTTP video diagnostics</div>
               <pre
                 aria-label="scrcpy HTTP video debug overlay"
-                style={{
-                  margin: 0,
-                  padding: 10,
-                  background: "#0f1218",
-                  border: "1px solid #2b313d",
-                  borderRadius: 8,
-                  whiteSpace: "pre-wrap",
-                  userSelect: "text",
-                  fontFamily: "Consolas, monospace",
-                  fontSize: 11,
-                  lineHeight: 1.5,
-                  maxHeight: 260,
-                  overflow: "auto",
-                }}
+                style={{ margin: 0, padding: 10, background: "#0f1218", border: "1px solid #2b313d", borderRadius: 8, whiteSpace: "pre-wrap", userSelect: "text", fontFamily: "Consolas, monospace", fontSize: 11, lineHeight: 1.5, maxHeight: 260, overflow: "auto" }}
               >
                 {[
                   `http: ${scrcpyDiagnostics?.response || "pending"}`,
                   `content-type: ${scrcpyDiagnostics?.contentType || "pending"}`,
+                  `mime: ${scrcpyDiagnostics?.mimeType || "pending"}`,
                   `stream: ${formatBytes(scrcpyDiagnostics?.bytesReceived || 0)} / ${scrcpyDiagnostics?.chunksReceived || 0} chunks`,
                   `first box: ${scrcpyDiagnostics?.firstBox || "waiting"}`,
                   `last chunk: ${formatBytes(scrcpyDiagnostics?.lastChunkBytes || 0)}`,
@@ -3638,233 +1072,16 @@ function App() {
             </div>
           )}
 
-          {streamMode === "custom-webrtc" && (
-            <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
-              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>WebRTC diagnostics</div>
-              <div style={{ fontSize: 12, lineHeight: 1.7, color: "#d7dfed", marginBottom: 10 }}>
-                <div>Transport: {captureOverlay.backendLabel}</div>
-                <div>Mode: {captureOverlay.statusLine}</div>
-                <div>{captureOverlay.reasonLine}</div>
-                <div>{captureOverlay.verificationLine}</div>
-                <div>Capture backend: {bridgeCaptureOverlay.backendLabel}</div>
-                <div>Capture state: {bridgeCaptureOverlay.statusLine}</div>
-                <div>{bridgeCaptureOverlay.reasonLine}</div>
-                <div>{bridgeCaptureOverlay.verificationLine}</div>
-                <div>
-                  Input path: keyboard, mouse, and touch events are sent through the custom WebRTC bridge session.
-                </div>
-                <div>
-                  Fallbacks: the PNG preview remains available for comparison while the custom bridge manages the live video
-                  session, but WebRTC itself stays on its native stream path.
-                </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
-                <div>
-                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>First-frame path</div>
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 10,
-                      background: "#0f1218",
-                      border: "1px solid #2b313d",
-                      borderRadius: 8,
-                      whiteSpace: "pre-wrap",
-                      fontFamily: "Consolas, monospace",
-                      fontSize: 11,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {firstFrameDiagnostics}
-                  </pre>
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Offer / answer</div>
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 10,
-                      background: "#0f1218",
-                      border: "1px solid #2b313d",
-                      borderRadius: 8,
-                      whiteSpace: "pre-wrap",
-                      fontFamily: "Consolas, monospace",
-                      fontSize: 11,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {`offer: ${offerSummary}\nanswer: ${answerSummary}\n${answerAttemptSummary}`}
-                  </pre>
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Browser runtime events</div>
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 10,
-                      background: "#0f1218",
-                      border: "1px solid #2b313d",
-                      borderRadius: 8,
-                      whiteSpace: "pre-wrap",
-                      fontFamily: "Consolas, monospace",
-                      fontSize: 11,
-                      lineHeight: 1.5,
-                      maxHeight: 220,
-                      overflow: "auto",
-                    }}
-                  >
-                    {runtimeEventSummary}
-                  </pre>
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Bridge logs</div>
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 10,
-                      background: "#0f1218",
-                      border: "1px solid #2b313d",
-                      borderRadius: 8,
-                      whiteSpace: "pre-wrap",
-                      fontFamily: "Consolas, monospace",
-                      fontSize: 11,
-                      lineHeight: 1.5,
-                      maxHeight: 220,
-                      overflow: "auto",
-                    }}
-                  >
-                    {bridgeLogSummary}
-                  </pre>
-                </div>
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>ffmpeg stderr</div>
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 10,
-                      background: "#0f1218",
-                      border: "1px solid #2b313d",
-                      borderRadius: 8,
-                      whiteSpace: "pre-wrap",
-                      fontFamily: "Consolas, monospace",
-                      fontSize: 11,
-                      lineHeight: 1.5,
-                      maxHeight: 220,
-                      overflow: "auto",
-                    }}
-                  >
-                    {ffmpegStderrSummary}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {streamMode === "native-webrtc" && (
-            <div
-              data-testid="native-webrtc-diagnostics"
-              style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}
-            >
-              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Native WebRTC diagnostics</div>
-              <div style={{ fontSize: 12, lineHeight: 1.7, color: "#d7dfed", marginBottom: 10 }}>
-                <div>Transport: {nativeWebrtcOverlay.backendLabel}</div>
-                <div>Mode: {nativeWebrtcOverlay.statusLine}</div>
-                <div>{nativeWebrtcOverlay.reasonLine}</div>
-                <div>{nativeWebrtcOverlay.verificationLine}</div>
-                <div>
-                  Native upstream sending video:{" "}
-                  {nativeUpstreamSending
-                    ? "yes (inbound RTP/video counters are increasing)"
-                    : "no (no inbound RTP/video counters yet)"}
-                </div>
-                <div>Diagnosis: {nativeFailureReason.summary}</div>
-                <div>
-                  ICE servers: {formatIceServerSummary(nativeDiagnostics.startIceServers)}
-                </div>
-                <div>
-                  ICE transport mode:{" "}
-                  {nativeIceTransportMode === "relay" ? "relay-only" : "mixed candidates (local + direct)"}
-                </div>
-                {nativeMissingTurnNotice ? <div>{nativeMissingTurnNotice}</div> : null}
-                <div>
-                  Candidate path: local {formatCandidateTypeSummary(nativeDiagnostics.localCandidateSummary)} | remote{" "}
-                  {formatCandidateTypeSummary(nativeDiagnostics.remoteCandidateSummary)}
-                </div>
-                <div>
-                  Selected pair:{" "}
-                  {nativeDiagnostics.peerStats?.selectedCandidatePair
-                    ? `${nativeDiagnostics.peerStats.selectedCandidatePair.localCandidateType || "n/a"} ${nativeDiagnostics.peerStats.selectedCandidatePair.localAddress || "n/a"} -> ${nativeDiagnostics.peerStats.selectedCandidatePair.remoteCandidateType || "n/a"} ${nativeDiagnostics.peerStats.selectedCandidatePair.remoteAddress || "n/a"}`
-                    : "none"}
-                </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
-                <div>
-                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>First-frame path</div>
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 10,
-                      background: "#0f1218",
-                      border: "1px solid #2b313d",
-                      borderRadius: 8,
-                      whiteSpace: "pre-wrap",
-                      fontFamily: "Consolas, monospace",
-                      fontSize: 11,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {nativeFirstFrameDiagnostics}
-                  </pre>
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Browser runtime events</div>
-                  <pre
-                    style={{
-                      margin: 0,
-                      padding: 10,
-                      background: "#0f1218",
-                      border: "1px solid #2b313d",
-                      borderRadius: 8,
-                      whiteSpace: "pre-wrap",
-                      fontFamily: "Consolas, monospace",
-                      fontSize: 11,
-                      lineHeight: 1.5,
-                      maxHeight: 220,
-                      overflow: "auto",
-                    }}
-                  >
-                    {nativeRuntimeEventSummary}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
-            <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>
-              Android system logs ({logsPaused ? "paused" : "live"}, last {logLimit})
-            </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
-              <input
-                type="text"
-                value={logFilter}
-                onChange={(event) => setLogFilter(event.target.value)}
-                placeholder="Filter text (e.g. package name)"
-                style={{ flex: 1 }}
-              />
+          <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
+            <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Android system logs ({logsPaused ? "paused" : "live"}, last {logRows})</div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+              <input type="text" value={logFilter} onChange={(event) => setLogFilter(event.target.value)} placeholder="Filter text (e.g. package name)" style={{ flex: 1, minWidth: 180 }} />
               <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-                <input
-                  type="checkbox"
-                  checked={errorsOnly}
-                  onChange={(event) => setErrorsOnly(event.target.checked)}
-                />
+                <input type="checkbox" checked={errorsOnly} onChange={(event) => setErrorsOnly(event.target.checked)} />
                 Errors only
               </label>
               <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-                <input
-                  type="checkbox"
-                  checked={fatalOnly}
-                  onChange={(event) => setFatalOnly(event.target.checked)}
-                />
+                <input type="checkbox" checked={fatalOnly} onChange={(event) => setFatalOnly(event.target.checked)} />
                 FATAL
               </label>
               <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
@@ -3873,119 +1090,56 @@ function App() {
                   type="number"
                   min={1}
                   max={500}
-                  value={logLimit}
+                  value={logRows}
                   onChange={(event) => {
-                    const next = Number(event.target.value);
-                    if (Number.isNaN(next)) return;
-                    setLogLimit(Math.max(1, Math.min(500, next)));
+                    const value = Number(event.target.value);
+                    if (!Number.isNaN(value)) setLogRows(clamp(value, 1, 500));
                   }}
                   style={{ width: 72 }}
                 />
               </label>
-              <button onClick={() => setLogsPaused((prev) => !prev)}>
-                {logsPaused ? "Resume logs" : "Pause logs"}
-              </button>
-              <button
-                onClick={() =>
-                  setLogEntries((prev) => {
-                    if (prev.length > 0) {
-                      lastSeenLogRef.current = prev[prev.length - 1];
-                    }
-                    return [];
-                  })
-                }
-                disabled={logEntries.length === 0}
-              >
-                Clear
-              </button>
+              <button onClick={() => setLogsPaused((value) => !value)}>{logsPaused ? "Resume logs" : "Pause logs"}</button>
+              <button onClick={() => setLogs([])} disabled={logs.length === 0}>Clear</button>
             </div>
-            <div
-              style={{
-                fontFamily: "monospace",
-                fontSize: 12,
-                height: logPaneHeight,
-                overflow: "auto",
-                background: "#0f1218",
-                border: "1px solid #2b313d",
-                borderRadius: 8,
-                padding: 8,
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {logEntries.length === 0 ? "No log entries." : logEntries.join("\n")}
-            </div>
-            <div
-              onMouseDown={(event) => {
-                event.preventDefault();
-                isLogResizingRef.current = true;
-                document.body.style.cursor = "row-resize";
-                document.body.style.userSelect = "none";
-              }}
-              style={{
-                marginTop: 8,
-                height: 10,
-                cursor: "row-resize",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-              title="Drag to resize log window height"
-              aria-label="Resize log window"
-            >
-              <div
-                style={{
-                  width: 48,
-                  height: 4,
-                  borderRadius: 999,
-                  background: "#3a4355",
-                }}
-              />
+            <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, height: 260, overflow: "auto", background: "#0f1218", border: "1px solid #2b313d", borderRadius: 8, padding: 8, whiteSpace: "pre-wrap" }}>
+              {logs.length === 0 ? "No log entries." : logs.join("\n")}
             </div>
           </div>
 
           {browserOpen && (
-            <div ref={browserSectionRef} style={{ padding: 12, border: "1px solid #2b313d", borderRadius: 12 }}>
+            <div ref={browserSectionRef} style={{ padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <div style={{ fontSize: 12, color: "#a8b3c7" }}>
-                  Browse /workspace{browserPath ? `/${browserPath}` : ""}
-                </div>
+                <strong>Browse /workspace{browserPath ? `/${browserPath}` : ""}</strong>
                 <button onClick={() => setBrowserOpen(false)}>Close</button>
               </div>
-
-              {browserData.parent !== null && (
-                <div style={{ marginBottom: 8 }}>
-                  <button onClick={() => browse(browserData.parent)}>.. parent</button>
-                </div>
+              {browserData?.parent !== null && (
+                <button onClick={() => browse(browserData?.parent || "")} style={{ marginBottom: 10 }}>.. parent</button>
               )}
-
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Directories</div>
-                {browserData.directories.length === 0 ? (
-                  <div style={{ fontSize: 12, color: "#999" }}>No subdirectories</div>
-                ) : (
-                  browserData.directories.map((directory) => (
-                    <div key={directory.path} style={{ marginBottom: 6 }}>
-                      <button onClick={() => browse(directory.path)} style={{ width: "100%", textAlign: "left" }}>
-                        [DIR] {directory.name}
+              <div style={{ display: "grid", gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>Directories</div>
+                  {browserData?.directories?.length === 0 ? (
+                    <div style={{ color: "#8b949e", fontSize: 12 }}>No directories.</div>
+                  ) : (
+                    browserData?.directories?.map((directory) => (
+                      <button key={directory.path} onClick={() => browse(directory.path)} style={{ width: "100%", textAlign: "left", marginBottom: 4 }}>
+                        {directory.name}/
                       </button>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div>
-                <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>APK files</div>
-                {browserData.apks.length === 0 ? (
-                  <div style={{ fontSize: 12, color: "#999" }}>No APKs here</div>
-                ) : (
-                  browserData.apks.map((apk) => (
-                    <div key={apk.path} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                      <button onClick={() => selectApk(apk.path)} style={{ flex: 1, textAlign: "left" }}>
-                        [APK] {apk.name}
+                    ))
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 6 }}>APKs</div>
+                  {browserData?.apks?.length === 0 ? (
+                    <div style={{ color: "#8b949e", fontSize: 12 }}>No APKs.</div>
+                  ) : (
+                    browserData?.apks?.map((apk) => (
+                      <button key={apk.path} onClick={() => selectApk(apk.path)} style={{ width: "100%", textAlign: "left", marginBottom: 4 }}>
+                        {apk.name}
                       </button>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           )}

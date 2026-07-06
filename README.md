@@ -2,7 +2,7 @@
 
 Designed for app development without requiring Android Studio locally. The stack runs a Dockerized Android emulator, a small APK/ADB bridge API, Envoy, and a React frontend.
 
-The primary display path is now a Guacamole-style HTTP tunnel: the server stays close to the emulator and streams scrcpy-captured video to the browser as fragmented MP4 over ordinary HTTP(S). Input goes back through normal HTTP API calls. This avoids browser WebRTC relay negotiation and works through corporate-firewall setups that already allow Guacamole-like traffic.
+The display path is a Guacamole-style HTTP tunnel: the server stays close to the emulator and streams scrcpy-captured video to the browser as fragmented MP4 over ordinary HTTP(S). Input goes back through normal HTTP API calls. No browser WebRTC, emulator gRPC-Web, or relay negotiation is used.
 
 ## Default Video Path
 
@@ -20,21 +20,19 @@ to remuxing `adb exec-out screenrecord --output-format=h264 -` into the same
 fragmented MP4 response. PNG preview remains available for inspection or
 recovery.
 
-The old STUN/TURN server implementation has been removed. The stack no longer mints relay credentials, generates emulator `-turncfg`, runs a TURN connectivity harness, or depends on a public relay route.
+The old WebRTC/STUN/TURN implementation has been removed. The stack no longer mints relay credentials, generates emulator `-turncfg`, runs a TURN connectivity harness, exposes emulator gRPC-Web, or depends on a public relay route.
 
 ## Minimal Exposed Ports
 
 The default stack exposes only:
 
-* `18080` -> Envoy entrypoint for the UI, APK bridge API, and emulator gRPC-Web endpoints
+* `18080` -> frontend Nginx entrypoint for the UI and `/api/*` APK bridge proxy
 * `15555` -> optional host ADB access to the emulator
 
 Everything else stays internal on the Docker network:
 
 * `frontend` on port `80`
 * `apkbridge` on port `5000`
-* `bridge-webrtc` on port `8090` for optional local WebRTC debugging
-* emulator gRPC on port `8554`
 
 Start the stack with:
 
@@ -78,14 +76,12 @@ On Windows PowerShell:
 What it runs:
 
 1. Frontend dependency install
-2. Bridge dependency install
-3. Python virtualenv bootstrap with `apkbridge/requirements.txt`
-4. `python -m unittest discover -s apkbridge/tests -v`
-5. `node --test --test-force-exit bridge-webrtc/test/*.test.mjs`
-6. `node scripts/test-guacamole-http.mjs`
-7. `npm --prefix frontend run build`
-8. Optional emulator container startup smoke test when `RUN_EMULATOR_STARTUP_TEST=1`
-9. Optional deployed HTTP video validation when `RUN_EMULATOR_STREAM_TEST=1` or `E2E_BASE_URL` is set
+2. Python virtualenv bootstrap with `apkbridge/requirements.txt`
+3. `python -m unittest discover -s apkbridge/tests -v`
+4. `node scripts/test-guacamole-http.mjs`
+5. `npm --prefix frontend run build`
+6. Optional emulator container startup smoke test when `RUN_EMULATOR_STARTUP_TEST=1`
+7. Optional deployed HTTP video validation when `RUN_EMULATOR_STREAM_TEST=1` or `E2E_BASE_URL` is set
 
 ## Internet Access Defaults
 

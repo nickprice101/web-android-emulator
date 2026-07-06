@@ -41,7 +41,7 @@ const findings = {
   shellUnsetVariableCrash: /start-emulator\.sh:\s*\d+:\s*_emulator_version: parameter not set/.test(logText),
   modemIpv6Failure: /qemu-system-x86_64-headless: .*id=modem: address resolution failed for ::1/.test(logText),
   invalidRadioOption: /qemu-system-x86_64-headless: -radio: invalid option/.test(logText),
-  grpcServerStarted: /Started GRPC server at 0\.0\.0\.0:8554/.test(logText),
+  directAdbBridgeForwarderStarted: /\[start-emulator\] Started direct adb bridge forwarder on .*:5555 -> 127\.0\.0\.1:5555\./.test(logText),
   adbPortGuardHeartbeatCount: (logText.match(/\[adb-port-guard\] alive: iter=/g) || []).length,
   repeatedRestartLoop:
     (logText.match(/Using direct emulator launch: \/android\/sdk\/emulator\/emulator/g) || []).length > 1 ||
@@ -118,7 +118,7 @@ const summary = {
   rootCause,
   explanation,
   likelyHealthyLongRunningRuntime:
-    findings.grpcServerStarted &&
+    findings.directAdbBridgeForwarderStarted &&
     findings.adbPortGuardHeartbeatCount >= 3 &&
     !findings.modemIpv6Failure &&
     !findings.invalidRadioOption &&

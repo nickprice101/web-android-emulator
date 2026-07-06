@@ -33,12 +33,6 @@ stage() {
 stage "stage 1: dependency/bootstrap checks"
 echo "[testbed] preparing Node dependencies"
 run_npm --prefix frontend ci
-run_npm --prefix bridge-webrtc ci
-
-if [[ "${BRIDGE_WRTC_BUILD_FORK:-0}" == "1" ]]; then
-  echo "[testbed] building forked @roamhq/wrtc binary for ${OSTYPE:-unknown}"
-  run_npm --prefix bridge-webrtc run build:wrtc-fork
-fi
 
 echo "[testbed] preparing Python virtual environment"
 run_python3 -m venv .venv-testbed
@@ -58,19 +52,15 @@ stage "stage 2: apkbridge validation"
 echo "[testbed] running apkbridge unit tests"
 "$VENV_PYTHON" -m unittest discover -s apkbridge/tests -v
 
-stage "stage 3: bridge media validation"
-echo "[testbed] running bridge-webrtc unit tests"
-run_node --test --test-force-exit bridge-webrtc/test/*.test.mjs
-
-stage "stage 4: Guacamole-style HTTP tunnel configuration guards"
+stage "stage 3: Guacamole-style HTTP tunnel configuration guards"
 echo "[testbed] running Guacamole-style HTTP configuration checks"
 run_node scripts/test-guacamole-http.mjs
 
-stage "stage 5: frontend production build"
+stage "stage 4: frontend production build"
 echo "[testbed] running frontend build"
 run_npm --prefix frontend run build
 
-stage "stage 6: optional emulator container startup smoke test"
+stage "stage 5: optional emulator container startup smoke test"
 if [[ "${RUN_EMULATOR_STARTUP_TEST:-0}" == "1" ]]; then
   echo "[testbed] running emulator startup smoke test"
   bash scripts/test-emulator-startup.sh
@@ -78,7 +68,7 @@ else
   echo "[testbed] skipping emulator startup smoke test (set RUN_EMULATOR_STARTUP_TEST=1 to run it)"
 fi
 
-stage "stage 7: optional deployed video-stream validation"
+stage "stage 6: optional deployed video-stream validation"
 if [[ "${RUN_EMULATOR_STREAM_TEST:-0}" == "1" || -n "${E2E_BASE_URL:-}" ]]; then
   echo "[testbed] running deployed Playwright video-stream validation"
   run_npm --prefix frontend run test:e2e:guacamole-http

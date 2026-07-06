@@ -15,6 +15,14 @@ function assertNoActiveTurnConfig(name, text) {
   assert.doesNotMatch(text, /turn-tls-shim|turn-connectivity-harness/i, `${name} must not reference removed TURN harnesses`);
 }
 
+function assertNoWebrtcRuntime(name, text) {
+  assert.doesNotMatch(
+    text,
+    /android-emulator-webrtc|bridge-webrtc|custom-webrtc|native-webrtc|grpc-web|\/bridge\/|RTCPeerConnection|MediaStream|wrtc/i,
+    `${name} must not contain the removed WebRTC runtime path`
+  );
+}
+
 const frontendMain = readRepoFile("frontend/src/main.jsx");
 assert.match(
   frontendMain,
@@ -29,15 +37,11 @@ assert.match(
 const streamModeOptions = frontendMain.match(/const STREAM_MODE_OPTIONS = \[[\s\S]*?\];/)?.[0] || "";
 assert.ok(streamModeOptions, "frontend must define stream mode options");
 assert.match(streamModeOptions, /value: "png", label: "PNG preview"/, "stream selector must retain PNG preview");
-assert.doesNotMatch(
-  streamModeOptions,
-  /custom-webrtc|native-webrtc/,
-  "stream selector must expose only Guacamole HTTP and PNG preview"
-);
-assert.doesNotMatch(
+assertNoWebrtcRuntime("frontend/src/main.jsx", frontendMain);
+assert.match(
   frontendMain,
-  /FALLBACK_STUN_URL|stun:stun\.l\.google\.com/,
-  "frontend must not inject a public STUN server"
+  /'video\/mp4; codecs="avc1\.42C029"'/,
+  "frontend must prefer the API 35 scrcpy AVC codec string seen in emulator logs"
 );
 assert.match(
   frontendMain,
@@ -47,8 +51,18 @@ assert.match(
 assert.match(
   frontendMain,
   /Sent \$\{name\} through Guacamole-style HTTP input/,
-  "toolbar keys must route through HTTP input when the HTTP tunnel is active"
+  "toolbar keys must route through HTTP input"
 );
+
+const frontendPackage = readRepoFile("frontend/package.json");
+const frontendViteConfig = readRepoFile("frontend/vite.config.js");
+assertNoWebrtcRuntime("frontend/package.json", frontendPackage);
+assertNoWebrtcRuntime("frontend/vite.config.js", frontendViteConfig);
+
+const frontendNginx = readRepoFile("frontend/nginx.conf");
+assert.match(frontendNginx, /location \/api\/ \{[\s\S]*proxy_pass http:\/\/apkbridge:5000\//, "frontend Nginx must proxy /api to apkbridge");
+assert.match(frontendNginx, /proxy_buffering off;/, "frontend Nginx must not buffer the live scrcpy stream");
+assert.match(frontendNginx, /proxy_read_timeout 1h;/, "frontend Nginx must allow long-lived scrcpy responses");
 
 const apkbridgeApp = readRepoFile("apkbridge/app.py");
 assert.match(apkbridgeApp, /SCRCPY_MAX_FPS = .*"24"/, "apkbridge must default scrcpy to 24fps");
@@ -78,41 +92,36 @@ assert.match(apkbridgeApp, /-flush_packets/, "apkbridge ffmpeg muxing must flush
 
 const composeConfig = readRepoFile("docker-compose.yml");
 assertNoActiveTurnConfig("docker-compose.yml", composeConfig);
+assertNoWebrtcRuntime("docker-compose.yml", composeConfig);
 assert.match(composeConfig, /SCRCPY_MAX_FPS:\s*"24"/, "compose must pin scrcpy max fps to 24");
 assert.match(composeConfig, /SCRCPY_VIDEO_BIT_RATE:/, "compose must expose scrcpy bitrate tuning");
 assert.match(composeConfig, /SCRCPY_PORT_RANGE:/, "compose must expose scrcpy tunnel port range tuning");
-assert.match(composeConfig, /CAPTURE_FPS:\s*"\$\{CAPTURE_FPS:-24\}"/, "optional WebRTC bridge fallback must also default to 24fps");
+assert.match(composeConfig, /18080:80/, "frontend must own the public UI/API entrypoint");
+assert.doesNotMatch(composeConfig, /envoyproxy\/envoy|container_name:\s*google-emu-envoy/, "compose must not start the removed Envoy container");
+assert.doesNotMatch(composeConfig, /-grpc\s+8554|emu-grpc-token|8554/, "compose must not expose emulator gRPC for the HTTP-only path");
 
 const emulatorDockerfile = readRepoFile("emulator/Dockerfile");
 const emulatorWrapper = readRepoFile("emulator/start-emulator.sh");
 assertNoActiveTurnConfig("emulator/Dockerfile", emulatorDockerfile);
 assertNoActiveTurnConfig("emulator/start-emulator.sh", emulatorWrapper);
-assert.match(emulatorDockerfile, /COPY start-emulator\.sh \/usr\/local\/bin\/start-emulator\.sh/, "emulator Dockerfile must install the renamed wrapper");
-assert.match(emulatorDockerfile, /ENTRYPOINT \["\/usr\/local\/bin\/start-emulator\.sh"\]/, "emulator Dockerfile must run the renamed wrapper");
+assert.match(emulatorDockerfile, /COPY start-emulator\.sh \/usr\/local\/bin\/start-emulator\.sh/, "emulator Dockerfile must install the wrapper");
+assert.match(emulatorDockerfile, /ENTRYPOINT \["\/usr\/local\/bin\/start-emulator\.sh"\]/, "emulator Dockerfile must run the wrapper");
 assert.match(emulatorWrapper, /\[start-emulator\]/, "emulator wrapper logs must use the non-TURN prefix");
 assert.match(emulatorWrapper, /EMULATOR_LAUNCH_MODE="\$\{EMULATOR_LAUNCH_MODE:-direct\}"/, "emulator wrapper must keep direct launch as the default");
 assert.match(emulatorWrapper, /start_direct_adb_bridge_forwarder\(\)/, "emulator wrapper must keep the sibling-container ADB bridge");
-
-const bridgeServer = readRepoFile("bridge-webrtc/server.mjs");
-assertNoActiveTurnConfig("bridge-webrtc/server.mjs", bridgeServer);
-assert.doesNotMatch(bridgeServer, /prepareIceServersForNode|createHmac|turnConnectivity|turnPolicy/i, "bridge server must not contain TURN preparation or credential code");
-assert.match(bridgeServer, /iceServers: buildIceServers\(\),[\s\S]*iceTransportPolicy: "all"/, "optional bridge WebRTC config must be local ICE only");
-assert.equal(existsSync(resolve(repoRoot, "bridge-webrtc/turn-tls-shim.mjs")), false, "TURN TLS shim file must be removed");
-assert.equal(existsSync(resolve(repoRoot, "bridge-webrtc/test/turn-connectivity-harness.mjs")), false, "TURN connectivity harness must be removed");
+assert.doesNotMatch(emulatorWrapper, /-grpc|emu-grpc-token|TOKEN_WATCHER|gRPC-Web|bridge-webrtc/, "emulator wrapper must not start gRPC/token support for removed WebRTC");
 
 const testbedSh = readRepoFile("scripts/testbed.sh");
 const testbedPs1 = readRepoFile("scripts/testbed.ps1");
 assertNoActiveTurnConfig("scripts/testbed.sh", testbedSh);
 assertNoActiveTurnConfig("scripts/testbed.ps1", testbedPs1);
+assertNoWebrtcRuntime("scripts/testbed.sh", testbedSh);
+assertNoWebrtcRuntime("scripts/testbed.ps1", testbedPs1);
 assert.match(testbedSh, /test-guacamole-http\.mjs/, "bash testbed must run the HTTP tunnel configuration guard");
 assert.match(testbedPs1, /test-guacamole-http\.mjs/, "PowerShell testbed must run the HTTP tunnel configuration guard");
 assert.match(testbedSh, /test:e2e:guacamole-http/, "bash testbed must run the Guacamole HTTP E2E when deployed validation is enabled");
 
-const envoyConfig = readRepoFile("envoy.yaml");
-assert.match(
-  envoyConfig,
-  /prefix:\s*"\/api\/"[\s\S]*?cluster:\s*apkbridge[\s\S]*?timeout:\s*0s/m,
-  "Envoy must keep /api routed to apkbridge with streaming timeouts disabled"
-);
+assert.equal(existsSync(resolve(repoRoot, "bridge-webrtc")), false, "bridge-webrtc directory must be removed");
+assert.equal(existsSync(resolve(repoRoot, "envoy.yaml")), false, "envoy config must be removed after frontend Nginx owns /api proxying");
 
-console.log("[guacamole-http-test] Guacamole-style HTTP tunnel defaults verified.");
+console.log("[guacamole-http-test] HTTP-only Guacamole-style tunnel defaults verified.");

@@ -34,6 +34,10 @@ SCRCPY_FFMPEG_FRAGMENT_US = max(50000, int(os.environ.get("SCRCPY_FFMPEG_FRAGMEN
 SCRCPY_STARTUP_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("SCRCPY_STARTUP_TIMEOUT_SECONDS", "20")))
 SCRCPY_LOG_CAPTURE_LIMIT = max(4096, int(os.environ.get("SCRCPY_LOG_CAPTURE_LIMIT", "65536")))
 SCRCPY_PORT_RANGE = os.environ.get("SCRCPY_PORT_RANGE", "27183:27283").strip() or "27183:27283"
+SCRCPY_STREAM_LOCK_WAIT_SECONDS = max(0.0, float(os.environ.get("SCRCPY_STREAM_LOCK_WAIT_SECONDS", "8")))
+SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS = max(
+    0.05, float(os.environ.get("SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS", "0.1"))
+)
 SCRCPY_STREAM_LOCK_PATH = Path(
     os.environ.get("SCRCPY_STREAM_LOCK_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-scrcpy-video.lock"))
 )
@@ -104,11 +108,28 @@ def adb_popen(*args):
     )
 
 
+def scrcpy_stream_lock_retry_delay(deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return 0
+    return min(SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS, remaining)
+
+
 @contextmanager
-def scrcpy_stream_lock():
+def scrcpy_stream_lock(wait_seconds=0.0):
     """Hold one live scrcpy capture across all gunicorn workers."""
+    deadline = time.monotonic() + max(0.0, wait_seconds)
+
     if fcntl is None:
-        acquired = SCRCPY_STREAM_THREAD_LOCK.acquire(blocking=False)
+        acquired = False
+        while True:
+            acquired = SCRCPY_STREAM_THREAD_LOCK.acquire(blocking=False)
+            if acquired:
+                break
+            retry_delay = scrcpy_stream_lock_retry_delay(deadline)
+            if retry_delay <= 0:
+                break
+            time.sleep(retry_delay)
         try:
             yield acquired
         finally:
@@ -120,12 +141,18 @@ def scrcpy_stream_lock():
     lock_file = SCRCPY_STREAM_LOCK_PATH.open("a+b")
     acquired = False
     try:
-        try:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            acquired = True
-        except OSError as exc:
-            if exc.errno not in (errno.EACCES, errno.EAGAIN):
-                raise
+        while True:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                    raise
+                retry_delay = scrcpy_stream_lock_retry_delay(deadline)
+                if retry_delay <= 0:
+                    break
+                time.sleep(retry_delay)
         yield acquired
     finally:
         if acquired:
@@ -560,7 +587,7 @@ def scrcpy_video():
             except Exception as exc:
                 stream_queue.put((f"{stream_name}:error", str(exc).encode("utf-8", errors="replace")))
 
-        with scrcpy_stream_lock() as lock_acquired:
+        with scrcpy_stream_lock(wait_seconds=SCRCPY_STREAM_LOCK_WAIT_SECONDS) as lock_acquired:
             if not lock_acquired:
                 raise ScrcpyStreamBusy(
                     "another scrcpy video stream is already active; close the other emulator tab "

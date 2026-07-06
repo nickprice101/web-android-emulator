@@ -1,6 +1,7 @@
 import io
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import app as app_module  # noqa: E402
 from app import app  # noqa: E402
 
 
@@ -113,6 +115,51 @@ class ScreenrecordEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(first_chunk, b"frame-2")
+
+
+class ScrcpyStreamLockTests(unittest.TestCase):
+    class FakeFcntl:
+        LOCK_EX = 1
+        LOCK_NB = 2
+        LOCK_UN = 4
+
+        def __init__(self, busy_attempts):
+            self.busy_attempts = busy_attempts
+            self.lock_attempts = 0
+            self.unlocked = False
+
+        def flock(self, fileno, flags):
+            if flags == self.LOCK_UN:
+                self.unlocked = True
+                return
+
+            self.lock_attempts += 1
+            if self.lock_attempts <= self.busy_attempts:
+                raise OSError(app_module.errno.EAGAIN, "busy")
+
+    def test_scrcpy_stream_lock_waits_for_transient_busy_owner(self):
+        fake_fcntl = self.FakeFcntl(busy_attempts=2)
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch("app.fcntl", fake_fcntl), patch(
+            "app.SCRCPY_STREAM_LOCK_PATH", Path(temp_dir) / "scrcpy-video.lock"
+        ), patch("app.SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS", 0.001):
+            with app_module.scrcpy_stream_lock(wait_seconds=0.1) as acquired:
+                self.assertTrue(acquired)
+
+        self.assertEqual(fake_fcntl.lock_attempts, 3)
+        self.assertTrue(fake_fcntl.unlocked)
+
+    def test_scrcpy_stream_lock_reports_busy_after_timeout(self):
+        fake_fcntl = self.FakeFcntl(busy_attempts=10)
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch("app.fcntl", fake_fcntl), patch(
+            "app.SCRCPY_STREAM_LOCK_PATH", Path(temp_dir) / "scrcpy-video.lock"
+        ):
+            with app_module.scrcpy_stream_lock(wait_seconds=0) as acquired:
+                self.assertFalse(acquired)
+
+        self.assertEqual(fake_fcntl.lock_attempts, 1)
+        self.assertFalse(fake_fcntl.unlocked)
 
 
 class ScrcpyVideoEndpointTests(unittest.TestCase):

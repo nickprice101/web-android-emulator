@@ -119,10 +119,30 @@ append_param_if_missing() {
   esac
 }
 
+param_has_flag() {
+  flag="$1"
+  case " ${EMULATOR_PARAMS_VALUE} " in
+    *" ${flag} "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+append_param_value_if_flag_missing() {
+  flag="$1"
+  value="$2"
+  if ! param_has_flag "${flag}"; then
+    append_param_if_missing "${flag} ${value}"
+  fi
+}
+
 # Keep emulator rendering stable for headless HTTP video capture in container
 # deployments. These flags are additive and can still be overridden by
 # supplying explicit values in EMULATOR_PARAMS.
-append_param_if_missing "-gpu swiftshader_indirect"
+EMULATOR_GPU_MODE="${EMULATOR_GPU_MODE:-swiftshader_indirect}"
+case "${EMULATOR_GPU_MODE}" in
+  ""|"none"|"disabled") ;;
+  *) append_param_value_if_flag_missing "-gpu" "${EMULATOR_GPU_MODE}" ;;
+esac
 append_param_if_missing "-no-boot-anim"
 append_param_if_missing "-camera-back none"
 append_param_if_missing "-camera-front none"
@@ -451,6 +471,7 @@ launch_direct_emulator() {
   log "Using direct emulator mode; legacy launcher bypassed."
   log "Using direct emulator launch: ${DIRECT_EMULATOR_BIN}"
   log "Direct emulator ports: ${_ports}"
+  log "Direct emulator GPU mode: ${EMULATOR_GPU_MODE:-emulator default}"
   if [ "${_radio_override_applied}" -eq 1 ]; then
     log "Direct emulator radio override: ${EMULATOR_RADIO_DEVICE}"
   else

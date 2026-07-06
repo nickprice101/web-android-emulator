@@ -13,11 +13,13 @@ services:
     privileged: true
     devices:
       - /dev/kvm:/dev/kvm
+      - /dev/dri:/dev/dri
     shm_size: "4gb"
     environment:
       ADBKEY: |
         PLACEHOLDER_ADB_KEY
-      EMULATOR_PARAMS: "-no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
+      EMULATOR_GPU_MODE: "${EMULATOR_GPU_MODE:-host}"
+      EMULATOR_PARAMS: "-no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
     expose:
       - "5555"
     ports:
@@ -60,9 +62,9 @@ services:
     environment:
       ADB_TARGET: "emulator:5555"
       WORKSPACE_ROOT: "/workspace"
-      SCRCPY_MAX_FPS: "24"
+      SCRCPY_MAX_FPS: "${SCRCPY_MAX_FPS:-30}"
       SCRCPY_VIDEO_BIT_RATE: "${SCRCPY_VIDEO_BIT_RATE:-6000000}"
-      SCRCPY_MAX_SIZE: "${SCRCPY_MAX_SIZE:-1080}"
+      SCRCPY_MAX_SIZE: "${SCRCPY_MAX_SIZE:-720}"
       SCRCPY_PORT_RANGE: "${SCRCPY_PORT_RANGE:-27183:27283}"
       ADBKEY: |
         PLACEHOLDER_ADB_KEY

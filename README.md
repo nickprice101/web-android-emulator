@@ -6,14 +6,19 @@ The display path is a Guacamole-style HTTP tunnel: the server stays close to the
 
 ## Default Video Path
 
-The frontend defaults to `Guacamole HTTP (24fps)`.
+The frontend defaults to `Guacamole HTTP (30fps)` at `720p`. A toolbar quality selector can switch the scrcpy stream between `720p` and `1080p`.
 
 `apkbridge` runs scrcpy against the emulator, records a low-latency Matroska stream into a FIFO, and ffmpeg remuxes it into fragmented MP4 for browser MediaSource playback. The default stream target is:
 
-* `SCRCPY_MAX_FPS=24`
+* `SCRCPY_MAX_FPS=30`
 * `SCRCPY_VIDEO_BIT_RATE=6000000`
-* `SCRCPY_MAX_SIZE=1080`
+* `SCRCPY_MAX_SIZE=720`
 * `SCRCPY_PORT_RANGE=27183:27283`
+
+The emulator container defaults to `EMULATOR_GPU_MODE=host` and maps `/dev/dri`
+so Linux hosts with an Intel iGPU can use emulator host GPU acceleration. Set
+`EMULATOR_GPU_MODE=swiftshader_indirect` if the deployment host does not expose
+a usable render device.
 
 If scrcpy cannot start before video bytes are produced, `apkbridge` falls back
 to remuxing `adb exec-out screenrecord --output-format=h264 -` into the same

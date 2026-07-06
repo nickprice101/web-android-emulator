@@ -31,6 +31,12 @@ test("deployed Guacamole-style HTTP path renders real video frames", async ({ pa
   await expect(page.getByText("Scrcpy HTTP video diagnostics", { exact: true })).toBeVisible({
     timeout: VIDEO_WAIT_TIMEOUT_MS,
   });
+  await expect(page.locator('[data-testid="scrcpy-fps-overlay"]')).toContainText("fps", {
+    timeout: VIDEO_WAIT_TIMEOUT_MS,
+  });
+  await expect(page.locator('label:has-text("Quality") select')).toHaveValue("720", {
+    timeout: VIDEO_WAIT_TIMEOUT_MS,
+  });
 
   const mediaOutcomeHandle = await page.waitForFunction(
     ({ minDimension }) => {
@@ -96,12 +102,14 @@ test("deployed Guacamole-style HTTP path renders real video frames", async ({ pa
   const videoStats = mediaOutcome?.videoStats ?? null;
   const browserDiagnostics = await page.evaluate(() => window.__EMU_E2E__ || null);
   const activeTransport = browserDiagnostics?.activeTransport || "scrcpy-http";
+  const streamMaxSize = browserDiagnostics?.streamMaxSize || 720;
 
   const diagnosticsPayload = {
     emulatorState,
     bridgeApiState,
     lastMessage,
     activeTransport,
+    streamMaxSize,
     scrcpyDiagnosticsText,
     browserDiagnostics,
     mediaOutcome,
@@ -125,6 +133,7 @@ test("deployed Guacamole-style HTTP path renders real video frames", async ({ pa
   expect(emulatorState.toLowerCase()).toContain("connected");
   expect(bridgeApiState.toLowerCase()).toContain("ready");
   expect(activeTransport).toBe("scrcpy-http");
+  expect(streamMaxSize).toBe(720);
   expect(videoStats?.readyState ?? 0).toBeGreaterThanOrEqual(HAVE_CURRENT_DATA);
   expect(videoStats?.videoWidth ?? 0).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
   expect(videoStats?.videoHeight ?? 0).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
@@ -133,5 +142,7 @@ test("deployed Guacamole-style HTTP path renders real video frames", async ({ pa
     `Expected decoded frames or playback progress, got ${JSON.stringify(videoStats)}`
   ).toBeTruthy();
   expect(scrcpyDiagnosticsText).toContain("stream:");
+  expect(scrcpyDiagnosticsText).toContain("target:");
+  expect(scrcpyDiagnosticsText).toContain("current fps:");
   expect(scrcpyDiagnosticsText).toContain("mse:");
 });

@@ -95,6 +95,8 @@ assertNoActiveTurnConfig("docker-compose.yml", composeConfig);
 assertNoWebrtcRuntime("docker-compose.yml", composeConfig);
 assert.match(composeConfig, /EMULATOR_GPU_MODE:\s*"\$\{EMULATOR_GPU_MODE:-swiftshader_indirect\}"/, "compose must default the emulator to container-safe software GPU rendering");
 assert.match(composeConfig, /EMULATOR_AVD_READ_ONLY:\s*"\$\{EMULATOR_AVD_READ_ONLY:-1\}"/, "compose must default the emulator AVD to read-only startup for duplicate-lock tolerance");
+assert.match(composeConfig, /shm_size:\s*"6gb"/, "compose must provide more than 4GB of shared memory for the AI-capable emulator");
+assert.match(composeConfig, /EMULATOR_RAM_SIZE_MB:\s*"\$\{EMULATOR_RAM_SIZE_MB:-6144\}"/, "compose must default the emulator guest RAM above 4GB");
 assert.match(composeConfig, /EMULATOR_PARAMS:.*-no-metrics/, "compose must opt the emulator out of metrics prompts");
 assert.match(composeConfig, /SCRCPY_MAX_FPS:\s*"\$\{SCRCPY_MAX_FPS:-30\}"/, "compose must pin scrcpy max fps to 30");
 assert.match(composeConfig, /SCRCPY_VIDEO_BIT_RATE:/, "compose must expose scrcpy bitrate tuning");
@@ -114,6 +116,9 @@ assert.match(emulatorWrapper, /EMULATOR_LAUNCH_MODE="\$\{EMULATOR_LAUNCH_MODE:-d
 assert.match(emulatorWrapper, /start_direct_adb_bridge_forwarder\(\)/, "emulator wrapper must keep the sibling-container ADB bridge");
 assert.match(emulatorWrapper, /append_param_if_missing "-no-metrics"/, "emulator wrapper must suppress emulator metrics prompts by default");
 assert.match(emulatorWrapper, /EMULATOR_AVD_READ_ONLY="\$\{EMULATOR_AVD_READ_ONLY:-1\}"/, "emulator wrapper must default to duplicate-lock-tolerant read-only AVD startup");
+assert.match(emulatorWrapper, /EMULATOR_RAM_SIZE_MB="\$\{EMULATOR_RAM_SIZE_MB:-6144\}"/, "emulator wrapper must default guest RAM above 4GB");
+assert.match(emulatorWrapper, /append_param_value_if_flag_missing "-memory" "\$\{EMULATOR_RAM_SIZE_MB\}"/, "emulator wrapper must pass the configured RAM to the emulator process");
+assert.match(emulatorWrapper, /hw\.ramSize=\$\{EMULATOR_RAM_SIZE_MB\}/, "emulator wrapper must keep the AVD config RAM above 4GB");
 assert.match(emulatorWrapper, /remove_stale_pixel2_avd_locks\(\)/, "emulator wrapper must clear stale Pixel2 AVD lock files before launch");
 assert.doesNotMatch(emulatorWrapper, /-grpc|emu-grpc-token|TOKEN_WATCHER|gRPC-Web|bridge-webrtc/, "emulator wrapper must not start gRPC/token support for removed WebRTC");
 

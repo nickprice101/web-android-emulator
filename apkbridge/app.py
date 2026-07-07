@@ -1,8 +1,10 @@
 from contextlib import contextmanager
 import errno
 import fnmatch
+import json
 import os
 import queue
+import signal
 import shlex
 import shutil
 import subprocess
@@ -55,6 +57,10 @@ AI_NATIVE_LIB_PATTERNS = tuple(
 SCRCPY_STREAM_LOCK_PATH = Path(
     os.environ.get("SCRCPY_STREAM_LOCK_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-scrcpy-video.lock"))
 )
+SCRCPY_STREAM_STATE_PATH = Path(
+    os.environ.get("SCRCPY_STREAM_STATE_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-scrcpy-video.json"))
+)
+SCRCPY_SHUTDOWN_TIMEOUT_SECONDS = max(0.1, float(os.environ.get("SCRCPY_SHUTDOWN_TIMEOUT_SECONDS", "2")))
 KEY_MAP = {"HOME": "3", "BACK": "4", "RECENTS": "187", "POWER": "26", "MENU": "82"}
 KEY_NAME_MAP = {
     "GoHome": KEY_MAP["HOME"],
@@ -78,7 +84,11 @@ AUTO_AI_INSTALL_ABI_MODES = {"ai", "auto-ai", "prefer-ai", "mlc-ai"}
 
 
 class ScrcpyStreamBusy(RuntimeError):
-    """Raised when another client already owns the single scrcpy video tunnel."""
+    """Raised when the scrcpy stream manager cannot be acquired."""
+
+
+class ScrcpyStreamSuperseded(RuntimeError):
+    """Raised when a newer client has replaced this scrcpy stream."""
 
 
 def run(cmd, timeout=90):
@@ -312,6 +322,219 @@ def scrcpy_stream_lock(wait_seconds=0.0):
         if acquired:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
         lock_file.close()
+
+
+def read_process_cmdline(pid):
+    try:
+        raw_cmdline = Path(f"/proc/{int(pid)}/cmdline").read_bytes()
+    except (FileNotFoundError, ProcessLookupError, PermissionError, OSError, ValueError):
+        return []
+
+    return [part.decode("utf-8", errors="replace") for part in raw_cmdline.split(b"\0") if part]
+
+
+def process_cmd_basename(args):
+    return Path(args[0]).name if args else ""
+
+
+def is_scrcpy_cmdline(args):
+    if process_cmd_basename(args) != "scrcpy":
+        return False
+    return ADB_TARGET in args or SCRCPY_PORT_RANGE in args or "--serial" not in args
+
+
+def is_ffmpeg_cmdline_for_fifo(args, fifo_path):
+    return process_cmd_basename(args) == "ffmpeg" and bool(fifo_path) and str(fifo_path) in args
+
+
+def process_is_zombie(pid):
+    try:
+        stat_text = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8", errors="replace")
+        state = stat_text.rsplit(")", 1)[1].strip().split()[0]
+        return state == "Z"
+    except (FileNotFoundError, ProcessLookupError, PermissionError, OSError, IndexError, ValueError):
+        return False
+
+
+def process_is_running(pid):
+    try:
+        pid = int(pid)
+        if pid <= 0:
+            return False
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OSError, ValueError):
+        return False
+
+    return not process_is_zombie(pid)
+
+
+def send_signal_to_process_or_group(pid, sig):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+
+    if pid <= 0 or pid == os.getpid():
+        return False
+
+    if os.name == "posix" and hasattr(os, "killpg"):
+        try:
+            os.killpg(pid, sig)
+            return True
+        except ProcessLookupError:
+            return False
+        except OSError as exc:
+            if exc.errno not in (errno.ESRCH, errno.EPERM):
+                app.logger.debug("failed to signal process group %s: %s", pid, exc)
+
+    try:
+        os.kill(pid, sig)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError as exc:
+        if exc.errno not in (errno.ESRCH, errno.EPERM):
+            app.logger.debug("failed to signal process %s: %s", pid, exc)
+        return False
+
+
+def terminate_pid(pid, label, cmdline_matches=None, timeout_seconds=None):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+
+    if pid <= 0 or pid == os.getpid():
+        return False
+
+    args = read_process_cmdline(pid)
+    if cmdline_matches and not cmdline_matches(args):
+        app.logger.debug("skipping %s pid %s because cmdline no longer matches: %s", label, pid, shlex.join(args))
+        return False
+
+    if not process_is_running(pid):
+        return False
+
+    timeout_seconds = SCRCPY_SHUTDOWN_TIMEOUT_SECONDS if timeout_seconds is None else max(0.0, timeout_seconds)
+    app.logger.info("terminating previous %s pid %s", label, pid)
+    send_signal_to_process_or_group(pid, signal.SIGTERM)
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if not process_is_running(pid):
+            return True
+        time.sleep(0.05)
+
+    sigkill = getattr(signal, "SIGKILL", signal.SIGTERM)
+    app.logger.warning("force killing previous %s pid %s after %.1fs", label, pid, timeout_seconds)
+    send_signal_to_process_or_group(pid, sigkill)
+    return True
+
+
+def terminate_process(proc, label):
+    if not proc or proc.poll() is not None:
+        return
+
+    pid = getattr(proc, "pid", None)
+    if pid:
+        terminate_pid(pid, label)
+    else:
+        proc.terminate()
+
+    try:
+        proc.wait(timeout=0.5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            app.logger.warning("%s process did not exit after kill", label)
+
+
+def iter_scrcpy_process_pids():
+    proc_root = Path("/proc")
+    if not proc_root.exists():
+        return
+
+    for proc_dir in proc_root.iterdir():
+        if not proc_dir.name.isdigit():
+            continue
+        pid = int(proc_dir.name)
+        if pid == os.getpid():
+            continue
+        if is_scrcpy_cmdline(read_process_cmdline(pid)):
+            yield pid
+
+
+def read_scrcpy_stream_state():
+    try:
+        state = json.loads(SCRCPY_STREAM_STATE_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError) as exc:
+        app.logger.warning("could not read scrcpy stream state %s: %s", SCRCPY_STREAM_STATE_PATH, exc)
+        return {}
+
+    return state if isinstance(state, dict) else {}
+
+
+def write_scrcpy_stream_state(owner_token, scrcpy_proc, ffmpeg_proc, fifo_path):
+    SCRCPY_STREAM_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    state = {
+        "owner": owner_token,
+        "worker_pid": os.getpid(),
+        "scrcpy_pid": getattr(scrcpy_proc, "pid", None),
+        "ffmpeg_pid": getattr(ffmpeg_proc, "pid", None),
+        "fifo_path": str(fifo_path),
+        "started_at": time.time(),
+    }
+    temp_state_path = SCRCPY_STREAM_STATE_PATH.with_name(f"{SCRCPY_STREAM_STATE_PATH.name}.{owner_token}.tmp")
+    temp_state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    os.replace(temp_state_path, SCRCPY_STREAM_STATE_PATH)
+
+
+def scrcpy_stream_state_matches(owner_token):
+    return read_scrcpy_stream_state().get("owner") == owner_token
+
+
+def clear_scrcpy_stream_state(owner_token):
+    with scrcpy_stream_lock(wait_seconds=SCRCPY_STREAM_LOCK_WAIT_SECONDS) as lock_acquired:
+        if not lock_acquired:
+            app.logger.warning("could not acquire scrcpy stream manager lock to clear owner %s", owner_token)
+            return
+        if read_scrcpy_stream_state().get("owner") != owner_token:
+            return
+        try:
+            SCRCPY_STREAM_STATE_PATH.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def shutdown_existing_scrcpy_stream():
+    state = read_scrcpy_stream_state()
+    fifo_path = state.get("fifo_path")
+    recorded_pids = {pid for pid in (state.get("scrcpy_pid"), state.get("ffmpeg_pid")) if pid}
+
+    if state:
+        terminate_pid(state.get("scrcpy_pid"), "scrcpy", is_scrcpy_cmdline)
+        terminate_pid(
+            state.get("ffmpeg_pid"),
+            "scrcpy ffmpeg",
+            lambda args: is_ffmpeg_cmdline_for_fifo(args, fifo_path),
+        )
+        try:
+            SCRCPY_STREAM_STATE_PATH.unlink()
+        except FileNotFoundError:
+            pass
+
+    for pid in iter_scrcpy_process_pids() or []:
+        if pid in recorded_pids:
+            continue
+        terminate_pid(pid, "untracked scrcpy", is_scrcpy_cmdline)
 
 
 def fragmented_mp4_output_args():
@@ -742,6 +965,8 @@ def scrcpy_video():
         ffmpeg_proc = None
         stream_queue = queue.Queue()
         stderr_chunks = []
+        owner_token = uuid.uuid4().hex
+        state_registered = False
 
         def append_stderr(chunk):
             if not chunk:
@@ -779,64 +1004,69 @@ def scrcpy_video():
             except Exception as exc:
                 stream_queue.put((f"{stream_name}:error", str(exc).encode("utf-8", errors="replace")))
 
-        with scrcpy_stream_lock(wait_seconds=SCRCPY_STREAM_LOCK_WAIT_SECONDS) as lock_acquired:
-            if not lock_acquired:
-                raise ScrcpyStreamBusy(
-                    "another scrcpy video stream is already active; close the other emulator tab "
-                    "or reconnect it before starting a new HTTP video stream"
-                )
-            if not shutil.which("scrcpy"):
-                fail_stream("scrcpy binary is not available")
+        def fail_if_superseded():
+            if not scrcpy_stream_state_matches(owner_token):
+                raise ScrcpyStreamSuperseded("scrcpy video stream was replaced by a newer client")
 
-            try:
-                os.mkfifo(fifo_path, 0o600)
-                scrcpy_cmd = [
-                    "scrcpy",
-                    "--serial",
-                    ADB_TARGET,
-                    "--no-window",
-                    "--no-control",
-                    "--no-audio",
-                    "--port",
-                    SCRCPY_PORT_RANGE,
-                    "--video-codec",
-                    "h264",
-                    "--video-bit-rate",
-                    str(bit_rate_value),
-                    "--max-size",
-                    str(max_size_value),
-                    "--max-fps",
-                    str(max_fps_value),
-                    "--record",
-                    str(fifo_path),
-                    "--record-format",
-                    "mkv",
-                ]
-                ffmpeg_cmd = [
-                    "ffmpeg",
-                    "-hide_banner",
-                    "-loglevel",
-                    "warning",
-                    "-fflags",
-                    "+genpts",
-                    "-flags",
-                    "low_delay",
-                    "-f",
-                    "matroska",
-                    "-probesize",
-                    "65536",
-                    "-analyzeduration",
-                    "1000000",
-                    "-i",
-                    str(fifo_path),
-                    *fragmented_mp4_output_args(),
-                ]
+        if not shutil.which("scrcpy"):
+            fail_stream("scrcpy binary is not available")
+
+        try:
+            os.mkfifo(fifo_path, 0o600)
+            scrcpy_cmd = [
+                "scrcpy",
+                "--serial",
+                ADB_TARGET,
+                "--no-window",
+                "--no-control",
+                "--no-audio",
+                "--port",
+                SCRCPY_PORT_RANGE,
+                "--video-codec",
+                "h264",
+                "--video-bit-rate",
+                str(bit_rate_value),
+                "--max-size",
+                str(max_size_value),
+                "--max-fps",
+                str(max_fps_value),
+                "--record",
+                str(fifo_path),
+                "--record-format",
+                "mkv",
+            ]
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "warning",
+                "-fflags",
+                "+genpts",
+                "-flags",
+                "low_delay",
+                "-f",
+                "matroska",
+                "-probesize",
+                "65536",
+                "-analyzeduration",
+                "1000000",
+                "-i",
+                str(fifo_path),
+                *fragmented_mp4_output_args(),
+            ]
+
+            with scrcpy_stream_lock(wait_seconds=SCRCPY_STREAM_LOCK_WAIT_SECONDS) as lock_acquired:
+                if not lock_acquired:
+                    raise ScrcpyStreamBusy("timed out waiting for the scrcpy stream manager lock")
+
+                shutdown_existing_scrcpy_stream()
                 ffmpeg_proc = subprocess.Popen(
                     ffmpeg_cmd,
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     bufsize=0,
+                    start_new_session=True,
                 )
                 scrcpy_proc = subprocess.Popen(
                     scrcpy_cmd,
@@ -844,62 +1074,72 @@ def scrcpy_video():
                     stderr=subprocess.PIPE,
                     stdin=subprocess.DEVNULL,
                     bufsize=0,
+                    start_new_session=True,
                 )
-                schedule_video_startup_nudge()
+                write_scrcpy_stream_state(owner_token, scrcpy_proc, ffmpeg_proc, fifo_path)
+                state_registered = True
 
-                threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stdout, "ffmpeg-stdout"), daemon=True).start()
-                threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stderr, "ffmpeg-stderr"), daemon=True).start()
-                threading.Thread(target=pump_pipe, args=(scrcpy_proc.stderr, "scrcpy-stderr"), daemon=True).start()
+            schedule_video_startup_nudge()
 
-                delivered = False
-                startup_deadline = time.monotonic() + SCRCPY_STARTUP_TIMEOUT_SECONDS
-                while True:
-                    try:
-                        stream_name, chunk = stream_queue.get(timeout=0.25)
-                    except queue.Empty:
-                        if ffmpeg_proc.poll() is not None:
-                            break
+            threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stdout, "ffmpeg-stdout"), daemon=True).start()
+            threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stderr, "ffmpeg-stderr"), daemon=True).start()
+            threading.Thread(target=pump_pipe, args=(scrcpy_proc.stderr, "scrcpy-stderr"), daemon=True).start()
+
+            delivered = False
+            startup_deadline = time.monotonic() + SCRCPY_STARTUP_TIMEOUT_SECONDS
+            while True:
+                try:
+                    stream_name, chunk = stream_queue.get(timeout=0.25)
+                except queue.Empty:
+                    fail_if_superseded()
+                    if ffmpeg_proc.poll() is not None:
+                        break
+                    if not delivered and scrcpy_proc.poll() is not None:
+                        drain_pending_stderr()
+                        fail_if_superseded()
+                        fail_stream("scrcpy exited before producing video")
+                    if not delivered and time.monotonic() >= startup_deadline:
+                        drain_pending_stderr()
+                        fail_if_superseded()
+                        fail_stream(f"timed out waiting {SCRCPY_STARTUP_TIMEOUT_SECONDS:g}s for scrcpy video")
+                    continue
+
+                if stream_name == "ffmpeg-stdout":
+                    if not chunk:
+                        fail_if_superseded()
                         if not delivered and scrcpy_proc.poll() is not None:
                             drain_pending_stderr()
                             fail_stream("scrcpy exited before producing video")
-                        if not delivered and time.monotonic() >= startup_deadline:
-                            drain_pending_stderr()
-                            fail_stream(f"timed out waiting {SCRCPY_STARTUP_TIMEOUT_SECONDS:g}s for scrcpy video")
-                        continue
-
-                    if stream_name == "ffmpeg-stdout":
-                        if not chunk:
-                            if not delivered and scrcpy_proc.poll() is not None:
-                                drain_pending_stderr()
-                                fail_stream("scrcpy exited before producing video")
+                        if ffmpeg_proc.poll() is not None:
                             break
-                        delivered = True
-                        yield chunk
                         continue
 
-                    append_stderr(chunk)
+                    fail_if_superseded()
+                    delivered = True
+                    yield chunk
+                    continue
 
-                if not delivered:
-                    fail_stream("scrcpy video stream ended before producing video")
+                append_stderr(chunk)
 
-                stderr_text = collected_stderr()
-                if stderr_text:
-                    app.logger.warning(
-                        "scrcpy video stream ended: %s",
-                        stderr_text,
-                    )
-            finally:
-                for proc in (scrcpy_proc, ffmpeg_proc):
-                    if proc and proc.poll() is None:
-                        proc.terminate()
-                        try:
-                            proc.wait(timeout=2)
-                        except subprocess.TimeoutExpired:
-                            proc.kill()
-                try:
-                    fifo_path.unlink()
-                except FileNotFoundError:
-                    pass
+            if not delivered:
+                fail_if_superseded()
+                fail_stream("scrcpy video stream ended before producing video")
+
+            stderr_text = collected_stderr()
+            if stderr_text:
+                app.logger.warning(
+                    "scrcpy video stream ended: %s",
+                    stderr_text,
+                )
+        finally:
+            terminate_process(scrcpy_proc, "scrcpy")
+            terminate_process(ffmpeg_proc, "scrcpy ffmpeg")
+            if state_registered:
+                clear_scrcpy_stream_state(owner_token)
+            try:
+                fifo_path.unlink()
+            except FileNotFoundError:
+                pass
 
     def generate_screenrecord_mp4(fallback_reason):
         app.logger.warning("Using adb screenrecord MP4 fallback for /scrcpy-video: %s", fallback_reason)
@@ -1041,6 +1281,9 @@ def scrcpy_video():
     def generate_with_fallback():
         try:
             yield from generate_scrcpy_mp4()
+        except ScrcpyStreamSuperseded:
+            app.logger.info("scrcpy video stream ended because a newer request replaced it")
+            return
         except ScrcpyStreamBusy:
             raise
         except RuntimeError as exc:
@@ -1052,6 +1295,8 @@ def scrcpy_video():
     except StopIteration:
         return jsonify({"ok": False, "error": "scrcpy video stream ended before producing video"}), 503
     except ScrcpyStreamBusy as e:
+        return jsonify({"ok": False, "error": str(e)}), 503
+    except ScrcpyStreamSuperseded as e:
         return jsonify({"ok": False, "error": str(e)}), 409
     except RuntimeError as e:
         return jsonify({"ok": False, "error": str(e)}), 503

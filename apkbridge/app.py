@@ -38,6 +38,9 @@ SCRCPY_STREAM_LOCK_WAIT_SECONDS = max(0.0, float(os.environ.get("SCRCPY_STREAM_L
 SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS = max(
     0.05, float(os.environ.get("SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS", "0.1"))
 )
+VIDEO_STARTUP_NUDGE_DELAY_SECONDS = max(0.0, float(os.environ.get("VIDEO_STARTUP_NUDGE_DELAY_SECONDS", "0.75")))
+VIDEO_STARTUP_NUDGE_INTERVAL_SECONDS = max(0.05, float(os.environ.get("VIDEO_STARTUP_NUDGE_INTERVAL_SECONDS", "0.75")))
+VIDEO_STARTUP_NUDGE_REPEATS = max(0, int(os.environ.get("VIDEO_STARTUP_NUDGE_REPEATS", "3")))
 ADB_INSTALL_ABI = os.environ.get("ADB_INSTALL_ABI", "").strip()
 SCRCPY_STREAM_LOCK_PATH = Path(
     os.environ.get("SCRCPY_STREAM_LOCK_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-scrcpy-video.lock"))
@@ -210,6 +213,40 @@ def wake_and_unlock():
         adb("shell", "wm", "dismiss-keyguard")
     except Exception:
         pass
+
+
+def nudge_display_for_video_startup():
+    if VIDEO_STARTUP_NUDGE_REPEATS <= 0:
+        return
+
+    try:
+        adb("shell", "input", "keyevent", "224", timeout=5)
+        adb("shell", "wm", "dismiss-keyguard", timeout=5)
+    except Exception as exc:
+        app.logger.debug("video startup wake nudge failed: %s", exc)
+
+    for index in range(VIDEO_STARTUP_NUDGE_REPEATS):
+        try:
+            adb("shell", "input", "tap", "0", "0", timeout=5)
+        except Exception as exc:
+            app.logger.debug("video startup tap nudge failed: %s", exc)
+            return
+        if index + 1 < VIDEO_STARTUP_NUDGE_REPEATS:
+            time.sleep(VIDEO_STARTUP_NUDGE_INTERVAL_SECONDS)
+
+
+def schedule_video_startup_nudge():
+    if VIDEO_STARTUP_NUDGE_REPEATS <= 0:
+        return None
+
+    def worker():
+        if VIDEO_STARTUP_NUDGE_DELAY_SECONDS:
+            time.sleep(VIDEO_STARTUP_NUDGE_DELAY_SECONDS)
+        nudge_display_for_video_startup()
+
+    thread = threading.Thread(target=worker, name="video-startup-nudge", daemon=True)
+    thread.start()
+    return thread
 
 
 def launch_package(pkg):
@@ -664,6 +701,7 @@ def scrcpy_video():
                     stdin=subprocess.DEVNULL,
                     bufsize=0,
                 )
+                schedule_video_startup_nudge()
 
                 threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stdout, "ffmpeg-stdout"), daemon=True).start()
                 threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stderr, "ffmpeg-stderr"), daemon=True).start()
@@ -754,6 +792,7 @@ def scrcpy_video():
                 screenrecord_proc = adb_popen(
                     "exec-out",
                     "screenrecord",
+                    "--bugreport",
                     "--output-format=h264",
                     "--bit-rate",
                     str(bit_rate_value),
@@ -767,13 +806,13 @@ def scrcpy_video():
                     "-loglevel",
                     "warning",
                     "-fflags",
-                    "+genpts+nobuffer",
+                    "+genpts",
                     "-flags",
                     "low_delay",
                     "-probesize",
-                    "32",
+                    "65536",
                     "-analyzeduration",
-                    "0",
+                    "1000000",
                     "-f",
                     "h264",
                     "-i",
@@ -789,6 +828,8 @@ def scrcpy_video():
                 )
                 if screenrecord_proc.stdout:
                     screenrecord_proc.stdout.close()
+
+                schedule_video_startup_nudge()
 
                 open_streams = 0
                 for fileobj, stream_name in (

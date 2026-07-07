@@ -57,9 +57,9 @@ http://YOUR_HOST:18080
 
 ## Emulator Image
 
-The default emulator build uses Google's public emulator base image and then installs the pinned Android emulator package plus an Android 14 (API 34) Google APIs `x86_64` system image during build. The default platform package is `platforms;android-34`. The Dockerfile creates a `Pixel2` AVD backed by the `pixel_5` profile and starts the emulator through `emulator/start-emulator.sh`.
+The default emulator build uses Google's public emulator base image and then installs the pinned Android emulator package plus an Android 16 (API 36) Google APIs `x86_64` system image during build. The default platform package is `platforms;android-36`. The Dockerfile creates a `Pixel2` AVD backed by the `pixel_5` profile and starts the emulator through `emulator/start-emulator.sh`.
 
-The stack uses an `x86_64` guest image because the Linux x64 emulator cannot boot an `arm64-v8a` system image on an x86_64 host. API 34 remains the default because it is the currently verified container image for the HTTP video path. AI APKs that include real `x86_64` model/runtime libraries can run on this default image.
+The stack uses an `x86_64` guest image because the Linux x64 emulator cannot boot an `arm64-v8a` system image on an x86_64 host. AI APKs that include real `x86_64` model/runtime libraries can run on the default API 36 image.
 
 `apkbridge` defaults `ADB_INSTALL_ABI=auto-ai`. In this mode the bridge inspects the APK's native libraries and the connected device ABI list before install:
 
@@ -87,8 +87,8 @@ To pin a different emulator base image or SDK package, build with:
 
 ```bash
 EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297 \
-EMULATOR_SYSTEM_IMAGE=system-images\;android-34\;google_apis\;x86_64 \
-EMULATOR_PLATFORM=platforms\;android-34 \
+EMULATOR_SYSTEM_IMAGE=system-images\;android-36\;google_apis\;x86_64 \
+EMULATOR_PLATFORM=platforms\;android-36 \
 docker compose build emulator
 ```
 

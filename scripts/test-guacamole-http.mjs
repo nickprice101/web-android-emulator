@@ -41,7 +41,7 @@ assertNoWebrtcRuntime("frontend/src/main.jsx", frontendMain);
 assert.match(
   frontendMain,
   /'video\/mp4; codecs="avc1\.42C029"'/,
-  "frontend must prefer the API 35 scrcpy AVC codec string seen in emulator logs"
+  "frontend must prefer the API 36-compatible scrcpy AVC codec string seen in emulator logs"
 );
 assert.match(
   frontendMain,
@@ -86,7 +86,7 @@ assert.match(apkbridgeApp, /generate_screenrecord_mp4/, "apkbridge must retain a
 assert.match(
   apkbridgeApp,
   /"screenrecord",\s*"--bugreport",\s*"--output-format=h264"/,
-  "apkbridge screenrecord fallback must use --bugreport so API 34 stdout capture emits frames"
+  "apkbridge screenrecord fallback must use --bugreport so API 34+ stdout capture emits frames"
 );
 assert.match(
   apkbridgeApp,
@@ -111,8 +111,8 @@ assertNoActiveTurnConfig("docker-compose.yml", composeConfig);
 assertNoWebrtcRuntime("docker-compose.yml", composeConfig);
 assert.match(composeConfig, /EMULATOR_GPU_MODE:\s*"\$\{EMULATOR_GPU_MODE:-swiftshader_indirect\}"/, "compose must default the emulator to container-safe software GPU rendering");
 assert.match(composeConfig, /EMULATOR_AVD_READ_ONLY:\s*"\$\{EMULATOR_AVD_READ_ONLY:-1\}"/, "compose must default the emulator AVD to read-only startup for duplicate-lock tolerance");
-assert.match(composeConfig, /EMULATOR_SYSTEM_IMAGE:\s*"\$\{EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64\}"/, "compose must default to the verified API 34 Google APIs x86_64 system image");
-assert.match(composeConfig, /EMULATOR_PLATFORM:\s*"\$\{EMULATOR_PLATFORM:-platforms;android-34\}"/, "compose must default to the Android 34 platform package");
+assert.match(composeConfig, /EMULATOR_SYSTEM_IMAGE:\s*"\$\{EMULATOR_SYSTEM_IMAGE:-system-images;android-36;google_apis;x86_64\}"/, "compose must default to the API 36 Google APIs x86_64 system image");
+assert.match(composeConfig, /EMULATOR_PLATFORM:\s*"\$\{EMULATOR_PLATFORM:-platforms;android-36\}"/, "compose must default to the Android 36 platform package");
 assert.match(composeConfig, /shm_size:\s*"6gb"/, "compose must provide more than 4GB of shared memory for the AI-capable emulator");
 assert.match(composeConfig, /EMULATOR_RAM_SIZE_MB:\s*"\$\{EMULATOR_RAM_SIZE_MB:-6144\}"/, "compose must default the emulator guest RAM above 4GB");
 assert.match(composeConfig, /EMULATOR_PARAMS:.*-no-metrics/, "compose must opt the emulator out of metrics prompts");
@@ -129,8 +129,8 @@ const emulatorWrapper = readRepoFile("emulator/start-emulator.sh");
 assertNoActiveTurnConfig("emulator/Dockerfile", emulatorDockerfile);
 assertNoActiveTurnConfig("emulator/start-emulator.sh", emulatorWrapper);
 assert.match(emulatorDockerfile, /COPY start-emulator\.sh \/usr\/local\/bin\/start-emulator\.sh/, "emulator Dockerfile must install the wrapper");
-assert.match(emulatorDockerfile, /ARG EMULATOR_SYSTEM_IMAGE=system-images;android-34;google_apis;x86_64/, "emulator Dockerfile must default to the API 34 Google APIs x86_64 system image");
-assert.match(emulatorDockerfile, /ARG EMULATOR_PLATFORM=platforms;android-34/, "emulator Dockerfile must default to the Android 34 platform package");
+assert.match(emulatorDockerfile, /ARG EMULATOR_SYSTEM_IMAGE=system-images;android-36;google_apis;x86_64/, "emulator Dockerfile must default to the API 36 Google APIs x86_64 system image");
+assert.match(emulatorDockerfile, /ARG EMULATOR_PLATFORM=platforms;android-36/, "emulator Dockerfile must default to the Android 36 platform package");
 assert.match(emulatorDockerfile, /EMULATOR_SYSTEM_IMAGE=\$\{EMULATOR_SYSTEM_IMAGE\}/, "emulator Dockerfile must pass the selected system image into runtime");
 assert.match(emulatorDockerfile, /EMULATOR_PLATFORM=\$\{EMULATOR_PLATFORM\}/, "emulator Dockerfile must pass the selected platform into runtime");
 assert.match(emulatorDockerfile, /ENTRYPOINT \["\/usr\/local\/bin\/start-emulator\.sh"\]/, "emulator Dockerfile must run the wrapper");
@@ -139,8 +139,8 @@ assert.match(emulatorWrapper, /EMULATOR_LAUNCH_MODE="\$\{EMULATOR_LAUNCH_MODE:-d
 assert.match(emulatorWrapper, /start_direct_adb_bridge_forwarder\(\)/, "emulator wrapper must keep the sibling-container ADB bridge");
 assert.match(emulatorWrapper, /append_param_if_missing "-no-metrics"/, "emulator wrapper must suppress emulator metrics prompts by default");
 assert.match(emulatorWrapper, /EMULATOR_AVD_READ_ONLY="\$\{EMULATOR_AVD_READ_ONLY:-1\}"/, "emulator wrapper must default to duplicate-lock-tolerant read-only AVD startup");
-assert.match(emulatorWrapper, /EMULATOR_SYSTEM_IMAGE="\$\{EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64\}"/, "emulator wrapper must default to the API 34 Google APIs x86_64 system image");
-assert.match(emulatorWrapper, /EMULATOR_PLATFORM="\$\{EMULATOR_PLATFORM:-platforms;android-34\}"/, "emulator wrapper must default to the Android 34 platform package");
+assert.match(emulatorWrapper, /EMULATOR_SYSTEM_IMAGE="\$\{EMULATOR_SYSTEM_IMAGE:-system-images;android-36;google_apis;x86_64\}"/, "emulator wrapper must default to the API 36 Google APIs x86_64 system image");
+assert.match(emulatorWrapper, /EMULATOR_PLATFORM="\$\{EMULATOR_PLATFORM:-platforms;android-36\}"/, "emulator wrapper must default to the Android 36 platform package");
 assert.match(emulatorWrapper, /tr ';' '\/'/, "emulator wrapper must derive image.sysdir.1 from EMULATOR_SYSTEM_IMAGE");
 assert.match(emulatorWrapper, /EMULATOR_RAM_SIZE_MB="\$\{EMULATOR_RAM_SIZE_MB:-6144\}"/, "emulator wrapper must default guest RAM above 4GB");
 assert.match(emulatorWrapper, /append_param_value_if_flag_missing "-memory" "\$\{EMULATOR_RAM_SIZE_MB\}"/, "emulator wrapper must pass the configured RAM to the emulator process");

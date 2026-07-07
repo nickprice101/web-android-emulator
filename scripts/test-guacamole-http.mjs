@@ -119,7 +119,7 @@ assert.match(composeConfig, /EMULATOR_PARAMS:.*-no-metrics/, "compose must opt t
 assert.match(composeConfig, /SCRCPY_MAX_FPS:\s*"\$\{SCRCPY_MAX_FPS:-30\}"/, "compose must pin scrcpy max fps to 30");
 assert.match(composeConfig, /SCRCPY_VIDEO_BIT_RATE:/, "compose must expose scrcpy bitrate tuning");
 assert.match(composeConfig, /SCRCPY_PORT_RANGE:/, "compose must expose scrcpy tunnel port range tuning");
-assert.match(composeConfig, /ADB_INSTALL_ABI:\s*"\$\{ADB_INSTALL_ABI:-auto\}"/, "compose must let Android choose the default install ABI unless explicitly overridden");
+assert.match(composeConfig, /ADB_INSTALL_ABI:\s*"\$\{ADB_INSTALL_ABI:-auto-ai\}"/, "compose must default to AI-aware ABI selection while preserving Android auto-selection for non-AI APKs");
 assert.match(composeConfig, /18080:80/, "frontend must own the public UI/API entrypoint");
 assert.doesNotMatch(composeConfig, /envoyproxy\/envoy|container_name:\s*google-emu-envoy/, "compose must not start the removed Envoy container");
 assert.doesNotMatch(composeConfig, /-grpc\s+8554|emu-grpc-token|8554/, "compose must not expose emulator gRPC for the HTTP-only path");

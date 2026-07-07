@@ -62,8 +62,8 @@ VIDEO_STREAM_LOCK_RETRY_INTERVAL_SECONDS = max(
         )
     ),
 )
-X11_DISPLAY = os.environ.get("X11_DISPLAY", "emulator:99.0").strip() or "emulator:99.0"
-X11_VIDEO_SIZE = os.environ.get("X11_VIDEO_SIZE", "1080x1920").strip() or "1080x1920"
+X11_DISPLAY = os.environ.get("X11_DISPLAY", "emulator:99.0+100,100").strip() or "emulator:99.0+100,100"
+X11_VIDEO_SIZE = os.environ.get("X11_VIDEO_SIZE", "1080x2340").strip() or "1080x2340"
 VIDEO_STARTUP_NUDGE_DELAY_SECONDS = max(0.0, float(os.environ.get("VIDEO_STARTUP_NUDGE_DELAY_SECONDS", "0.75")))
 VIDEO_STARTUP_NUDGE_INTERVAL_SECONDS = max(0.05, float(os.environ.get("VIDEO_STARTUP_NUDGE_INTERVAL_SECONDS", "0.75")))
 VIDEO_STARTUP_NUDGE_REPEATS = max(0, int(os.environ.get("VIDEO_STARTUP_NUDGE_REPEATS", "3")))

@@ -8,13 +8,13 @@ The display path is a Guacamole-style HTTP tunnel: the emulator runs in a virtua
 
 The frontend defaults to `Guacamole HTTP (30fps)` at `720p`. A toolbar quality selector can switch the FFmpeg display stream between `720p` and `1080p`.
 
-The emulator container starts Xvfb on `:99`, launches the Android emulator into a framebuffer-sized window, and exposes that X display only on the internal Docker network. `apkbridge` records `emulator:99.0` with FFmpeg `x11grab`, encodes low-latency H.264, and muxes fragmented MP4 for browser MediaSource playback. The default stream target is:
+The emulator container starts Xvfb on `:99`, launches the Android emulator into a framebuffer-sized window, and exposes that X display only on the internal Docker network. `apkbridge` records the phone viewport at `emulator:99.0+100,100` with FFmpeg `x11grab`, encodes low-latency H.264, and muxes fragmented MP4 for browser MediaSource playback. The default stream target is:
 
 * `VIDEO_MAX_FPS=30`
 * `VIDEO_BIT_RATE=6000000`
 * `VIDEO_MAX_SIZE=720`
-* `X11_DISPLAY=emulator:99.0`
-* `X11_VIDEO_SIZE=1080x1920`
+* `X11_DISPLAY=emulator:99.0+100,100`
+* `X11_VIDEO_SIZE=1080x2340`
 
 The emulator container defaults to `EMULATOR_GPU_MODE=swiftshader_indirect` for
 stable headless rendering across container hosts. It still maps `/dev/dri`, so

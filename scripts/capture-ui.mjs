@@ -21,9 +21,7 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <rect x="950" y="14" width="118" height="30" rx="8" fill="#252D3B"/>
   <text x="1009" y="34" text-anchor="middle" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">720p stream</text>
 
-  <rect x="16" y="78" width="500" height="790" rx="20" fill="#05070B" stroke="#202634"/>
-  <rect x="44" y="78" width="444" height="790" rx="18" fill="#02040A" stroke="#202634"/>
-  <rect x="44" y="78" width="444" height="790" rx="18" fill="url(#screen)"/>
+  <rect x="86" y="78" width="365" height="790" fill="url(#screen)"/>
 
   <rect x="538" y="78" width="886" height="790" rx="18" fill="#171A21"/>
   <rect x="560" y="102" width="842" height="86" rx="12" fill="#111823" stroke="#2B313D"/>
@@ -43,7 +41,7 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <text x="578" y="390" fill="#D7DFED" font-family="Consolas, monospace" font-size="13">Streaming FFmpeg X display capture as fragmented MP4 at a 30fps target.</text>
   <rect x="560" y="440" width="842" height="158" rx="12" fill="#111823" stroke="#2B313D"/>
   <text x="578" y="466" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Display diagnostics</text>
-  <text x="578" y="510" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Emulator screen: 1080x1920</text>
+  <text x="578" y="510" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Emulator screen: 1080x2340</text>
   <text x="578" y="536" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Video frame: FFmpeg X display MP4 over ordinary HTTPS fetch (30fps target, 720p)</text>
   <text x="578" y="562" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">If X display capture cannot start, adb screenrecord keeps the same HTTP video surface alive.</text>
   <rect x="560" y="616" width="842" height="212" rx="12" fill="#111823" stroke="#2B313D"/>
@@ -51,9 +49,9 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <text x="578" y="668" fill="#D7DFED" font-family="Consolas, monospace" font-size="12">http: 200 OK | content-type: video/mp4</text>
   <text x="578" y="688" fill="#D7DFED" font-family="Consolas, monospace" font-size="12">stream: 14.2 MB / 512 chunks | mse: open / appended 512</text>
   <text x="578" y="708" fill="#D7DFED" font-family="Consolas, monospace" font-size="12">target: 30fps / 720p | current fps: 29.8</text>
-  <text x="578" y="728" fill="#D7DFED" font-family="Consolas, monospace" font-size="12">video: ready 4, net 2, 720x1280 | frames: total 894, dropped 2</text>
+  <text x="578" y="728" fill="#D7DFED" font-family="Consolas, monospace" font-size="12">video: ready 4, net 2, 720x1560 | frames: total 894, dropped 2</text>
   <defs>
-    <linearGradient id="screen" x1="44" y1="78" x2="488" y2="868" gradientUnits="userSpaceOnUse">
+    <linearGradient id="screen" x1="86" y1="78" x2="451" y2="868" gradientUnits="userSpaceOnUse">
       <stop stop-color="#1E4D3A"/>
       <stop offset="0.45" stop-color="#1C2E40"/>
       <stop offset="1" stop-color="#0A1018"/>

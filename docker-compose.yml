@@ -25,9 +25,9 @@ services:
       EMULATOR_RAM_SIZE_MB: "${EMULATOR_RAM_SIZE_MB:-6144}"
       EMULATOR_VIRTUAL_DISPLAY: "${EMULATOR_VIRTUAL_DISPLAY:-1}"
       EMULATOR_X_DISPLAY: "${EMULATOR_X_DISPLAY:-:99}"
-      EMULATOR_X_SCREEN_SIZE: "${EMULATOR_X_SCREEN_SIZE:-1080x1920x24}"
-      EMULATOR_X_CAPTURE_SIZE: "${EMULATOR_X_CAPTURE_SIZE:-1080x1920}"
-      EMULATOR_PARAMS: "-no-metrics -no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
+      EMULATOR_X_SCREEN_SIZE: "${EMULATOR_X_SCREEN_SIZE:-1280x2540x24}"
+      EMULATOR_X_CAPTURE_SIZE: "${EMULATOR_X_CAPTURE_SIZE:-1080x2340}"
+      EMULATOR_PARAMS: "-no-metrics -no-nested-warnings -no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
     expose:
       - "5555"
       - "6099"
@@ -74,8 +74,8 @@ services:
       VIDEO_MAX_FPS: "${VIDEO_MAX_FPS:-30}"
       VIDEO_BIT_RATE: "${VIDEO_BIT_RATE:-6000000}"
       VIDEO_MAX_SIZE: "${VIDEO_MAX_SIZE:-720}"
-      X11_DISPLAY: "${X11_DISPLAY:-emulator:99.0}"
-      X11_VIDEO_SIZE: "${X11_VIDEO_SIZE:-1080x1920}"
+      X11_DISPLAY: "${X11_DISPLAY:-emulator:99.0+100,100}"
+      X11_VIDEO_SIZE: "${X11_VIDEO_SIZE:-1080x2340}"
       ADB_INSTALL_ABI: "${ADB_INSTALL_ABI:-auto-ai}"
       ADBKEY: |
         PLACEHOLDER_ADB_KEY

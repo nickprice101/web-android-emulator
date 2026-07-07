@@ -65,6 +65,16 @@ assert.match(
 );
 assert.match(
   frontendMain,
+  /objectFit: "cover"/,
+  "frontend must crop the visible video surface instead of letterboxing it with black borders"
+);
+assert.doesNotMatch(
+  frontendMain,
+  />PNG preview<[\s\S]*refresh:/,
+  "PNG fallback must not add a header above the tappable screen surface"
+);
+assert.match(
+  frontendMain,
   /Sent \$\{name\} through Guacamole-style HTTP input/,
   "toolbar keys must route through HTTP input"
 );
@@ -83,7 +93,7 @@ const apkbridgeApp = readRepoFile("apkbridge/app.py");
 const apkbridgeDockerfile = readRepoFile("apkbridge/Dockerfile");
 assert.match(apkbridgeApp, /VIDEO_MAX_FPS = .*"30"/, "apkbridge must default HTTP video to 30fps");
 assert.match(apkbridgeApp, /VIDEO_BIT_RATE = [\s\S]*?"6000000"/, "apkbridge must default to a tunnel-friendly bitrate");
-assert.match(apkbridgeApp, /X11_DISPLAY = .*"emulator:99\.0"/, "apkbridge must default to the emulator container X display");
+assert.match(apkbridgeApp, /X11_DISPLAY = .*"emulator:99\.0\+100,100"/, "apkbridge must default to the phone viewport inside the emulator container X display");
 assert.match(apkbridgeApp, /def schedule_video_startup_nudge/, "apkbridge must nudge the display when starting video capture");
 const x11FfmpegCommand = apkbridgeApp.match(/def x11_ffmpeg_command[\s\S]*?\n\n/)?.[0] || "";
 assert.ok(x11FfmpegCommand, "apkbridge must define an FFmpeg X display command for the HTTP tunnel");
@@ -134,12 +144,14 @@ assert.match(composeConfig, /shm_size:\s*"6gb"/, "compose must provide more than
 assert.match(composeConfig, /EMULATOR_RAM_SIZE_MB:\s*"\$\{EMULATOR_RAM_SIZE_MB:-6144\}"/, "compose must default the emulator guest RAM above 4GB");
 assert.match(composeConfig, /EMULATOR_VIRTUAL_DISPLAY:\s*"\$\{EMULATOR_VIRTUAL_DISPLAY:-1\}"/, "compose must enable the virtual X display by default");
 assert.match(composeConfig, /EMULATOR_X_DISPLAY:\s*"\$\{EMULATOR_X_DISPLAY:-:99\}"/, "compose must pin the emulator X display");
-assert.match(composeConfig, /EMULATOR_X_CAPTURE_SIZE:\s*"\$\{EMULATOR_X_CAPTURE_SIZE:-1080x1920\}"/, "compose must align the emulator window with the FFmpeg capture size");
+assert.match(composeConfig, /EMULATOR_X_SCREEN_SIZE:\s*"\$\{EMULATOR_X_SCREEN_SIZE:-1280x2540x24\}"/, "compose must leave room for the emulator Qt window around the captured phone screen");
+assert.match(composeConfig, /EMULATOR_X_CAPTURE_SIZE:\s*"\$\{EMULATOR_X_CAPTURE_SIZE:-1080x2340\}"/, "compose must align the emulator window with the FFmpeg capture size");
 assert.match(composeConfig, /EMULATOR_PARAMS:.*-no-metrics/, "compose must opt the emulator out of metrics prompts");
+assert.match(composeConfig, /EMULATOR_PARAMS:.*-no-nested-warnings/, "compose must keep nested virtualization dialogs out of the captured display");
 assert.match(composeConfig, /VIDEO_MAX_FPS:\s*"\$\{VIDEO_MAX_FPS:-30\}"/, "compose must pin HTTP video max fps to 30");
 assert.match(composeConfig, /VIDEO_BIT_RATE:/, "compose must expose FFmpeg video bitrate tuning");
-assert.match(composeConfig, /X11_DISPLAY:\s*"\$\{X11_DISPLAY:-emulator:99\.0\}"/, "compose must point apkbridge at the emulator X display");
-assert.match(composeConfig, /X11_VIDEO_SIZE:\s*"\$\{X11_VIDEO_SIZE:-1080x1920\}"/, "compose must pass the FFmpeg capture rectangle");
+assert.match(composeConfig, /X11_DISPLAY:\s*"\$\{X11_DISPLAY:-emulator:99\.0\+100,100\}"/, "compose must point apkbridge at the phone viewport inside the emulator X display");
+assert.match(composeConfig, /X11_VIDEO_SIZE:\s*"\$\{X11_VIDEO_SIZE:-1080x2340\}"/, "compose must pass the FFmpeg capture rectangle");
 assert.doesNotMatch(composeConfig, /SCRCPY_PORT_RANGE:/, "compose must not expose scrcpy tunnel port tuning");
 assert.match(composeConfig, /ADB_INSTALL_ABI:\s*"\$\{ADB_INSTALL_ABI:-auto-ai\}"/, "compose must default to AI-aware ABI selection while preserving Android auto-selection for non-AI APKs");
 assert.match(composeConfig, /18080:80/, "frontend must own the public UI/API entrypoint");
@@ -165,6 +177,7 @@ assert.match(emulatorWrapper, /Xvfb "\$\{EMULATOR_X_DISPLAY\}"/, "emulator wrapp
 assert.match(emulatorWrapper, /append_param_if_missing "-no-skin"/, "emulator wrapper must remove the emulator skin for aligned X display capture");
 assert.match(emulatorWrapper, /-fixed-scale/, "emulator wrapper must keep the emulator window at a stable 1:1 scale");
 assert.match(emulatorWrapper, /append_param_if_missing "-no-metrics"/, "emulator wrapper must suppress emulator metrics prompts by default");
+assert.match(emulatorWrapper, /append_param_if_missing "-no-nested-warnings"/, "emulator wrapper must suppress nested virtualization dialogs in X display captures");
 assert.match(emulatorWrapper, /EMULATOR_AVD_READ_ONLY="\$\{EMULATOR_AVD_READ_ONLY:-1\}"/, "emulator wrapper must default to duplicate-lock-tolerant read-only AVD startup");
 assert.match(emulatorWrapper, /EMULATOR_SYSTEM_IMAGE="\$\{EMULATOR_SYSTEM_IMAGE:-system-images;android-36;google_apis;x86_64\}"/, "emulator wrapper must default to the API 36 Google APIs x86_64 system image");
 assert.match(emulatorWrapper, /EMULATOR_PLATFORM="\$\{EMULATOR_PLATFORM:-platforms;android-36\}"/, "emulator wrapper must default to the Android 36 platform package");

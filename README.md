@@ -59,7 +59,25 @@ http://YOUR_HOST:18080
 
 The default emulator build uses Google's public emulator base image and then installs the pinned Android emulator package plus an Android 14 (API 34) Google APIs `x86_64` system image during build. The default platform package is `platforms;android-34`. The Dockerfile creates a `Pixel2` AVD backed by the `pixel_5` profile and starts the emulator through `emulator/start-emulator.sh`.
 
-The stack uses an `x86_64` guest image because the Linux x64 emulator cannot boot an `arm64-v8a` system image on an x86_64 host. `apkbridge` defaults `ADB_INSTALL_ABI=auto`, so Android chooses the install ABI that matches the selected image. If you need to test ARM64-only app libraries on a newer translated x86_64 image, opt in with `EMULATOR_SYSTEM_IMAGE=system-images;android-36;google_apis;x86_64`, `EMULATOR_PLATFORM=platforms;android-36`, and `ADB_INSTALL_ABI=arm64-v8a`.
+The stack uses an `x86_64` guest image because the Linux x64 emulator cannot boot an `arm64-v8a` system image on an x86_64 host. API 34 remains the default because it is the currently verified container image for the HTTP video path. AI APKs that include real `x86_64` model/runtime libraries can run on this default image.
+
+`apkbridge` defaults `ADB_INSTALL_ABI=auto-ai`. In this mode the bridge inspects the APK's native libraries and the connected device ABI list before install:
+
+* If the APK has AI native libraries for `x86_64` and the device supports `x86_64`, the bridge installs the x86 build.
+* If the APK has AI native libraries only for `arm64-v8a` and the selected emulator image exposes translated `arm64-v8a`, the bridge installs with `--abi arm64-v8a`.
+* If no AI native libraries match, the bridge falls back to Android's normal package-manager ABI choice.
+* If the APK contains AI libraries but none match the device ABI list, the install fails early with a diagnostic instead of silently launching without AI support.
+
+The AI library detector matches `libLlama-*.so`, `libmlc*.so`, and `libtvm4j_runtime_packed.so` by default. Override `AI_NATIVE_LIB_PATTERNS` with a comma-separated pattern list for other AI runtimes. Set `ADB_INSTALL_ABI=auto` to restore plain Android ABI selection or set an explicit ABI such as `arm64-v8a` for manual testing.
+
+For ARM64-only AI APKs on the hosted x86 emulator, opt into a translated image explicitly:
+
+```bash
+EMULATOR_SYSTEM_IMAGE=system-images\;android-36\;google_apis\;x86_64 \
+EMULATOR_PLATFORM=platforms\;android-36 \
+ADB_INSTALL_ABI=auto-ai \
+docker compose up --build
+```
 
 The selected `EMULATOR_SYSTEM_IMAGE` and `EMULATOR_PLATFORM` are passed into the runtime container too. At startup, `emulator/start-emulator.sh` derives the AVD `image.sysdir.1` path from `EMULATOR_SYSTEM_IMAGE`, so custom SDK packages do not need a hard-coded AVD sysdir patch.
 

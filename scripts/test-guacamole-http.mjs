@@ -111,7 +111,7 @@ assertNoActiveTurnConfig("docker-compose.yml", composeConfig);
 assertNoWebrtcRuntime("docker-compose.yml", composeConfig);
 assert.match(composeConfig, /EMULATOR_GPU_MODE:\s*"\$\{EMULATOR_GPU_MODE:-swiftshader_indirect\}"/, "compose must default the emulator to container-safe software GPU rendering");
 assert.match(composeConfig, /EMULATOR_AVD_READ_ONLY:\s*"\$\{EMULATOR_AVD_READ_ONLY:-1\}"/, "compose must default the emulator AVD to read-only startup for duplicate-lock tolerance");
-assert.match(composeConfig, /EMULATOR_SYSTEM_IMAGE:\s*"\$\{EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64\}"/, "compose must default to the API 34 Google APIs x86_64 system image");
+assert.match(composeConfig, /EMULATOR_SYSTEM_IMAGE:\s*"\$\{EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64\}"/, "compose must default to the verified API 34 Google APIs x86_64 system image");
 assert.match(composeConfig, /EMULATOR_PLATFORM:\s*"\$\{EMULATOR_PLATFORM:-platforms;android-34\}"/, "compose must default to the Android 34 platform package");
 assert.match(composeConfig, /shm_size:\s*"6gb"/, "compose must provide more than 4GB of shared memory for the AI-capable emulator");
 assert.match(composeConfig, /EMULATOR_RAM_SIZE_MB:\s*"\$\{EMULATOR_RAM_SIZE_MB:-6144\}"/, "compose must default the emulator guest RAM above 4GB");
@@ -119,7 +119,7 @@ assert.match(composeConfig, /EMULATOR_PARAMS:.*-no-metrics/, "compose must opt t
 assert.match(composeConfig, /SCRCPY_MAX_FPS:\s*"\$\{SCRCPY_MAX_FPS:-30\}"/, "compose must pin scrcpy max fps to 30");
 assert.match(composeConfig, /SCRCPY_VIDEO_BIT_RATE:/, "compose must expose scrcpy bitrate tuning");
 assert.match(composeConfig, /SCRCPY_PORT_RANGE:/, "compose must expose scrcpy tunnel port range tuning");
-assert.match(composeConfig, /ADB_INSTALL_ABI:\s*"\$\{ADB_INSTALL_ABI:-auto\}"/, "compose must let Android choose the default install ABI unless explicitly overridden");
+assert.match(composeConfig, /ADB_INSTALL_ABI:\s*"\$\{ADB_INSTALL_ABI:-auto-ai\}"/, "compose must default to AI-aware ABI selection while preserving Android auto-selection for non-AI APKs");
 assert.match(composeConfig, /18080:80/, "frontend must own the public UI/API entrypoint");
 assert.doesNotMatch(composeConfig, /envoyproxy\/envoy|container_name:\s*google-emu-envoy/, "compose must not start the removed Envoy container");
 assert.doesNotMatch(composeConfig, /-grpc\s+8554|emu-grpc-token|8554/, "compose must not expose emulator gRPC for the HTTP-only path");

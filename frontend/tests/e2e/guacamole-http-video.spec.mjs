@@ -31,9 +31,7 @@ test("deployed Guacamole-style HTTP path renders real video frames", async ({ pa
   await expect(page.getByText("FFmpeg X display diagnostics", { exact: true })).toBeVisible({
     timeout: VIDEO_WAIT_TIMEOUT_MS,
   });
-  await expect(page.locator('[data-testid="display-fps-overlay"]')).toContainText("fps", {
-    timeout: VIDEO_WAIT_TIMEOUT_MS,
-  });
+  await expect(page.locator('[data-testid="display-fps-overlay"]')).toHaveCount(0);
   await expect(page.locator('label:has-text("Quality") select')).toHaveValue("720", {
     timeout: VIDEO_WAIT_TIMEOUT_MS,
   });

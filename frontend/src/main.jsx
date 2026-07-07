@@ -373,7 +373,7 @@ function ApiVideoInputSurface({
   return (
     <div
       ref={containerRef}
-      style={{ flex: 1, position: "relative", background: "#000" }}
+      style={{ flex: 1, minHeight: 0, position: "relative", background: "#000" }}
       tabIndex={0}
       role="application"
       aria-label="Android emulator display"
@@ -392,7 +392,7 @@ function ApiVideoInputSurface({
 function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMessage, onDiagnosticsChange, onInput }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
-  const [status, setStatus] = useState("connecting");
+  const [, setStatus] = useState("connecting");
   const [detail, setDetail] = useState(
     `Opening HTTP tunnel from the emulator X display at ${GUACAMOLE_HTTP_TARGET_FPS}fps / ${streamMaxSize}p...`
   );
@@ -676,17 +676,12 @@ function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onM
   }, [onMessage, onStateChange, streamMaxSize]);
 
   const inlineDebugSummary = `${formatBytes(debug.bytesReceived)} / ${debug.chunksReceived} chunks`;
-  const fpsSummary = `${debug.measuredFps || "0.0"} fps`;
 
   return (
     <div
       aria-description={inlineDebugSummary}
       style={{ width, height, borderRadius: 8, background: "#05070b", color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid #202634" }}
     >
-      <div style={{ padding: "10px 12px", borderBottom: "1px solid #202634", display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12 }}>
-        <span>Guacamole-style HTTP tunnel</span>
-        <span>transport: HTTP fetch | target: {GUACAMOLE_HTTP_TARGET_FPS}fps / {streamMaxSize}p | status: {status}</span>
-      </div>
       <ApiVideoInputSurface
         containerRef={containerRef}
         mediaWidth={videoRef.current?.videoWidth || width}
@@ -701,30 +696,6 @@ function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onM
           muted
           style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", background: "#000" }}
         />
-        <div
-          data-testid="display-fps-overlay"
-          style={{
-            position: "absolute",
-            top: 10,
-            right: 10,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "6px 9px",
-            border: "1px solid rgba(215, 223, 237, 0.24)",
-            borderRadius: 8,
-            background: "rgba(5, 7, 11, 0.74)",
-            color: "#f2f5f9",
-            fontFamily: "Consolas, monospace",
-            fontSize: 12,
-            lineHeight: 1,
-            pointerEvents: "none",
-            textShadow: "0 1px 2px rgba(0, 0, 0, 0.8)",
-          }}
-        >
-          <span>{fpsSummary}</span>
-          <span style={{ color: "#a8b3c7" }}>{streamMaxSize}p</span>
-        </div>
         {!hasVideo && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
             <div style={{ maxWidth: 420, padding: 16, background: "rgba(10, 12, 18, 0.9)", border: "1px solid #3b465b", borderRadius: 8, fontSize: 13, lineHeight: 1.5 }}>

@@ -4,6 +4,7 @@ import sys
 import tempfile
 import time
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,6 +23,13 @@ def make_python_proc(code):
     )
 
 
+def make_apk(apk_path, entries):
+    with zipfile.ZipFile(apk_path, "w") as apk:
+        for entry in entries:
+            apk.writestr(entry, b"stub")
+    return apk_path
+
+
 class InstallAbiTests(unittest.TestCase):
     def test_adb_install_args_include_configured_arm64_abi(self):
         with patch.object(app_module, "ADB_INSTALL_ABI", "arm64-v8a"):
@@ -34,6 +42,80 @@ class InstallAbiTests(unittest.TestCase):
             args = app_module.adb_install_args("/tmp/app.apk")
 
         self.assertEqual(args, ["install", "-r", "-t", "-g", "/tmp/app.apk"])
+
+    def test_auto_ai_install_abi_selects_arm64_when_model_library_is_arm64_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            apk_path = make_apk(
+                Path(temp_dir) / "app.apk",
+                [
+                    "lib/x86_64/libdjl_tokenizer.so",
+                    "lib/x86_64/libc++_shared.so",
+                    "lib/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so",
+                    "lib/arm64-v8a/libtvm4j_runtime_packed.so",
+                ],
+            )
+
+            with patch.object(app_module, "ADB_INSTALL_ABI", "auto-ai"), patch(
+                "app.get_device_supported_abis",
+                return_value=["x86_64", "x86", "arm64-v8a", "armeabi-v7a"],
+            ):
+                plan = app_module.adb_install_plan(apk_path)
+
+        self.assertEqual(plan["resolved_abi"], "arm64-v8a")
+        self.assertEqual(
+            plan["args"],
+            ["install", "-r", "-t", "-g", "--abi", "arm64-v8a", str(apk_path)],
+        )
+        self.assertIn("libLlama-3.2-3B-Instruct-q4f16_0-MLC.so", plan["apk_ai_abis"]["arm64-v8a"])
+
+    def test_auto_ai_install_abi_prefers_x86_when_x86_has_ai_library(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            apk_path = make_apk(
+                Path(temp_dir) / "app.apk",
+                [
+                    "lib/x86_64/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so",
+                    "lib/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so",
+                ],
+            )
+
+            with patch.object(app_module, "ADB_INSTALL_ABI", "auto-ai"), patch(
+                "app.get_device_supported_abis",
+                return_value=["x86_64", "arm64-v8a"],
+            ):
+                plan = app_module.adb_install_plan(apk_path)
+
+        self.assertEqual(plan["resolved_abi"], "x86_64")
+        self.assertEqual(
+            plan["args"],
+            ["install", "-r", "-t", "-g", "--abi", "x86_64", str(apk_path)],
+        )
+
+    def test_auto_ai_install_abi_fails_fast_when_device_cannot_run_ai_abi(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            apk_path = make_apk(
+                Path(temp_dir) / "app.apk",
+                ["lib/arm64-v8a/libLlama-3.2-3B-Instruct-q4f16_0-MLC.so"],
+            )
+
+            with patch.object(app_module, "ADB_INSTALL_ABI", "auto-ai"), patch(
+                "app.get_device_supported_abis",
+                return_value=["x86_64", "x86"],
+            ):
+                with self.assertRaisesRegex(RuntimeError, "API 36 Google APIs x86_64"):
+                    app_module.adb_install_plan(apk_path)
+
+    def test_auto_ai_install_abi_uses_android_auto_when_no_ai_library_matches(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            apk_path = make_apk(Path(temp_dir) / "app.apk", ["lib/x86_64/libdjl_tokenizer.so"])
+
+            with patch.object(app_module, "ADB_INSTALL_ABI", "auto-ai"), patch(
+                "app.get_device_supported_abis",
+                side_effect=AssertionError("device ABI should not be queried"),
+            ):
+                plan = app_module.adb_install_plan(apk_path)
+
+        self.assertIsNone(plan["resolved_abi"])
+        self.assertEqual(plan["args"], ["install", "-r", "-t", "-g", str(apk_path)])
 
 
 class InputEventEndpointTests(unittest.TestCase):

@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import errno
+import fnmatch
 import os
 import queue
 import shlex
@@ -9,6 +10,7 @@ import tempfile
 import uuid
 import threading
 import time
+import zipfile
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, stream_with_context
@@ -41,7 +43,15 @@ SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS = max(
 VIDEO_STARTUP_NUDGE_DELAY_SECONDS = max(0.0, float(os.environ.get("VIDEO_STARTUP_NUDGE_DELAY_SECONDS", "0.75")))
 VIDEO_STARTUP_NUDGE_INTERVAL_SECONDS = max(0.05, float(os.environ.get("VIDEO_STARTUP_NUDGE_INTERVAL_SECONDS", "0.75")))
 VIDEO_STARTUP_NUDGE_REPEATS = max(0, int(os.environ.get("VIDEO_STARTUP_NUDGE_REPEATS", "3")))
-ADB_INSTALL_ABI = os.environ.get("ADB_INSTALL_ABI", "").strip()
+ADB_INSTALL_ABI = os.environ.get("ADB_INSTALL_ABI", "auto-ai").strip()
+AI_NATIVE_LIB_PATTERNS = tuple(
+    pattern.strip()
+    for pattern in os.environ.get(
+        "AI_NATIVE_LIB_PATTERNS",
+        "libLlama-*.so,libmlc*.so,libtvm4j_runtime_packed.so",
+    ).split(",")
+    if pattern.strip()
+)
 SCRCPY_STREAM_LOCK_PATH = Path(
     os.environ.get("SCRCPY_STREAM_LOCK_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-scrcpy-video.lock"))
 )
@@ -63,6 +73,8 @@ KEY_NAME_MAP = {
     "Delete": "112",
 }
 SCRCPY_STREAM_THREAD_LOCK = threading.Lock()
+AUTO_INSTALL_ABI_MODES = {"", "auto", "none", "default"}
+AUTO_AI_INSTALL_ABI_MODES = {"ai", "auto-ai", "prefer-ai", "mlc-ai"}
 
 
 class ScrcpyStreamBusy(RuntimeError):
@@ -112,12 +124,142 @@ def adb_popen(*args):
     )
 
 
-def adb_install_args(apk_path):
+def parse_abi_list(value):
+    return [part.strip() for part in str(value or "").replace(" ", ",").split(",") if part.strip()]
+
+
+def adb_getprop(prop_name, timeout=8):
+    rc, out, err = run(["adb", "-s", ADB_TARGET, "shell", "getprop", prop_name], timeout=timeout)
+    if rc != 0:
+        raise RuntimeError(err or out or f"adb getprop {prop_name} failed")
+    return out.strip()
+
+
+def get_device_supported_abis():
+    abis = parse_abi_list(adb_getprop("ro.product.cpu.abilist"))
+    if abis:
+        return abis
+
+    fallback = []
+    for prop_name in ("ro.product.cpu.abi", "ro.product.cpu.abi2"):
+        value = adb_getprop(prop_name)
+        if value and value not in fallback:
+            fallback.append(value)
+    return fallback
+
+
+def apk_native_libs_by_abi(apk_path):
+    libs_by_abi = {}
+    try:
+        with zipfile.ZipFile(apk_path) as apk:
+            for entry_name in apk.namelist():
+                parts = entry_name.split("/")
+                if len(parts) != 3 or parts[0] != "lib" or not parts[2].endswith(".so"):
+                    continue
+                libs_by_abi.setdefault(parts[1], set()).add(parts[2])
+    except (FileNotFoundError, zipfile.BadZipFile):
+        return {}
+
+    return {abi: sorted(libs) for abi, libs in sorted(libs_by_abi.items())}
+
+
+def is_ai_native_lib(lib_name):
+    lowered_name = lib_name.lower()
+    return any(fnmatch.fnmatchcase(lowered_name, pattern.lower()) for pattern in AI_NATIVE_LIB_PATTERNS)
+
+
+def apk_ai_native_libs_by_abi(apk_path):
+    return {
+        abi: [lib_name for lib_name in libs if is_ai_native_lib(lib_name)]
+        for abi, libs in apk_native_libs_by_abi(apk_path).items()
+        if any(is_ai_native_lib(lib_name) for lib_name in libs)
+    }
+
+
+def resolve_adb_install_abi(apk_path):
+    mode = (ADB_INSTALL_ABI or "auto-ai").strip()
+    mode_key = mode.lower()
+    if mode_key in AUTO_INSTALL_ABI_MODES:
+        return {
+            "mode": mode or "auto",
+            "resolved_abi": None,
+            "reason": "Android package manager ABI auto-selection requested.",
+            "device_abis": [],
+            "apk_ai_abis": {},
+        }
+    if mode_key not in AUTO_AI_INSTALL_ABI_MODES:
+        return {
+            "mode": mode,
+            "resolved_abi": mode,
+            "reason": f"Explicit install ABI requested: {mode}.",
+            "device_abis": [],
+            "apk_ai_abis": {},
+        }
+
+    apk_ai_abis = apk_ai_native_libs_by_abi(apk_path)
+    if not apk_ai_abis:
+        return {
+            "mode": mode,
+            "resolved_abi": None,
+            "reason": (
+                "No AI native libraries matched "
+                f"{', '.join(AI_NATIVE_LIB_PATTERNS)}; using Android package manager ABI auto-selection."
+            ),
+            "device_abis": [],
+            "apk_ai_abis": {},
+        }
+
+    device_abis = get_device_supported_abis()
+    if not device_abis:
+        raise RuntimeError("Unable to determine device ABI list for AI-aware APK install.")
+
+    compatible = [abi for abi in device_abis if abi in apk_ai_abis]
+    if not compatible:
+        raise RuntimeError(
+            "APK contains AI native libraries for "
+            f"{', '.join(sorted(apk_ai_abis))}, but the connected device exposes "
+            f"{', '.join(device_abis)}. Use an emulator image with the matching ABI/native bridge "
+            "(for ARM64-only AI libraries, use the API 36 Google APIs x86_64 image) or build the APK "
+            "with AI native libraries for the emulator ABI."
+        )
+
+    selected = sorted(
+        compatible,
+        key=lambda abi: (-len(apk_ai_abis.get(abi, [])), device_abis.index(abi)),
+    )[0]
+    return {
+        "mode": mode,
+        "resolved_abi": selected,
+        "reason": (
+            f"Selected {selected} because the APK includes AI native libraries "
+            f"({', '.join(apk_ai_abis[selected])}) for a device-supported ABI."
+        ),
+        "device_abis": device_abis,
+        "apk_ai_abis": apk_ai_abis,
+    }
+
+
+def adb_install_plan(apk_path):
+    abi_plan = resolve_adb_install_abi(apk_path)
     args = ["install", "-r", "-t", "-g"]
-    if ADB_INSTALL_ABI and ADB_INSTALL_ABI.lower() not in {"auto", "none", "default"}:
-        args.extend(["--abi", ADB_INSTALL_ABI])
+    if abi_plan["resolved_abi"]:
+        args.extend(["--abi", abi_plan["resolved_abi"]])
     args.append(str(apk_path))
-    return args
+    return {"args": args, **abi_plan}
+
+
+def adb_install_args(apk_path):
+    return adb_install_plan(apk_path)["args"]
+
+
+def install_abi_response_fields(install_plan):
+    return {
+        "install_abi": install_plan["resolved_abi"] or "auto",
+        "install_abi_mode": install_plan["mode"],
+        "install_abi_reason": install_plan["reason"],
+        "device_abis": install_plan["device_abis"],
+        "apk_ai_abis": install_plan["apk_ai_abis"],
+    }
 
 
 def scrcpy_stream_lock_retry_delay(deadline):
@@ -487,7 +629,8 @@ def install():
             tmp_path = tmp.name
         detected_pkg = detect_package_name(tmp_path)
         final_pkg = pkg or detected_pkg
-        out = adb(*adb_install_args(tmp_path))
+        install_plan = adb_install_plan(tmp_path)
+        out = adb(*install_plan["args"])
         if not final_pkg:
             final_pkg = infer_installed_package(before_packages)
         return jsonify(
@@ -495,7 +638,7 @@ def install():
                 "ok": True,
                 "message": out,
                 "package": final_pkg,
-                "install_abi": ADB_INSTALL_ABI or "auto",
+                **install_abi_response_fields(install_plan),
                 "launch": launch_package(final_pkg) if final_pkg else None,
             }
         )
@@ -518,7 +661,8 @@ def install_built():
         pkg = data.get("package", "").strip()
         detected_pkg = detect_package_name(apk)
         final_pkg = pkg or detected_pkg
-        out = adb(*adb_install_args(apk))
+        install_plan = adb_install_plan(apk)
+        out = adb(*install_plan["args"])
         if not final_pkg:
             final_pkg = infer_installed_package(before_packages)
         return jsonify(
@@ -526,7 +670,7 @@ def install_built():
                 "ok": True,
                 "message": out,
                 "package": final_pkg,
-                "install_abi": ADB_INSTALL_ABI or "auto",
+                **install_abi_response_fields(install_plan),
                 "launch": launch_package(final_pkg) if final_pkg else None,
             }
         )
@@ -1065,7 +1209,16 @@ def screenrecord():
 def device_info():
     try:
         size = get_screen_size()
-        return jsonify({"ok": True, "screen": size, "target": ADB_TARGET})
+        abi_error = None
+        try:
+            abis = get_device_supported_abis()
+        except Exception as exc:
+            abis = []
+            abi_error = str(exc)
+        payload = {"ok": True, "screen": size, "target": ADB_TARGET, "abis": abis}
+        if abi_error:
+            payload["abi_error"] = abi_error
+        return jsonify(payload)
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

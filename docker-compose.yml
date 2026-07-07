@@ -7,8 +7,8 @@ services:
       context: ./emulator
       args:
         EMULATOR_IMAGE: "${EMULATOR_IMAGE:-us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297}"
-        EMULATOR_SYSTEM_IMAGE: "${EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64}"
-        EMULATOR_PLATFORM: "${EMULATOR_PLATFORM:-platforms;android-34}"
+        EMULATOR_SYSTEM_IMAGE: "${EMULATOR_SYSTEM_IMAGE:-system-images;android-36;google_apis;x86_64}"
+        EMULATOR_PLATFORM: "${EMULATOR_PLATFORM:-platforms;android-36}"
     image: google-emu-emulator:latest
     privileged: true
     devices:
@@ -20,8 +20,8 @@ services:
         PLACEHOLDER_ADB_KEY
       EMULATOR_GPU_MODE: "${EMULATOR_GPU_MODE:-swiftshader_indirect}"
       EMULATOR_AVD_READ_ONLY: "${EMULATOR_AVD_READ_ONLY:-1}"
-      EMULATOR_SYSTEM_IMAGE: "${EMULATOR_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64}"
-      EMULATOR_PLATFORM: "${EMULATOR_PLATFORM:-platforms;android-34}"
+      EMULATOR_SYSTEM_IMAGE: "${EMULATOR_SYSTEM_IMAGE:-system-images;android-36;google_apis;x86_64}"
+      EMULATOR_PLATFORM: "${EMULATOR_PLATFORM:-platforms;android-36}"
       EMULATOR_RAM_SIZE_MB: "${EMULATOR_RAM_SIZE_MB:-6144}"
       EMULATOR_PARAMS: "-no-metrics -no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -no-boot-anim -camera-back none -camera-front none -no-snapshot-save"
     expose:
@@ -70,7 +70,7 @@ services:
       SCRCPY_VIDEO_BIT_RATE: "${SCRCPY_VIDEO_BIT_RATE:-6000000}"
       SCRCPY_MAX_SIZE: "${SCRCPY_MAX_SIZE:-720}"
       SCRCPY_PORT_RANGE: "${SCRCPY_PORT_RANGE:-27183:27283}"
-      ADB_INSTALL_ABI: "${ADB_INSTALL_ABI:-auto}"
+      ADB_INSTALL_ABI: "${ADB_INSTALL_ABI:-auto-ai}"
       ADBKEY: |
         PLACEHOLDER_ADB_KEY
     volumes:

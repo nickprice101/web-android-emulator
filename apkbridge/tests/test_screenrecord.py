@@ -1,4 +1,5 @@
 import io
+import json
 import subprocess
 import sys
 import tempfile
@@ -176,6 +177,40 @@ class ScrcpyStreamLockTests(unittest.TestCase):
         self.assertFalse(fake_fcntl.unlocked)
 
 
+class ScrcpyStreamLifecycleTests(unittest.TestCase):
+    def test_shutdown_existing_scrcpy_stream_terminates_recorded_and_untracked_processes(self):
+        terminated = []
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "scrcpy-video.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "owner": "old-owner",
+                        "scrcpy_pid": 111,
+                        "ffmpeg_pid": 222,
+                        "fifo_path": "/tmp/scrcpy-video-old.mkv",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def fake_terminate_pid(pid, label, cmdline_matches=None, timeout_seconds=None):
+                terminated.append((pid, label))
+                return True
+
+            with patch("app.SCRCPY_STREAM_STATE_PATH", state_path), patch(
+                "app.terminate_pid", side_effect=fake_terminate_pid
+            ), patch("app.iter_scrcpy_process_pids", return_value=[333]):
+                app_module.shutdown_existing_scrcpy_stream()
+
+            self.assertFalse(state_path.exists())
+
+        self.assertIn((111, "scrcpy"), terminated)
+        self.assertIn((222, "scrcpy ffmpeg"), terminated)
+        self.assertIn((333, "untracked scrcpy"), terminated)
+
+
 class ScrcpyVideoEndpointTests(unittest.TestCase):
     def test_video_startup_nudge_taps_top_left_after_wake(self):
         adb_calls = []
@@ -285,6 +320,98 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             )
         )
 
+    def test_scrcpy_video_replaces_existing_owner_before_streaming(self):
+        class FakePipe:
+            def __init__(self, chunks):
+                self.chunks = list(chunks)
+                self.closed = False
+
+            def read(self, size=-1):
+                return self.chunks.pop(0) if self.chunks else b""
+
+            def close(self):
+                self.closed = True
+
+        class FakeProc:
+            def __init__(self, pid, stdout=None, stderr=None, polls=None):
+                self.pid = pid
+                self.stdout = stdout
+                self.stderr = stderr
+                self._polls = list(polls or [None, 0])
+
+            def poll(self):
+                return self._polls.pop(0) if self._polls else 0
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                pass
+
+        terminated = []
+        popen_kwargs = []
+
+        def fake_terminate_pid(pid, label, cmdline_matches=None, timeout_seconds=None):
+            terminated.append((pid, label))
+            return True
+
+        def fake_popen(cmd, **kwargs):
+            popen_kwargs.append((cmd[0], kwargs))
+            if cmd[0] == "ffmpeg":
+                return FakeProc(pid=201, stdout=FakePipe([b"ftyp", b""]), stderr=FakePipe([]), polls=[None, 0])
+            return FakeProc(pid=202, stdout=None, stderr=FakePipe([]), polls=[None, 0])
+
+        client = app.test_client()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "scrcpy-video.json"
+            lock_path = Path(temp_dir) / "scrcpy-video.lock"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "owner": "old-owner",
+                        "scrcpy_pid": 101,
+                        "ffmpeg_pid": 102,
+                        "fifo_path": "/tmp/scrcpy-video-old.mkv",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("app.SCRCPY_STREAM_STATE_PATH", state_path), patch(
+                "app.SCRCPY_STREAM_LOCK_PATH", lock_path
+            ), patch("app.video_prerequisite_error", return_value=None), patch(
+                "app.shutil.which", side_effect=lambda tool: f"/usr/bin/{tool}"
+            ), patch(
+                "app.tempfile.gettempdir", return_value="/tmp"
+            ), patch(
+                "app.os.mkfifo", create=True
+            ), patch(
+                "app.subprocess.Popen", side_effect=fake_popen
+            ), patch(
+                "app.terminate_pid", side_effect=fake_terminate_pid
+            ), patch(
+                "app.iter_scrcpy_process_pids", return_value=[]
+            ), patch(
+                "app.schedule_video_startup_nudge"
+            ):
+                response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
+                first_chunk = next(response.response)
+                active_state = json.loads(state_path.read_text(encoding="utf-8"))
+                response.response.close()
+
+            self.assertFalse(state_path.exists())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(first_chunk, b"ftyp")
+        self.assertIn((101, "scrcpy"), terminated)
+        self.assertIn((102, "scrcpy ffmpeg"), terminated)
+        self.assertEqual(active_state["scrcpy_pid"], 202)
+        self.assertEqual(active_state["ffmpeg_pid"], 201)
+        self.assertTrue(all(kwargs.get("start_new_session") for _, kwargs in popen_kwargs))
+
     def test_scrcpy_video_falls_back_to_screenrecord_mp4_when_scrcpy_exits_before_frames(self):
         class FakePipe:
             def __init__(self, chunks):
@@ -379,7 +506,7 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             adb_calls,
         )
 
-    def test_scrcpy_video_returns_conflict_when_scrcpy_stream_is_already_active(self):
+    def test_scrcpy_video_returns_unavailable_when_stream_manager_lock_is_busy(self):
         class BusyLock:
             def __enter__(self):
                 return False
@@ -388,15 +515,17 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
                 return False
 
         client = app.test_client()
-        with patch("app.video_prerequisite_error", return_value=None), patch("app.scrcpy_stream_lock", return_value=BusyLock()), patch(
+        with patch("app.video_prerequisite_error", return_value=None), patch(
+            "app.shutil.which", side_effect=lambda tool: f"/usr/bin/{tool}"
+        ), patch("app.os.mkfifo", create=True), patch("app.scrcpy_stream_lock", return_value=BusyLock()), patch(
             "app.subprocess.Popen"
         ) as popen_mock, patch("app.adb_popen") as adb_popen_mock, patch(
             "app.schedule_video_startup_nudge"
         ) as nudge_mock:
             response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
 
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("another scrcpy video stream is already active", response.get_json()["error"])
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("timed out waiting for the scrcpy stream manager lock", response.get_json()["error"])
         popen_mock.assert_not_called()
         adb_popen_mock.assert_not_called()
         nudge_mock.assert_not_called()

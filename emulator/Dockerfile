@@ -147,7 +147,8 @@ RUN apt-get update \
     iproute2 \
     nftables \
   && rm -rf /var/lib/apt/lists/*
-RUN chmod +x /usr/local/bin/start-emulator.sh /usr/local/bin/healthcheck-adb-bridge.sh
+RUN sed -i 's/\r$//' /usr/local/bin/start-emulator.sh /usr/local/bin/healthcheck-adb-bridge.sh \
+  && chmod +x /usr/local/bin/start-emulator.sh /usr/local/bin/healthcheck-adb-bridge.sh
 
 HEALTHCHECK --interval=30s --timeout=30s --start-period=180s --retries=10 CMD ["/usr/local/bin/healthcheck-adb-bridge.sh"]
 

@@ -153,7 +153,7 @@ display_number_from_name() {
 start_virtual_x_display() {
   EMULATOR_X_DISPLAY="${EMULATOR_X_DISPLAY:-:99}"
   EMULATOR_X_SCREEN="${EMULATOR_X_SCREEN:-0}"
-  EMULATOR_X_SCREEN_SIZE="${EMULATOR_X_SCREEN_SIZE:-1080x1920x24}"
+  EMULATOR_X_SCREEN_SIZE="${EMULATOR_X_SCREEN_SIZE:-1280x2540x24}"
   _x_display_number="$(display_number_from_name "${EMULATOR_X_DISPLAY}")"
   case "${_x_display_number}" in
     ''|*[!0-9]*)
@@ -213,6 +213,7 @@ case "${EMULATOR_GPU_MODE}" in
   *) append_param_value_if_flag_missing "-gpu" "${EMULATOR_GPU_MODE}" ;;
 esac
 append_param_if_missing "-no-metrics"
+append_param_if_missing "-no-nested-warnings"
 append_param_if_missing "-no-boot-anim"
 append_param_if_missing "-camera-back none"
 append_param_if_missing "-camera-front none"
@@ -269,7 +270,7 @@ EMULATOR_RADIO_DEVICE="${EMULATOR_RADIO_DEVICE:-null}"
 EMULATOR_USE_RADIO_OVERRIDE="${EMULATOR_USE_RADIO_OVERRIDE:-0}"
 EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE:-system-images;android-36;google_apis;x86_64}"
 EMULATOR_PLATFORM="${EMULATOR_PLATFORM:-platforms;android-36}"
-EMULATOR_X_CAPTURE_SIZE="${EMULATOR_X_CAPTURE_SIZE:-1080x1920}"
+EMULATOR_X_CAPTURE_SIZE="${EMULATOR_X_CAPTURE_SIZE:-1080x2340}"
 mkdir -p "${ANDROID_USER_HOME}" "${ANDROID_AVD_HOME}"
 
 emulator_system_image_sysdir() {

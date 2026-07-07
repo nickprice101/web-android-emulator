@@ -368,8 +368,8 @@ class DisplayVideoEndpointTests(unittest.TestCase):
                 call[0] == "ffmpeg"
                 and "-f" in call
                 and "x11grab" in call
-                and "emulator:99.0" in call
-                and "1080x1920" in call
+                and "emulator:99.0+100,100" in call
+                and "1080x2340" in call
                 and "libx264" in call
                 and "24" in call
                 and "1000000" in call
@@ -467,7 +467,7 @@ class DisplayVideoEndpointTests(unittest.TestCase):
         self.assertEqual(first_chunk, b"ftyp")
         self.assertIn((102, "x11 ffmpeg"), terminated)
         self.assertEqual(active_state["ffmpeg_pid"], 201)
-        self.assertEqual(active_state["x11_display"], "emulator:99.0")
+        self.assertEqual(active_state["x11_display"], "emulator:99.0+100,100")
         self.assertTrue(all(kwargs.get("start_new_session") for _, kwargs in popen_kwargs))
 
     def test_display_video_falls_back_to_screenrecord_mp4_when_x11_capture_exits_before_frames(self):

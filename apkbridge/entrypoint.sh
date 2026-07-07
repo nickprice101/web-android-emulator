@@ -2,9 +2,15 @@
 set -e
 
 mkdir -p /root/.android
-printf '%s' "$ADBKEY" > /root/.android/adbkey
-chmod 600 /root/.android/adbkey
-adb pubkey /root/.android/adbkey > /root/.android/adbkey.pub
+ADBKEY_SENTINEL="$(printf '%s' "${ADBKEY:-}" | tr -d '\r\n')"
+if [ -n "${ADBKEY_SENTINEL}" ] && [ "${ADBKEY_SENTINEL}" != "PLACEHOLDER_ADB_KEY" ]; then
+  printf '%s' "$ADBKEY" > /root/.android/adbkey
+  chmod 600 /root/.android/adbkey
+  adb pubkey /root/.android/adbkey > /root/.android/adbkey.pub
+else
+  rm -f /root/.android/adbkey /root/.android/adbkey.pub
+  adb keygen /root/.android/adbkey >/dev/null 2>&1
+fi
 
 echo "Keys written. Connecting to $ADB_TARGET..."
 MAX_ATTEMPTS="${ADB_CONNECT_MAX_ATTEMPTS:-150}"

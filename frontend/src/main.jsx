@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-const EMULATOR_ASPECT = 1080 / 1920;
+const EMULATOR_ASPECT = 1080 / 2340;
 const DISPLAY_DEBUG_UPDATE_INTERVAL_MS = 250;
 const GUACAMOLE_HTTP_TARGET_FPS = 30;
 const GUACAMOLE_HTTP_BIT_RATE = 6_000_000;
@@ -47,7 +47,7 @@ function resolveStreamMaxSize(value) {
   return STREAM_QUALITY_VALUES.has(numericValue) ? numericValue : DEFAULT_GUACAMOLE_HTTP_MAX_SIZE;
 }
 
-function resolveVideoViewport(container, mediaWidth, mediaHeight) {
+function resolveVideoViewport(container, mediaWidth, mediaHeight, fitMode = "contain") {
   if (!container) {
     return null;
   }
@@ -59,10 +59,11 @@ function resolveVideoViewport(container, mediaWidth, mediaHeight) {
 
   const mediaAspect = mediaWidth > 0 && mediaHeight > 0 ? mediaWidth / mediaHeight : EMULATOR_ASPECT;
   const containerAspect = rect.width / rect.height;
+  const shouldCover = fitMode === "cover";
 
   let renderWidth = rect.width;
   let renderHeight = rect.height;
-  if (containerAspect > mediaAspect) {
+  if ((containerAspect > mediaAspect && !shouldCover) || (containerAspect <= mediaAspect && shouldCover)) {
     renderHeight = rect.height;
     renderWidth = renderHeight * mediaAspect;
   } else {
@@ -79,8 +80,8 @@ function resolveVideoViewport(container, mediaWidth, mediaHeight) {
   };
 }
 
-function resolvePointerRatios(event, container, mediaWidth, mediaHeight) {
-  const viewport = resolveVideoViewport(container, mediaWidth, mediaHeight);
+function resolvePointerRatios(event, container, mediaWidth, mediaHeight, fitMode) {
+  const viewport = resolveVideoViewport(container, mediaWidth, mediaHeight, fitMode);
   if (!viewport) {
     return null;
   }
@@ -290,6 +291,7 @@ function ApiVideoInputSurface({
   containerRef,
   mediaWidth,
   mediaHeight,
+  fitMode = "contain",
   onInput,
   onMessage,
   children,
@@ -299,25 +301,25 @@ function ApiVideoInputSurface({
   const handlePointerDown = useCallback(
     (event) => {
       event.currentTarget.focus?.();
-      const ratios = resolvePointerRatios(event, containerRef.current, mediaWidth, mediaHeight);
+      const ratios = resolvePointerRatios(event, containerRef.current, mediaWidth, mediaHeight, fitMode);
       if (!ratios) return;
       gestureRef.current = { ...ratios, pointerId: event.pointerId, startedAt: Date.now(), moved: false };
       event.currentTarget.setPointerCapture?.(event.pointerId);
     },
-    [containerRef, mediaHeight, mediaWidth]
+    [containerRef, fitMode, mediaHeight, mediaWidth]
   );
 
   const handlePointerMove = useCallback(
     (event) => {
       const gesture = gestureRef.current;
       if (!gesture || gesture.pointerId !== event.pointerId) return;
-      const ratios = resolvePointerRatios(event, containerRef.current, mediaWidth, mediaHeight);
+      const ratios = resolvePointerRatios(event, containerRef.current, mediaWidth, mediaHeight, fitMode);
       if (!ratios) return;
       if (Math.abs(ratios.xRatio - gesture.xRatio) >= 0.015 || Math.abs(ratios.yRatio - gesture.yRatio) >= 0.015) {
         gesture.moved = true;
       }
     },
-    [containerRef, mediaHeight, mediaWidth]
+    [containerRef, fitMode, mediaHeight, mediaWidth]
   );
 
   const clearGesture = useCallback((event) => {
@@ -331,7 +333,7 @@ function ApiVideoInputSurface({
       gestureRef.current = null;
       event.currentTarget.releasePointerCapture?.(event.pointerId);
       if (!gesture) return;
-      const end = resolvePointerRatios(event, containerRef.current, mediaWidth, mediaHeight);
+      const end = resolvePointerRatios(event, containerRef.current, mediaWidth, mediaHeight, fitMode);
       if (!end) return;
       try {
         if (!gesture.moved && Math.abs(end.xRatio - gesture.xRatio) < 0.015 && Math.abs(end.yRatio - gesture.yRatio) < 0.015) {
@@ -352,7 +354,7 @@ function ApiVideoInputSurface({
         onMessage?.(`Input failed: ${error.message}`);
       }
     },
-    [containerRef, mediaHeight, mediaWidth, onInput, onMessage]
+    [containerRef, fitMode, mediaHeight, mediaWidth, onInput, onMessage]
   );
 
   const handleKeyDown = useCallback(
@@ -373,7 +375,7 @@ function ApiVideoInputSurface({
   return (
     <div
       ref={containerRef}
-      style={{ flex: 1, minHeight: 0, position: "relative", background: "#000" }}
+      style={{ flex: 1, minHeight: 0, position: "relative", background: "#000", overflow: "hidden" }}
       tabIndex={0}
       role="application"
       aria-label="Android emulator display"
@@ -680,12 +682,13 @@ function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onM
   return (
     <div
       aria-description={inlineDebugSummary}
-      style={{ width, height, borderRadius: 8, background: "#05070b", color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid #202634" }}
+      style={{ width, height, color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column" }}
     >
       <ApiVideoInputSurface
         containerRef={containerRef}
         mediaWidth={videoRef.current?.videoWidth || width}
         mediaHeight={videoRef.current?.videoHeight || height}
+        fitMode="cover"
         onInput={onInput}
         onMessage={onMessage}
       >
@@ -694,7 +697,7 @@ function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onM
           autoPlay
           playsInline
           muted
-          style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", background: "#000" }}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", background: "#000" }}
         />
         {!hasVideo && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
@@ -731,15 +734,12 @@ function PngPreviewPane({ width, height, deviceInfo, onStateChange, onMessage, o
   }, []);
 
   return (
-    <div style={{ width, height, borderRadius: 8, background: "#05070b", color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column", border: "1px solid #202634" }}>
-      <div style={{ padding: "10px 12px", borderBottom: "1px solid #202634", display: "flex", justifyContent: "space-between", gap: 12, fontSize: 12 }}>
-        <span>PNG preview</span>
-        <span>refresh: {Math.round(1000 / PNG_REFRESH_MS)}fps</span>
-      </div>
+    <div style={{ width, height, color: "#d7dfed", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <ApiVideoInputSurface
         containerRef={containerRef}
         mediaWidth={screen?.width || width}
         mediaHeight={screen?.height || height}
+        fitMode="cover"
         onInput={onInput}
         onMessage={onMessage}
       >
@@ -756,7 +756,7 @@ function PngPreviewPane({ width, height, deviceInfo, onStateChange, onMessage, o
             onStateChange?.("error");
             onMessage?.("PNG preview failed to fetch /api/frame");
           }}
-          style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", background: "#000", userSelect: "none" }}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", background: "#000", userSelect: "none" }}
         />
         {!hasImage && (
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>

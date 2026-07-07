@@ -31,17 +31,39 @@ SCREENRECORD_TIME_LIMIT = max(10, min(180, int(os.environ.get("SCREENRECORD_TIME
 SCREENRECORD_MAX_CONSECUTIVE_FAILURES = 3
 SCREENRECORD_RETRY_DELAY_SECONDS = 0.5
 
-SCRCPY_VIDEO_BIT_RATE = max(1_000_000, int(os.environ.get("SCRCPY_VIDEO_BIT_RATE", "6000000")))
-SCRCPY_MAX_SIZE = max(320, int(os.environ.get("SCRCPY_MAX_SIZE", "720")))
-SCRCPY_MAX_FPS = max(1, int(os.environ.get("SCRCPY_MAX_FPS", "30")))
-SCRCPY_FFMPEG_FRAGMENT_US = max(50000, int(os.environ.get("SCRCPY_FFMPEG_FRAGMENT_US", "125000")))
-SCRCPY_STARTUP_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("SCRCPY_STARTUP_TIMEOUT_SECONDS", "20")))
-SCRCPY_LOG_CAPTURE_LIMIT = max(4096, int(os.environ.get("SCRCPY_LOG_CAPTURE_LIMIT", "65536")))
-SCRCPY_PORT_RANGE = os.environ.get("SCRCPY_PORT_RANGE", "27183:27283").strip() or "27183:27283"
-SCRCPY_STREAM_LOCK_WAIT_SECONDS = max(0.0, float(os.environ.get("SCRCPY_STREAM_LOCK_WAIT_SECONDS", "8")))
-SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS = max(
-    0.05, float(os.environ.get("SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS", "0.1"))
+VIDEO_BIT_RATE = max(
+    1_000_000,
+    int(os.environ.get("VIDEO_BIT_RATE", os.environ.get("SCRCPY_VIDEO_BIT_RATE", "6000000"))),
 )
+VIDEO_MAX_SIZE = max(320, int(os.environ.get("VIDEO_MAX_SIZE", os.environ.get("SCRCPY_MAX_SIZE", "720"))))
+VIDEO_MAX_FPS = max(1, int(os.environ.get("VIDEO_MAX_FPS", os.environ.get("SCRCPY_MAX_FPS", "30"))))
+VIDEO_FFMPEG_FRAGMENT_US = max(
+    50000,
+    int(os.environ.get("VIDEO_FFMPEG_FRAGMENT_US", os.environ.get("SCRCPY_FFMPEG_FRAGMENT_US", "125000"))),
+)
+VIDEO_STARTUP_TIMEOUT_SECONDS = max(
+    1.0,
+    float(os.environ.get("VIDEO_STARTUP_TIMEOUT_SECONDS", os.environ.get("SCRCPY_STARTUP_TIMEOUT_SECONDS", "20"))),
+)
+VIDEO_LOG_CAPTURE_LIMIT = max(
+    4096,
+    int(os.environ.get("VIDEO_LOG_CAPTURE_LIMIT", os.environ.get("SCRCPY_LOG_CAPTURE_LIMIT", "65536"))),
+)
+VIDEO_STREAM_LOCK_WAIT_SECONDS = max(
+    0.0,
+    float(os.environ.get("VIDEO_STREAM_LOCK_WAIT_SECONDS", os.environ.get("SCRCPY_STREAM_LOCK_WAIT_SECONDS", "8"))),
+)
+VIDEO_STREAM_LOCK_RETRY_INTERVAL_SECONDS = max(
+    0.05,
+    float(
+        os.environ.get(
+            "VIDEO_STREAM_LOCK_RETRY_INTERVAL_SECONDS",
+            os.environ.get("SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS", "0.1"),
+        )
+    ),
+)
+X11_DISPLAY = os.environ.get("X11_DISPLAY", "emulator:99.0").strip() or "emulator:99.0"
+X11_VIDEO_SIZE = os.environ.get("X11_VIDEO_SIZE", "1080x1920").strip() or "1080x1920"
 VIDEO_STARTUP_NUDGE_DELAY_SECONDS = max(0.0, float(os.environ.get("VIDEO_STARTUP_NUDGE_DELAY_SECONDS", "0.75")))
 VIDEO_STARTUP_NUDGE_INTERVAL_SECONDS = max(0.05, float(os.environ.get("VIDEO_STARTUP_NUDGE_INTERVAL_SECONDS", "0.75")))
 VIDEO_STARTUP_NUDGE_REPEATS = max(0, int(os.environ.get("VIDEO_STARTUP_NUDGE_REPEATS", "3")))
@@ -54,13 +76,22 @@ AI_NATIVE_LIB_PATTERNS = tuple(
     ).split(",")
     if pattern.strip()
 )
-SCRCPY_STREAM_LOCK_PATH = Path(
-    os.environ.get("SCRCPY_STREAM_LOCK_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-scrcpy-video.lock"))
+VIDEO_STREAM_LOCK_PATH = Path(
+    os.environ.get(
+        "VIDEO_STREAM_LOCK_PATH",
+        os.environ.get("SCRCPY_STREAM_LOCK_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-display-video.lock")),
+    )
 )
-SCRCPY_STREAM_STATE_PATH = Path(
-    os.environ.get("SCRCPY_STREAM_STATE_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-scrcpy-video.json"))
+VIDEO_STREAM_STATE_PATH = Path(
+    os.environ.get(
+        "VIDEO_STREAM_STATE_PATH",
+        os.environ.get("SCRCPY_STREAM_STATE_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-display-video.json")),
+    )
 )
-SCRCPY_SHUTDOWN_TIMEOUT_SECONDS = max(0.1, float(os.environ.get("SCRCPY_SHUTDOWN_TIMEOUT_SECONDS", "2")))
+VIDEO_SHUTDOWN_TIMEOUT_SECONDS = max(
+    0.1,
+    float(os.environ.get("VIDEO_SHUTDOWN_TIMEOUT_SECONDS", os.environ.get("SCRCPY_SHUTDOWN_TIMEOUT_SECONDS", "2"))),
+)
 KEY_MAP = {"HOME": "3", "BACK": "4", "RECENTS": "187", "POWER": "26", "MENU": "82"}
 KEY_NAME_MAP = {
     "GoHome": KEY_MAP["HOME"],
@@ -78,17 +109,17 @@ KEY_NAME_MAP = {
     "Backspace": "67",
     "Delete": "112",
 }
-SCRCPY_STREAM_THREAD_LOCK = threading.Lock()
+VIDEO_STREAM_THREAD_LOCK = threading.Lock()
 AUTO_INSTALL_ABI_MODES = {"", "auto", "none", "default"}
 AUTO_AI_INSTALL_ABI_MODES = {"ai", "auto-ai", "prefer-ai", "mlc-ai"}
 
 
-class ScrcpyStreamBusy(RuntimeError):
-    """Raised when the scrcpy stream manager cannot be acquired."""
+class VideoStreamBusy(RuntimeError):
+    """Raised when the display stream manager cannot be acquired."""
 
 
-class ScrcpyStreamSuperseded(RuntimeError):
-    """Raised when a newer client has replaced this scrcpy stream."""
+class VideoStreamSuperseded(RuntimeError):
+    """Raised when a newer client has replaced this display stream."""
 
 
 def run(cmd, timeout=90):
@@ -272,25 +303,25 @@ def install_abi_response_fields(install_plan):
     }
 
 
-def scrcpy_stream_lock_retry_delay(deadline):
+def video_stream_lock_retry_delay(deadline):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         return 0
-    return min(SCRCPY_STREAM_LOCK_RETRY_INTERVAL_SECONDS, remaining)
+    return min(VIDEO_STREAM_LOCK_RETRY_INTERVAL_SECONDS, remaining)
 
 
 @contextmanager
-def scrcpy_stream_lock(wait_seconds=0.0):
-    """Hold one live scrcpy capture across all gunicorn workers."""
+def video_stream_lock(wait_seconds=0.0):
+    """Hold one live display capture across all gunicorn workers."""
     deadline = time.monotonic() + max(0.0, wait_seconds)
 
     if fcntl is None:
         acquired = False
         while True:
-            acquired = SCRCPY_STREAM_THREAD_LOCK.acquire(blocking=False)
+            acquired = VIDEO_STREAM_THREAD_LOCK.acquire(blocking=False)
             if acquired:
                 break
-            retry_delay = scrcpy_stream_lock_retry_delay(deadline)
+            retry_delay = video_stream_lock_retry_delay(deadline)
             if retry_delay <= 0:
                 break
             time.sleep(retry_delay)
@@ -298,11 +329,11 @@ def scrcpy_stream_lock(wait_seconds=0.0):
             yield acquired
         finally:
             if acquired:
-                SCRCPY_STREAM_THREAD_LOCK.release()
+                VIDEO_STREAM_THREAD_LOCK.release()
         return
 
-    SCRCPY_STREAM_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    lock_file = SCRCPY_STREAM_LOCK_PATH.open("a+b")
+    VIDEO_STREAM_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = VIDEO_STREAM_LOCK_PATH.open("a+b")
     acquired = False
     try:
         while True:
@@ -313,7 +344,7 @@ def scrcpy_stream_lock(wait_seconds=0.0):
             except OSError as exc:
                 if exc.errno not in (errno.EACCES, errno.EAGAIN):
                     raise
-                retry_delay = scrcpy_stream_lock_retry_delay(deadline)
+                retry_delay = video_stream_lock_retry_delay(deadline)
                 if retry_delay <= 0:
                     break
                 time.sleep(retry_delay)
@@ -337,14 +368,8 @@ def process_cmd_basename(args):
     return Path(args[0]).name if args else ""
 
 
-def is_scrcpy_cmdline(args):
-    if process_cmd_basename(args) != "scrcpy":
-        return False
-    return ADB_TARGET in args or SCRCPY_PORT_RANGE in args or "--serial" not in args
-
-
-def is_ffmpeg_cmdline_for_fifo(args, fifo_path):
-    return process_cmd_basename(args) == "ffmpeg" and bool(fifo_path) and str(fifo_path) in args
+def is_ffmpeg_cmdline_for_x11(args, display):
+    return process_cmd_basename(args) == "ffmpeg" and "-f" in args and "x11grab" in args and bool(display) and display in args
 
 
 def process_is_zombie(pid):
@@ -419,7 +444,7 @@ def terminate_pid(pid, label, cmdline_matches=None, timeout_seconds=None):
     if not process_is_running(pid):
         return False
 
-    timeout_seconds = SCRCPY_SHUTDOWN_TIMEOUT_SECONDS if timeout_seconds is None else max(0.0, timeout_seconds)
+    timeout_seconds = VIDEO_SHUTDOWN_TIMEOUT_SECONDS if timeout_seconds is None else max(0.0, timeout_seconds)
     app.logger.info("terminating previous %s pid %s", label, pid)
     send_signal_to_process_or_group(pid, signal.SIGTERM)
 
@@ -455,7 +480,7 @@ def terminate_process(proc, label):
             app.logger.warning("%s process did not exit after kill", label)
 
 
-def iter_scrcpy_process_pids():
+def iter_x11_ffmpeg_process_pids():
     proc_root = Path("/proc")
     if not proc_root.exists():
         return
@@ -466,82 +491,79 @@ def iter_scrcpy_process_pids():
         pid = int(proc_dir.name)
         if pid == os.getpid():
             continue
-        if is_scrcpy_cmdline(read_process_cmdline(pid)):
+        if is_ffmpeg_cmdline_for_x11(read_process_cmdline(pid), X11_DISPLAY):
             yield pid
 
 
-def read_scrcpy_stream_state():
+def read_video_stream_state():
     try:
-        state = json.loads(SCRCPY_STREAM_STATE_PATH.read_text(encoding="utf-8"))
+        state = json.loads(VIDEO_STREAM_STATE_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except (OSError, json.JSONDecodeError) as exc:
-        app.logger.warning("could not read scrcpy stream state %s: %s", SCRCPY_STREAM_STATE_PATH, exc)
+        app.logger.warning("could not read display stream state %s: %s", VIDEO_STREAM_STATE_PATH, exc)
         return {}
 
     return state if isinstance(state, dict) else {}
 
 
-def write_scrcpy_stream_state(owner_token, scrcpy_proc, ffmpeg_proc, fifo_path):
-    SCRCPY_STREAM_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+def write_video_stream_state(owner_token, ffmpeg_proc, x11_display):
+    VIDEO_STREAM_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     state = {
         "owner": owner_token,
         "worker_pid": os.getpid(),
-        "scrcpy_pid": getattr(scrcpy_proc, "pid", None),
         "ffmpeg_pid": getattr(ffmpeg_proc, "pid", None),
-        "fifo_path": str(fifo_path),
+        "x11_display": x11_display,
+        "x11_video_size": X11_VIDEO_SIZE,
         "started_at": time.time(),
     }
-    temp_state_path = SCRCPY_STREAM_STATE_PATH.with_name(f"{SCRCPY_STREAM_STATE_PATH.name}.{owner_token}.tmp")
+    temp_state_path = VIDEO_STREAM_STATE_PATH.with_name(f"{VIDEO_STREAM_STATE_PATH.name}.{owner_token}.tmp")
     temp_state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
-    os.replace(temp_state_path, SCRCPY_STREAM_STATE_PATH)
+    os.replace(temp_state_path, VIDEO_STREAM_STATE_PATH)
 
 
-def scrcpy_stream_state_matches(owner_token):
-    return read_scrcpy_stream_state().get("owner") == owner_token
+def video_stream_state_matches(owner_token):
+    return read_video_stream_state().get("owner") == owner_token
 
 
-def clear_scrcpy_stream_state(owner_token):
-    with scrcpy_stream_lock(wait_seconds=SCRCPY_STREAM_LOCK_WAIT_SECONDS) as lock_acquired:
+def clear_video_stream_state(owner_token):
+    with video_stream_lock(wait_seconds=VIDEO_STREAM_LOCK_WAIT_SECONDS) as lock_acquired:
         if not lock_acquired:
-            app.logger.warning("could not acquire scrcpy stream manager lock to clear owner %s", owner_token)
+            app.logger.warning("could not acquire display stream manager lock to clear owner %s", owner_token)
             return
-        if read_scrcpy_stream_state().get("owner") != owner_token:
+        if read_video_stream_state().get("owner") != owner_token:
             return
         try:
-            SCRCPY_STREAM_STATE_PATH.unlink()
+            VIDEO_STREAM_STATE_PATH.unlink()
         except FileNotFoundError:
             pass
 
 
-def shutdown_existing_scrcpy_stream():
-    state = read_scrcpy_stream_state()
-    fifo_path = state.get("fifo_path")
-    recorded_pids = {pid for pid in (state.get("scrcpy_pid"), state.get("ffmpeg_pid")) if pid}
+def shutdown_existing_video_stream():
+    state = read_video_stream_state()
+    x11_display = state.get("x11_display") or X11_DISPLAY
+    recorded_pids = {pid for pid in (state.get("ffmpeg_pid"),) if pid}
 
     if state:
-        terminate_pid(state.get("scrcpy_pid"), "scrcpy", is_scrcpy_cmdline)
         terminate_pid(
             state.get("ffmpeg_pid"),
-            "scrcpy ffmpeg",
-            lambda args: is_ffmpeg_cmdline_for_fifo(args, fifo_path),
+            "x11 ffmpeg",
+            lambda args: is_ffmpeg_cmdline_for_x11(args, x11_display),
         )
         try:
-            SCRCPY_STREAM_STATE_PATH.unlink()
+            VIDEO_STREAM_STATE_PATH.unlink()
         except FileNotFoundError:
             pass
 
-    for pid in iter_scrcpy_process_pids() or []:
+    for pid in iter_x11_ffmpeg_process_pids() or []:
         if pid in recorded_pids:
             continue
-        terminate_pid(pid, "untracked scrcpy", is_scrcpy_cmdline)
+        terminate_pid(pid, "untracked x11 ffmpeg", lambda args: is_ffmpeg_cmdline_for_x11(args, X11_DISPLAY))
 
 
-def fragmented_mp4_output_args():
-    return [
+def fragmented_mp4_output_args(copy_video=True):
+    args = [
         "-an",
-        "-c:v",
-        "copy",
         "-flush_packets",
         "1",
         "-muxdelay",
@@ -551,12 +573,75 @@ def fragmented_mp4_output_args():
         "-movflags",
         "empty_moov+default_base_moof+separate_moof+omit_tfhd_offset",
         "-frag_duration",
-        str(SCRCPY_FFMPEG_FRAGMENT_US),
+        str(VIDEO_FFMPEG_FRAGMENT_US),
         "-min_frag_duration",
-        str(SCRCPY_FFMPEG_FRAGMENT_US),
+        str(VIDEO_FFMPEG_FRAGMENT_US),
         "-f",
         "mp4",
         "pipe:1",
+    ]
+    if copy_video:
+        args[0:0] = ["-c:v", "copy"]
+    return args
+
+
+def x11_scale_filter(max_size_value):
+    return (
+        f"scale=if(gt(iw\\,ih)\\,-2\\,min(iw\\,{max_size_value})):"
+        f"if(gt(iw\\,ih)\\,min(ih\\,{max_size_value})\\,-2),format=yuv420p"
+    )
+
+
+def x11_ffmpeg_command(bit_rate_value, max_size_value, max_fps_value):
+    gop_size = max(1, max_fps_value * 2)
+    return [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-fflags",
+        "+genpts",
+        "-flags",
+        "low_delay",
+        "-f",
+        "x11grab",
+        "-draw_mouse",
+        "0",
+        "-framerate",
+        str(max_fps_value),
+        "-video_size",
+        X11_VIDEO_SIZE,
+        "-i",
+        X11_DISPLAY,
+        "-vf",
+        x11_scale_filter(max_size_value),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-tune",
+        "zerolatency",
+        "-profile:v",
+        "baseline",
+        "-level",
+        "4.2",
+        "-pix_fmt",
+        "yuv420p",
+        "-b:v",
+        str(bit_rate_value),
+        "-maxrate",
+        str(bit_rate_value),
+        "-bufsize",
+        str(bit_rate_value * 2),
+        "-g",
+        str(gop_size),
+        "-keyint_min",
+        str(max_fps_value),
+        "-sc_threshold",
+        "0",
+        "-r",
+        str(max_fps_value),
+        *fragmented_mp4_output_args(copy_video=False),
     ]
 
 
@@ -934,18 +1019,18 @@ def input_key():
         return jsonify({"error": str(e)}), 500
 
 
+@app.get("/display-video")
 @app.get("/scrcpy-video")
-def scrcpy_video():
-    """Stream scrcpy-captured emulator video as fragmented MP4 over plain HTTP.
+def display_video():
+    """Stream the emulator's virtual X display as fragmented MP4 over plain HTTP.
 
-    scrcpy records a low-latency Matroska stream into a FIFO while ffmpeg remuxes
-    it into fragmented MP4 for browser MediaSource playback. This mirrors the
-    Guacamole deployment shape: the server stays close to the emulator, while the
-    browser only needs an ordinary proxied HTTPS response plus HTTP input calls.
+    The emulator window runs inside Xvfb in the emulator container. The bridge
+    records that display with FFmpeg x11grab, encodes browser-compatible H.264,
+    and keeps the browser on the same ordinary HTTP/MSE contract as before.
     """
-    bit_rate = request.args.get("bit_rate", str(SCRCPY_VIDEO_BIT_RATE)).strip()
-    max_size = request.args.get("max_size", str(SCRCPY_MAX_SIZE)).strip()
-    max_fps = request.args.get("max_fps", str(SCRCPY_MAX_FPS)).strip()
+    bit_rate = request.args.get("bit_rate", str(VIDEO_BIT_RATE)).strip()
+    max_size = request.args.get("max_size", str(VIDEO_MAX_SIZE)).strip()
+    max_fps = request.args.get("max_fps", str(VIDEO_MAX_FPS)).strip()
 
     try:
         bit_rate_value = max(1_000_000, int(bit_rate))
@@ -959,9 +1044,7 @@ def scrcpy_video():
         message, status_code = prerequisite_error
         return jsonify({"ok": False, "error": message}), status_code
 
-    def generate_scrcpy_mp4():
-        fifo_path = Path(tempfile.gettempdir()) / f"scrcpy-video-{uuid.uuid4().hex}.mkv"
-        scrcpy_proc = None
+    def generate_x11_mp4():
         ffmpeg_proc = None
         stream_queue = queue.Queue()
         stderr_chunks = []
@@ -972,7 +1055,7 @@ def scrcpy_video():
             if not chunk:
                 return
             captured = sum(len(item) for item in stderr_chunks)
-            remaining = SCRCPY_LOG_CAPTURE_LIMIT - captured
+            remaining = VIDEO_LOG_CAPTURE_LIMIT - captured
             if remaining > 0:
                 stderr_chunks.append(chunk[:remaining])
 
@@ -982,7 +1065,7 @@ def scrcpy_video():
         def fail_stream(reason):
             stderr_text = collected_stderr()
             message = f"{reason}: {stderr_text}" if stderr_text else reason
-            app.logger.error("scrcpy video stream failed: %s", message)
+            app.logger.error("display video stream failed: %s", message)
             raise RuntimeError(message)
 
         def drain_pending_stderr():
@@ -1005,61 +1088,17 @@ def scrcpy_video():
                 stream_queue.put((f"{stream_name}:error", str(exc).encode("utf-8", errors="replace")))
 
         def fail_if_superseded():
-            if not scrcpy_stream_state_matches(owner_token):
-                raise ScrcpyStreamSuperseded("scrcpy video stream was replaced by a newer client")
-
-        if not shutil.which("scrcpy"):
-            fail_stream("scrcpy binary is not available")
+            if not video_stream_state_matches(owner_token):
+                raise VideoStreamSuperseded("display video stream was replaced by a newer client")
 
         try:
-            os.mkfifo(fifo_path, 0o600)
-            scrcpy_cmd = [
-                "scrcpy",
-                "--serial",
-                ADB_TARGET,
-                "--no-window",
-                "--no-control",
-                "--no-audio",
-                "--port",
-                SCRCPY_PORT_RANGE,
-                "--video-codec",
-                "h264",
-                "--video-bit-rate",
-                str(bit_rate_value),
-                "--max-size",
-                str(max_size_value),
-                "--max-fps",
-                str(max_fps_value),
-                "--record",
-                str(fifo_path),
-                "--record-format",
-                "mkv",
-            ]
-            ffmpeg_cmd = [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "warning",
-                "-fflags",
-                "+genpts",
-                "-flags",
-                "low_delay",
-                "-f",
-                "matroska",
-                "-probesize",
-                "65536",
-                "-analyzeduration",
-                "1000000",
-                "-i",
-                str(fifo_path),
-                *fragmented_mp4_output_args(),
-            ]
+            ffmpeg_cmd = x11_ffmpeg_command(bit_rate_value, max_size_value, max_fps_value)
 
-            with scrcpy_stream_lock(wait_seconds=SCRCPY_STREAM_LOCK_WAIT_SECONDS) as lock_acquired:
+            with video_stream_lock(wait_seconds=VIDEO_STREAM_LOCK_WAIT_SECONDS) as lock_acquired:
                 if not lock_acquired:
-                    raise ScrcpyStreamBusy("timed out waiting for the scrcpy stream manager lock")
+                    raise VideoStreamBusy("timed out waiting for the display stream manager lock")
 
-                shutdown_existing_scrcpy_stream()
+                shutdown_existing_video_stream()
                 ffmpeg_proc = subprocess.Popen(
                     ffmpeg_cmd,
                     stdin=subprocess.DEVNULL,
@@ -1068,25 +1107,16 @@ def scrcpy_video():
                     bufsize=0,
                     start_new_session=True,
                 )
-                scrcpy_proc = subprocess.Popen(
-                    scrcpy_cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    stdin=subprocess.DEVNULL,
-                    bufsize=0,
-                    start_new_session=True,
-                )
-                write_scrcpy_stream_state(owner_token, scrcpy_proc, ffmpeg_proc, fifo_path)
+                write_video_stream_state(owner_token, ffmpeg_proc, X11_DISPLAY)
                 state_registered = True
 
             schedule_video_startup_nudge()
 
             threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stdout, "ffmpeg-stdout"), daemon=True).start()
             threading.Thread(target=pump_pipe, args=(ffmpeg_proc.stderr, "ffmpeg-stderr"), daemon=True).start()
-            threading.Thread(target=pump_pipe, args=(scrcpy_proc.stderr, "scrcpy-stderr"), daemon=True).start()
 
             delivered = False
-            startup_deadline = time.monotonic() + SCRCPY_STARTUP_TIMEOUT_SECONDS
+            startup_deadline = time.monotonic() + VIDEO_STARTUP_TIMEOUT_SECONDS
             while True:
                 try:
                     stream_name, chunk = stream_queue.get(timeout=0.25)
@@ -1094,22 +1124,15 @@ def scrcpy_video():
                     fail_if_superseded()
                     if ffmpeg_proc.poll() is not None:
                         break
-                    if not delivered and scrcpy_proc.poll() is not None:
-                        drain_pending_stderr()
-                        fail_if_superseded()
-                        fail_stream("scrcpy exited before producing video")
                     if not delivered and time.monotonic() >= startup_deadline:
                         drain_pending_stderr()
                         fail_if_superseded()
-                        fail_stream(f"timed out waiting {SCRCPY_STARTUP_TIMEOUT_SECONDS:g}s for scrcpy video")
+                        fail_stream(f"timed out waiting {VIDEO_STARTUP_TIMEOUT_SECONDS:g}s for X display video")
                     continue
 
                 if stream_name == "ffmpeg-stdout":
                     if not chunk:
                         fail_if_superseded()
-                        if not delivered and scrcpy_proc.poll() is not None:
-                            drain_pending_stderr()
-                            fail_stream("scrcpy exited before producing video")
                         if ffmpeg_proc.poll() is not None:
                             break
                         continue
@@ -1123,26 +1146,21 @@ def scrcpy_video():
 
             if not delivered:
                 fail_if_superseded()
-                fail_stream("scrcpy video stream ended before producing video")
+                fail_stream("display video stream ended before producing video")
 
             stderr_text = collected_stderr()
             if stderr_text:
                 app.logger.warning(
-                    "scrcpy video stream ended: %s",
+                    "display video stream ended: %s",
                     stderr_text,
                 )
         finally:
-            terminate_process(scrcpy_proc, "scrcpy")
-            terminate_process(ffmpeg_proc, "scrcpy ffmpeg")
+            terminate_process(ffmpeg_proc, "x11 ffmpeg")
             if state_registered:
-                clear_scrcpy_stream_state(owner_token)
-            try:
-                fifo_path.unlink()
-            except FileNotFoundError:
-                pass
+                clear_video_stream_state(owner_token)
 
     def generate_screenrecord_mp4(fallback_reason):
-        app.logger.warning("Using adb screenrecord MP4 fallback for /scrcpy-video: %s", fallback_reason)
+        app.logger.warning("Using adb screenrecord MP4 fallback for /display-video: %s", fallback_reason)
         consecutive_failures = 0
 
         while consecutive_failures < SCREENRECORD_MAX_CONSECUTIVE_FAILURES:
@@ -1155,7 +1173,7 @@ def scrcpy_video():
                 if not chunk:
                     return
                 captured = sum(len(item) for item in stderr_chunks)
-                remaining = SCRCPY_LOG_CAPTURE_LIMIT - captured
+                remaining = VIDEO_LOG_CAPTURE_LIMIT - captured
                 if remaining > 0:
                     stderr_chunks.append(chunk[:remaining])
 
@@ -1226,7 +1244,7 @@ def scrcpy_video():
                         threading.Thread(target=pump_pipe, args=(fileobj, stream_name), daemon=True).start()
 
                 delivered = False
-                startup_deadline = time.monotonic() + SCRCPY_STARTUP_TIMEOUT_SECONDS
+                startup_deadline = time.monotonic() + VIDEO_STARTUP_TIMEOUT_SECONDS
                 while open_streams > 0:
                     try:
                         stream_name, chunk = stream_queue.get(timeout=0.25)
@@ -1276,15 +1294,15 @@ def scrcpy_video():
                 if ffmpeg_proc and ffmpeg_proc.stderr:
                     ffmpeg_proc.stderr.close()
 
-        raise RuntimeError(f"scrcpy failed and adb screenrecord fallback produced no video: {fallback_reason}")
+        raise RuntimeError(f"X display capture failed and adb screenrecord fallback produced no video: {fallback_reason}")
 
     def generate_with_fallback():
         try:
-            yield from generate_scrcpy_mp4()
-        except ScrcpyStreamSuperseded:
-            app.logger.info("scrcpy video stream ended because a newer request replaced it")
+            yield from generate_x11_mp4()
+        except VideoStreamSuperseded:
+            app.logger.info("display video stream ended because a newer request replaced it")
             return
-        except ScrcpyStreamBusy:
+        except VideoStreamBusy:
             raise
         except RuntimeError as exc:
             yield from generate_screenrecord_mp4(str(exc))
@@ -1293,15 +1311,15 @@ def scrcpy_video():
     try:
         first_chunk = next(stream)
     except StopIteration:
-        return jsonify({"ok": False, "error": "scrcpy video stream ended before producing video"}), 503
-    except ScrcpyStreamBusy as e:
+        return jsonify({"ok": False, "error": "display video stream ended before producing video"}), 503
+    except VideoStreamBusy as e:
         return jsonify({"ok": False, "error": str(e)}), 503
-    except ScrcpyStreamSuperseded as e:
+    except VideoStreamSuperseded as e:
         return jsonify({"ok": False, "error": str(e)}), 409
     except RuntimeError as e:
         return jsonify({"ok": False, "error": str(e)}), 503
     except Exception as e:
-        app.logger.exception("scrcpy video stream failed before headers")
+        app.logger.exception("display video stream failed before headers")
         return jsonify({"ok": False, "error": str(e)}), 500
 
     def generate_with_first_chunk():

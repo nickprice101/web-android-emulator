@@ -2,22 +2,24 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client";
 
 const EMULATOR_ASPECT = 1080 / 1920;
-const SCRCPY_DEBUG_UPDATE_INTERVAL_MS = 250;
+const DISPLAY_DEBUG_UPDATE_INTERVAL_MS = 250;
 const GUACAMOLE_HTTP_TARGET_FPS = 30;
 const GUACAMOLE_HTTP_BIT_RATE = 6_000_000;
 const DEFAULT_GUACAMOLE_HTTP_MAX_SIZE = 720;
+const DISPLAY_HTTP_MODE = "display-http";
 const PNG_REFRESH_MS = 1000;
 const STREAM_QUALITY_OPTIONS = [
   { value: 720, label: "720p" },
   { value: 1080, label: "1080p" },
 ];
 const STREAM_MODE_OPTIONS = [
-  { value: "scrcpy-http", label: "Guacamole HTTP (30fps)" },
+  { value: DISPLAY_HTTP_MODE, label: "Guacamole HTTP (30fps)" },
   { value: "png", label: "PNG preview" },
 ];
 const STREAM_MODE_VALUES = new Set(STREAM_MODE_OPTIONS.map((option) => option.value));
 const STREAM_QUALITY_VALUES = new Set(STREAM_QUALITY_OPTIONS.map((option) => option.value));
-const SCRCPY_MP4_MIME_CANDIDATES = [
+const DISPLAY_MP4_MIME_CANDIDATES = [
+  'video/mp4; codecs="avc1.42C02A"',
   'video/mp4; codecs="avc1.42C029"',
   'video/mp4; codecs="avc1.42E01E"',
   'video/mp4; codecs="avc1.4D4029"',
@@ -175,11 +177,11 @@ async function fetchWithRetry(url, options = {}, retry = {}) {
   throw new Error(`${url} failed after ${maxAttempts} attempts`);
 }
 
-function selectScrcpyMimeType() {
+function selectDisplayMimeType() {
   if (!window.MediaSource || typeof window.MediaSource.isTypeSupported !== "function") {
-    return SCRCPY_MP4_MIME_CANDIDATES[0];
+    return DISPLAY_MP4_MIME_CANDIDATES[0];
   }
-  return SCRCPY_MP4_MIME_CANDIDATES.find((candidate) => window.MediaSource.isTypeSupported(candidate)) || "";
+  return DISPLAY_MP4_MIME_CANDIDATES.find((candidate) => window.MediaSource.isTypeSupported(candidate)) || "";
 }
 
 function appendMediaBuffer(sourceBuffer, chunk) {
@@ -228,7 +230,7 @@ function readMp4BoxType(chunk) {
   return String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]).replace(/[^\x20-\x7e]/g, "?");
 }
 
-function buildScrcpyDebugSnapshot(video, mediaSource, sourceBuffer) {
+function buildDisplayDebugSnapshot(video, mediaSource, sourceBuffer) {
   const buffered = [];
   if (video?.buffered) {
     for (let index = 0; index < video.buffered.length; index += 1) {
@@ -247,7 +249,7 @@ function buildScrcpyDebugSnapshot(video, mediaSource, sourceBuffer) {
   };
 }
 
-function buildInitialScrcpyDebug(maxSize = DEFAULT_GUACAMOLE_HTTP_MAX_SIZE) {
+function buildInitialDisplayDebug(maxSize = DEFAULT_GUACAMOLE_HTTP_MAX_SIZE) {
   return {
     bytesReceived: 0,
     chunksReceived: 0,
@@ -387,15 +389,15 @@ function ApiVideoInputSurface({
   );
 }
 
-function ScrcpyHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMessage, onDiagnosticsChange, onInput }) {
+function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMessage, onDiagnosticsChange, onInput }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const [status, setStatus] = useState("connecting");
   const [detail, setDetail] = useState(
-    `Opening HTTP tunnel from scrcpy at ${GUACAMOLE_HTTP_TARGET_FPS}fps / ${streamMaxSize}p...`
+    `Opening HTTP tunnel from the emulator X display at ${GUACAMOLE_HTTP_TARGET_FPS}fps / ${streamMaxSize}p...`
   );
   const [hasVideo, setHasVideo] = useState(false);
-  const [debug, setDebug] = useState(() => buildInitialScrcpyDebug(streamMaxSize));
+  const [debug, setDebug] = useState(() => buildInitialDisplayDebug(streamMaxSize));
 
   useEffect(() => {
     onDiagnosticsChange?.(debug);
@@ -423,8 +425,8 @@ function ScrcpyHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMe
 
     setStatus("connecting");
     setHasVideo(false);
-    setDetail(`Opening HTTP tunnel from scrcpy at ${GUACAMOLE_HTTP_TARGET_FPS}fps / ${streamMaxSize}p...`);
-    setDebug(buildInitialScrcpyDebug(streamMaxSize));
+    setDetail(`Opening HTTP tunnel from the emulator X display at ${GUACAMOLE_HTTP_TARGET_FPS}fps / ${streamMaxSize}p...`);
+    setDebug(buildInitialDisplayDebug(streamMaxSize));
 
     const flushDebug = () => {
       if (debugFlushTimer) {
@@ -438,7 +440,7 @@ function ScrcpyHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMe
       pendingDebugPatch = null;
       setDebug((current) => ({
         ...current,
-        ...buildScrcpyDebugSnapshot(video, mediaSource, sourceBuffer),
+        ...buildDisplayDebugSnapshot(video, mediaSource, sourceBuffer),
         ...patch,
       }));
     };
@@ -454,7 +456,7 @@ function ScrcpyHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMe
         return;
       }
       if (!debugFlushTimer) {
-        debugFlushTimer = setTimeout(flushDebug, SCRCPY_DEBUG_UPDATE_INTERVAL_MS);
+        debugFlushTimer = setTimeout(flushDebug, DISPLAY_DEBUG_UPDATE_INTERVAL_MS);
       }
     };
 
@@ -545,7 +547,7 @@ function ScrcpyHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMe
         });
         if (cancelled) return;
 
-        const mimeType = selectScrcpyMimeType();
+        const mimeType = selectDisplayMimeType();
         if (!mimeType) {
           throw new Error("No supported MP4/H.264 MediaSource type was found");
         }
@@ -560,7 +562,7 @@ function ScrcpyHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMe
           max_size: String(streamMaxSize),
         });
         const response = await fetchWithRetry(
-          `/api/scrcpy-video?${params.toString()}`,
+          `/api/display-video?${params.toString()}`,
           {
             signal: abortController.signal,
             headers: { Accept: "video/mp4" },
@@ -580,14 +582,14 @@ function ScrcpyHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMe
           { immediate: true }
         );
         if (!response.ok) {
-          throw new Error(await readHttpError(response, "/api/scrcpy-video"));
+          throw new Error(await readHttpError(response, "/api/display-video"));
         }
         if (!response.body) {
-          throw new Error("scrcpy video stream returned no readable body");
+          throw new Error("display video stream returned no readable body");
         }
 
         setStatus("streaming");
-        setDetail(`Receiving fragmented MP4 over HTTP from scrcpy at ${GUACAMOLE_HTTP_TARGET_FPS}fps / ${streamMaxSize}p.`);
+        setDetail(`Receiving fragmented MP4 over HTTP from FFmpeg X display capture at ${GUACAMOLE_HTTP_TARGET_FPS}fps / ${streamMaxSize}p.`);
         onStateChange?.("connected");
         onMessage?.("Connected to Guacamole-style HTTP video tunnel");
         reader = response.body.getReader();
@@ -636,7 +638,7 @@ function ScrcpyHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMe
           setDetail(error.message);
           updateDebug({ lastEvent: "error", lastError: error.message }, { immediate: true });
           onStateChange?.("error");
-          onMessage?.(`Scrcpy HTTP video failed: ${error.message}`);
+          onMessage?.(`Display HTTP video failed: ${error.message}`);
         }
       }
     }
@@ -700,7 +702,7 @@ function ScrcpyHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMe
           style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", background: "#000" }}
         />
         <div
-          data-testid="scrcpy-fps-overlay"
+          data-testid="display-fps-overlay"
           style={{
             position: "absolute",
             top: 10,
@@ -810,9 +812,9 @@ function App() {
   const [emuState, setEmuState] = useState("connecting");
   const [bridgeState, setBridgeState] = useState("checking");
   const [deviceInfo, setDeviceInfo] = useState(null);
-  const [streamMode, setStreamMode] = useState("scrcpy-http");
+  const [streamMode, setStreamMode] = useState(DISPLAY_HTTP_MODE);
   const [streamMaxSize, setStreamMaxSize] = useState(DEFAULT_GUACAMOLE_HTTP_MAX_SIZE);
-  const [scrcpyDiagnostics, setScrcpyDiagnostics] = useState(null);
+  const [displayDiagnostics, setDisplayDiagnostics] = useState(null);
   const [logs, setLogs] = useState([]);
   const [logFilter, setLogFilter] = useState("");
   const [errorsOnly, setErrorsOnly] = useState(false);
@@ -850,13 +852,13 @@ function App() {
   useEffect(() => {
     window.__EMU_E2E__ = {
       activeTransport: streamMode,
-      scrcpyDiagnostics,
+      displayDiagnostics,
       emulatorState: emuState,
       bridgeApiState: bridgeState,
       deviceInfo,
       streamMaxSize,
     };
-  }, [bridgeState, deviceInfo, emuState, scrcpyDiagnostics, streamMaxSize, streamMode]);
+  }, [bridgeState, deviceInfo, emuState, displayDiagnostics, streamMaxSize, streamMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1051,16 +1053,16 @@ function App() {
   }
 
   function handleStreamModeChange(nextMode) {
-    const resolvedMode = STREAM_MODE_VALUES.has(nextMode) ? nextMode : "scrcpy-http";
-    setScrcpyDiagnostics(null);
+    const resolvedMode = STREAM_MODE_VALUES.has(nextMode) ? nextMode : DISPLAY_HTTP_MODE;
+    setDisplayDiagnostics(null);
     setEmuState("connecting");
-    setMessage(resolvedMode === "scrcpy-http" ? "Connecting to Guacamole-style HTTP video tunnel..." : "Switching to PNG preview mode...");
+    setMessage(resolvedMode === DISPLAY_HTTP_MODE ? "Connecting to Guacamole-style HTTP video tunnel..." : "Switching to PNG preview mode...");
     setStreamMode(resolvedMode);
   }
 
   function handleStreamQualityChange(nextMaxSize) {
     const resolvedMaxSize = resolveStreamMaxSize(nextMaxSize);
-    setScrcpyDiagnostics(null);
+    setDisplayDiagnostics(null);
     setEmuState("connecting");
     setMessage(`Switching HTTP video to ${resolvedMaxSize}p at ${GUACAMOLE_HTTP_TARGET_FPS}fps...`);
     setStreamMaxSize(resolvedMaxSize);
@@ -1109,7 +1111,7 @@ function App() {
           <select
             value={streamMaxSize}
             onChange={(event) => handleStreamQualityChange(event.target.value)}
-            disabled={streamMode !== "scrcpy-http"}
+            disabled={streamMode !== DISPLAY_HTTP_MODE}
           >
             {STREAM_QUALITY_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -1124,14 +1126,14 @@ function App() {
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
         <div ref={displaySurfaceRef} style={{ width: `${displayPercent}%`, display: "flex", alignItems: "center", justifyContent: "center", padding: 8, overflow: "hidden", userSelect: "none" }}>
-          {streamMode === "scrcpy-http" ? (
-            <ScrcpyHttpVideoPane
+          {streamMode === DISPLAY_HTTP_MODE ? (
+            <DisplayHttpVideoPane
               width={displaySize.width}
               height={displaySize.height}
               streamMaxSize={streamMaxSize}
               onStateChange={setEmuState}
               onMessage={setMessage}
-              onDiagnosticsChange={setScrcpyDiagnostics}
+              onDiagnosticsChange={setDisplayDiagnostics}
               onInput={sendInput}
             />
           ) : (
@@ -1184,35 +1186,35 @@ function App() {
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Display diagnostics</div>
             <div style={{ fontSize: 12, color: "#a8b3c7", lineHeight: 1.6 }}>
               <div>Emulator screen: {deviceInfo?.screen?.width && deviceInfo?.screen?.height ? `${deviceInfo.screen.width}x${deviceInfo.screen.height}` : "unavailable"}</div>
-              <div>Video frame: {streamMode === "scrcpy-http" ? `Guacamole-style scrcpy MP4 over ordinary HTTP fetch (${GUACAMOLE_HTTP_TARGET_FPS}fps target, ${streamMaxSize}p)` : "PNG preview over the emulator HTTP endpoint"}</div>
+              <div>Video frame: {streamMode === DISPLAY_HTTP_MODE ? `FFmpeg X display MP4 over ordinary HTTP fetch (${GUACAMOLE_HTTP_TARGET_FPS}fps target, ${streamMaxSize}p)` : "PNG preview over the emulator HTTP endpoint"}</div>
               <div>Input path: keyboard, mouse, and touch events are posted through /api/input-event</div>
             </div>
           </div>
 
-          {streamMode === "scrcpy-http" && (
-            <div data-testid="scrcpy-http-diagnostics" style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
-              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Scrcpy HTTP video diagnostics</div>
+          {streamMode === DISPLAY_HTTP_MODE && (
+            <div data-testid="display-http-diagnostics" style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
+              <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>FFmpeg X display diagnostics</div>
               <pre
-                aria-label="scrcpy HTTP video debug overlay"
+                aria-label="display HTTP video debug overlay"
                 style={{ margin: 0, padding: 10, background: "#0f1218", border: "1px solid #2b313d", borderRadius: 8, whiteSpace: "pre-wrap", userSelect: "text", fontFamily: "Consolas, monospace", fontSize: 11, lineHeight: 1.5, maxHeight: 260, overflow: "auto" }}
               >
                 {[
-                  `http: ${scrcpyDiagnostics?.response || "pending"}`,
-                  `content-type: ${scrcpyDiagnostics?.contentType || "pending"}`,
-                  `mime: ${scrcpyDiagnostics?.mimeType || "pending"}`,
-                  `stream: ${formatBytes(scrcpyDiagnostics?.bytesReceived || 0)} / ${scrcpyDiagnostics?.chunksReceived || 0} chunks`,
-                  `target: ${scrcpyDiagnostics?.targetFps || GUACAMOLE_HTTP_TARGET_FPS}fps / ${scrcpyDiagnostics?.maxSize || streamMaxSize}p`,
-                  `current fps: ${scrcpyDiagnostics?.measuredFps || "0.0"}`,
-                  `first box: ${scrcpyDiagnostics?.firstBox || "waiting"}`,
-                  `last chunk: ${formatBytes(scrcpyDiagnostics?.lastChunkBytes || 0)}`,
-                  `mse: ${scrcpyDiagnostics?.mediaSource || "unknown"} / appended ${scrcpyDiagnostics?.chunksAppended || 0}`,
-                  `source buffer updating: ${String(Boolean(scrcpyDiagnostics?.sourceBufferUpdating))}`,
-                  `video: ready ${scrcpyDiagnostics?.videoReadyState ?? 0}, net ${scrcpyDiagnostics?.videoNetworkState ?? 0}, ${scrcpyDiagnostics?.videoSize || "0x0"}`,
-                  `frames: total ${scrcpyDiagnostics?.totalVideoFrames ?? 0}, dropped ${scrcpyDiagnostics?.droppedVideoFrames ?? 0}`,
-                  `time: ${scrcpyDiagnostics?.currentTime || "0.00"}s`,
-                  `buffered: ${scrcpyDiagnostics?.buffered || "none"}`,
-                  `last event: ${scrcpyDiagnostics?.lastEvent || "initializing"}`,
-                  `error: ${scrcpyDiagnostics?.lastError || "none"}`,
+                  `http: ${displayDiagnostics?.response || "pending"}`,
+                  `content-type: ${displayDiagnostics?.contentType || "pending"}`,
+                  `mime: ${displayDiagnostics?.mimeType || "pending"}`,
+                  `stream: ${formatBytes(displayDiagnostics?.bytesReceived || 0)} / ${displayDiagnostics?.chunksReceived || 0} chunks`,
+                  `target: ${displayDiagnostics?.targetFps || GUACAMOLE_HTTP_TARGET_FPS}fps / ${displayDiagnostics?.maxSize || streamMaxSize}p`,
+                  `current fps: ${displayDiagnostics?.measuredFps || "0.0"}`,
+                  `first box: ${displayDiagnostics?.firstBox || "waiting"}`,
+                  `last chunk: ${formatBytes(displayDiagnostics?.lastChunkBytes || 0)}`,
+                  `mse: ${displayDiagnostics?.mediaSource || "unknown"} / appended ${displayDiagnostics?.chunksAppended || 0}`,
+                  `source buffer updating: ${String(Boolean(displayDiagnostics?.sourceBufferUpdating))}`,
+                  `video: ready ${displayDiagnostics?.videoReadyState ?? 0}, net ${displayDiagnostics?.videoNetworkState ?? 0}, ${displayDiagnostics?.videoSize || "0x0"}`,
+                  `frames: total ${displayDiagnostics?.totalVideoFrames ?? 0}, dropped ${displayDiagnostics?.droppedVideoFrames ?? 0}`,
+                  `time: ${displayDiagnostics?.currentTime || "0.00"}s`,
+                  `buffered: ${displayDiagnostics?.buffered || "none"}`,
+                  `last event: ${displayDiagnostics?.lastEvent || "initializing"}`,
+                  `error: ${displayDiagnostics?.lastError || "none"}`,
                 ].join("\n")}
               </pre>
             </div>

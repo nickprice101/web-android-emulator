@@ -135,9 +135,78 @@ append_param_value_if_flag_missing() {
   fi
 }
 
-# Keep emulator rendering stable for headless HTTP video capture in container
-# deployments. These flags are additive and can still be overridden by
-# supplying explicit values in EMULATOR_PARAMS.
+virtual_display_enabled() {
+  case "${EMULATOR_VIRTUAL_DISPLAY:-1}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    0|false|FALSE|no|NO|off|OFF|'') return 1 ;;
+    *)
+      log "Unsupported EMULATOR_VIRTUAL_DISPLAY='${EMULATOR_VIRTUAL_DISPLAY}'; expected true/false."
+      exit 1
+      ;;
+  esac
+}
+
+display_number_from_name() {
+  printf '%s' "$1" | sed 's/^.*://; s/\..*$//'
+}
+
+start_virtual_x_display() {
+  EMULATOR_X_DISPLAY="${EMULATOR_X_DISPLAY:-:99}"
+  EMULATOR_X_SCREEN="${EMULATOR_X_SCREEN:-0}"
+  EMULATOR_X_SCREEN_SIZE="${EMULATOR_X_SCREEN_SIZE:-1080x1920x24}"
+  _x_display_number="$(display_number_from_name "${EMULATOR_X_DISPLAY}")"
+  case "${_x_display_number}" in
+    ''|*[!0-9]*)
+      log "Unsupported EMULATOR_X_DISPLAY='${EMULATOR_X_DISPLAY}'; expected a display such as :99."
+      exit 1
+      ;;
+  esac
+  _x_socket="/tmp/.X11-unix/X${_x_display_number}"
+  _x_log="${EMULATOR_X_LOG:-/tmp/xvfb-emulator.log}"
+
+  if ! command -v Xvfb >/dev/null 2>&1; then
+    log "ERROR: Xvfb is unavailable; cannot start virtual emulator display."
+    exit 1
+  fi
+
+  mkdir -p /tmp/.X11-unix
+  chmod 1777 /tmp/.X11-unix 2>/dev/null || true
+  rm -f "${_x_socket}" 2>/dev/null || true
+  : > "${_x_log}"
+  (
+    tail -n +1 -F "${_x_log}" 2>/dev/null | sed 's/^/[xvfb] /' >&2
+  ) &
+
+  Xvfb "${EMULATOR_X_DISPLAY}" \
+    -screen "${EMULATOR_X_SCREEN}" "${EMULATOR_X_SCREEN_SIZE}" \
+    -ac \
+    -listen tcp \
+    >"${_x_log}" 2>&1 &
+  EMULATOR_XVFB_PID="$!"
+  export DISPLAY="${EMULATOR_X_DISPLAY}"
+
+  _x_wait=0
+  while [ "${_x_wait}" -lt 50 ]; do
+    if [ -S "${_x_socket}" ]; then
+      log "Started Xvfb display ${EMULATOR_X_DISPLAY} (${EMULATOR_X_SCREEN_SIZE}); TCP capture endpoint is port $((6000 + _x_display_number))."
+      unset _x_display_number _x_socket _x_log _x_wait
+      return 0
+    fi
+    if ! kill -0 "${EMULATOR_XVFB_PID}" 2>/dev/null; then
+      log "ERROR: Xvfb exited before creating ${_x_socket}."
+      exit 1
+    fi
+    _x_wait=$((_x_wait + 1))
+    sleep 0.1
+  done
+
+  log "ERROR: timed out waiting for Xvfb display socket ${_x_socket}."
+  exit 1
+}
+
+# Keep emulator rendering stable for virtual-display HTTP video capture in
+# container deployments. These flags are additive and can still be overridden
+# by supplying explicit values in EMULATOR_PARAMS.
 EMULATOR_GPU_MODE="${EMULATOR_GPU_MODE:-swiftshader_indirect}"
 case "${EMULATOR_GPU_MODE}" in
   ""|"none"|"disabled") ;;
@@ -197,6 +266,7 @@ EMULATOR_RADIO_DEVICE="${EMULATOR_RADIO_DEVICE:-null}"
 EMULATOR_USE_RADIO_OVERRIDE="${EMULATOR_USE_RADIO_OVERRIDE:-0}"
 EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE:-system-images;android-36;google_apis;x86_64}"
 EMULATOR_PLATFORM="${EMULATOR_PLATFORM:-platforms;android-36}"
+EMULATOR_X_CAPTURE_SIZE="${EMULATOR_X_CAPTURE_SIZE:-1080x1920}"
 mkdir -p "${ANDROID_USER_HOME}" "${ANDROID_AVD_HOME}"
 
 emulator_system_image_sysdir() {
@@ -522,6 +592,10 @@ launch_direct_emulator() {
     exit 1
   fi
 
+  if virtual_display_enabled; then
+    start_virtual_x_display
+  fi
+
   ensure_adb_server
   start_direct_adb_bridge_forwarder
   prepare_direct_emulator_logs
@@ -530,11 +604,21 @@ launch_direct_emulator() {
     "${DIRECT_EMULATOR_BIN}" \
     -avd Pixel2 \
     -ports "${_ports}" \
-    -no-window \
     -skip-adb-auth \
     -shell-serial "file:${_kernel_log}" \
     -logcat-output "${_logcat_log}" \
     -feature AllowSnapshotMigration
+
+  if virtual_display_enabled; then
+    if ! param_has_flag "-skin" && ! param_has_flag "-no-skin" && ! param_has_flag "-noskin"; then
+      set -- "$@" -skin "${EMULATOR_X_CAPTURE_SIZE}"
+    fi
+    if ! param_has_flag "-fixed-scale"; then
+      set -- "$@" -fixed-scale
+    fi
+  else
+    set -- "$@" -no-window
+  fi
 
   if [ -n "${EMULATOR_RADIO_DEVICE}" ] && supports_direct_radio_override; then
     set -- "$@" -radio "${EMULATOR_RADIO_DEVICE}"
@@ -557,6 +641,11 @@ launch_direct_emulator() {
   log "Direct emulator GPU mode: ${EMULATOR_GPU_MODE:-emulator default}"
   log "Direct emulator RAM: ${EMULATOR_RAM_SIZE_MB} MB"
   log "Direct emulator AVD read-only mode: ${EMULATOR_AVD_READ_ONLY}"
+  if virtual_display_enabled; then
+    log "Direct emulator virtual X display: DISPLAY=${DISPLAY:-unset}, capture size=${EMULATOR_X_CAPTURE_SIZE}"
+  else
+    log "Direct emulator window: disabled (-no-window)"
+  fi
   if [ "${_radio_override_applied}" -eq 1 ]; then
     log "Direct emulator radio override: ${EMULATOR_RADIO_DEVICE}"
   else

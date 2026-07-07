@@ -26,12 +26,17 @@ function assertNoWebrtcRuntime(name, text) {
 const frontendMain = readRepoFile("frontend/src/main.jsx");
 assert.match(
   frontendMain,
-  /const \[streamMode, setStreamMode\] = useState\("scrcpy-http"\);/,
+  /const \[streamMode, setStreamMode\] = useState\(DISPLAY_HTTP_MODE\);/,
   "frontend must default to the Guacamole-style HTTP tunnel"
 );
 assert.match(
   frontendMain,
-  /value: "scrcpy-http", label: "Guacamole HTTP \(30fps\)"/,
+  /const DISPLAY_HTTP_MODE = "display-http";/,
+  "frontend must name the FFmpeg display transport explicitly"
+);
+assert.match(
+  frontendMain,
+  /value: DISPLAY_HTTP_MODE, label: "Guacamole HTTP \(30fps\)"/,
   "stream selector must expose the 30fps HTTP tunnel as the primary mode"
 );
 const streamModeOptions = frontendMain.match(/const STREAM_MODE_OPTIONS = \[[\s\S]*?\];/)?.[0] || "";
@@ -41,12 +46,22 @@ assertNoWebrtcRuntime("frontend/src/main.jsx", frontendMain);
 assert.match(
   frontendMain,
   /'video\/mp4; codecs="avc1\.42C029"'/,
-  "frontend must prefer the API 36-compatible scrcpy AVC codec string seen in emulator logs"
+  "frontend must prefer the API 36-compatible AVC codec string seen in emulator logs"
 );
 assert.match(
   frontendMain,
   /max_fps: String\(GUACAMOLE_HTTP_TARGET_FPS\)/,
-  "frontend must request the configured 30fps target from the scrcpy endpoint"
+  "frontend must request the configured 30fps target from the display video endpoint"
+);
+assert.match(
+  frontendMain,
+  /\/api\/display-video\?/,
+  "frontend must stream video from the FFmpeg X display endpoint"
+);
+assert.match(
+  frontendMain,
+  /FFmpeg X display diagnostics/,
+  "frontend diagnostics must describe the FFmpeg X display capture path"
 );
 assert.match(
   frontendMain,
@@ -61,27 +76,29 @@ assertNoWebrtcRuntime("frontend/vite.config.js", frontendViteConfig);
 
 const frontendNginx = readRepoFile("frontend/nginx.conf");
 assert.match(frontendNginx, /location \/api\/ \{[\s\S]*proxy_pass http:\/\/apkbridge:5000\//, "frontend Nginx must proxy /api to apkbridge");
-assert.match(frontendNginx, /proxy_buffering off;/, "frontend Nginx must not buffer the live scrcpy stream");
-assert.match(frontendNginx, /proxy_read_timeout 1h;/, "frontend Nginx must allow long-lived scrcpy responses");
+assert.match(frontendNginx, /proxy_buffering off;/, "frontend Nginx must not buffer the live display stream");
+assert.match(frontendNginx, /proxy_read_timeout 1h;/, "frontend Nginx must allow long-lived display video responses");
 
 const apkbridgeApp = readRepoFile("apkbridge/app.py");
-assert.match(apkbridgeApp, /SCRCPY_MAX_FPS = .*"30"/, "apkbridge must default scrcpy to 30fps");
-assert.match(apkbridgeApp, /SCRCPY_VIDEO_BIT_RATE = .*"6000000"/, "apkbridge must default to a tunnel-friendly bitrate");
+const apkbridgeDockerfile = readRepoFile("apkbridge/Dockerfile");
+assert.match(apkbridgeApp, /VIDEO_MAX_FPS = .*"30"/, "apkbridge must default HTTP video to 30fps");
+assert.match(apkbridgeApp, /VIDEO_BIT_RATE = [\s\S]*?"6000000"/, "apkbridge must default to a tunnel-friendly bitrate");
+assert.match(apkbridgeApp, /X11_DISPLAY = .*"emulator:99\.0"/, "apkbridge must default to the emulator container X display");
 assert.match(apkbridgeApp, /def schedule_video_startup_nudge/, "apkbridge must nudge the display when starting video capture");
-const scrcpyCommand = apkbridgeApp.match(/scrcpy_cmd = \[[\s\S]*?\n\s+\]/)?.[0] || "";
-assert.ok(scrcpyCommand, "apkbridge must define a scrcpy command for the HTTP tunnel");
-assert.doesNotMatch(scrcpyCommand, /"--no-display"/, "apkbridge must use scrcpy 3.x --no-window instead of removed --no-display");
-assert.doesNotMatch(scrcpyCommand, /"--bit-rate"/, "apkbridge must use scrcpy 3.x --video-bit-rate instead of removed --bit-rate");
-assert.match(scrcpyCommand, /"--no-window"/, "apkbridge must run scrcpy headless with the current --no-window option");
-assert.match(scrcpyCommand, /"--no-audio"/, "apkbridge must disable scrcpy audio in the headless HTTP tunnel");
-assert.match(scrcpyCommand, /"--port"/, "apkbridge must pass an explicit scrcpy port range");
-assert.match(scrcpyCommand, /"--video-codec"[\s\S]*?"h264"/, "apkbridge must force an MSE-compatible H.264 scrcpy stream");
-assert.match(scrcpyCommand, /"--video-bit-rate"/, "apkbridge must configure scrcpy video bitrate with the current option name");
+const x11FfmpegCommand = apkbridgeApp.match(/def x11_ffmpeg_command[\s\S]*?\n\n/)?.[0] || "";
+assert.ok(x11FfmpegCommand, "apkbridge must define an FFmpeg X display command for the HTTP tunnel");
+assert.match(x11FfmpegCommand, /"x11grab"/, "apkbridge must capture the emulator virtual display with FFmpeg x11grab");
+assert.match(x11FfmpegCommand, /"libx264"/, "apkbridge must encode X display frames as browser-compatible H.264");
+assert.match(x11FfmpegCommand, /"zerolatency"/, "apkbridge must tune the encoder for live streaming");
+assert.match(x11FfmpegCommand, /X11_VIDEO_SIZE/, "apkbridge must capture the configured X display rectangle");
+assert.match(apkbridgeApp, /@app\.get\("\/display-video"\)/, "apkbridge must expose the new display video endpoint");
+assert.match(apkbridgeApp, /@app\.get\("\/scrcpy-video"\)/, "apkbridge must keep the old endpoint as a compatibility alias");
 assert.doesNotMatch(
-  scrcpyCommand,
-  /"--no-playback"/,
-  "apkbridge must not pass redundant --no-playback because --no-window and --no-audio already make recording headless"
+  apkbridgeApp,
+  /scrcpy_cmd = \[/,
+  "apkbridge must not construct a scrcpy recording command"
 );
+assert.doesNotMatch(apkbridgeDockerfile, /\bscrcpy\b/, "apkbridge image must not install scrcpy");
 assert.match(apkbridgeApp, /generate_screenrecord_mp4/, "apkbridge must retain an adb screenrecord MP4 fallback");
 assert.match(
   apkbridgeApp,
@@ -90,8 +107,8 @@ assert.match(
 );
 assert.match(
   apkbridgeApp,
-  /"-f",\s*"matroska"[\s\S]*?"-probesize",\s*"65536"/,
-  "apkbridge ffmpeg input must parse scrcpy Matroska recordings with enough probe data"
+  /"-f",\s*"x11grab"[\s\S]*?"-i",\s*X11_DISPLAY/,
+  "apkbridge ffmpeg input must capture the configured X display"
 );
 assert.match(
   apkbridgeApp,
@@ -115,10 +132,15 @@ assert.match(composeConfig, /EMULATOR_SYSTEM_IMAGE:\s*"\$\{EMULATOR_SYSTEM_IMAGE
 assert.match(composeConfig, /EMULATOR_PLATFORM:\s*"\$\{EMULATOR_PLATFORM:-platforms;android-36\}"/, "compose must default to the Android 36 platform package");
 assert.match(composeConfig, /shm_size:\s*"6gb"/, "compose must provide more than 4GB of shared memory for the AI-capable emulator");
 assert.match(composeConfig, /EMULATOR_RAM_SIZE_MB:\s*"\$\{EMULATOR_RAM_SIZE_MB:-6144\}"/, "compose must default the emulator guest RAM above 4GB");
+assert.match(composeConfig, /EMULATOR_VIRTUAL_DISPLAY:\s*"\$\{EMULATOR_VIRTUAL_DISPLAY:-1\}"/, "compose must enable the virtual X display by default");
+assert.match(composeConfig, /EMULATOR_X_DISPLAY:\s*"\$\{EMULATOR_X_DISPLAY:-:99\}"/, "compose must pin the emulator X display");
+assert.match(composeConfig, /EMULATOR_X_CAPTURE_SIZE:\s*"\$\{EMULATOR_X_CAPTURE_SIZE:-1080x1920\}"/, "compose must align the emulator window with the FFmpeg capture size");
 assert.match(composeConfig, /EMULATOR_PARAMS:.*-no-metrics/, "compose must opt the emulator out of metrics prompts");
-assert.match(composeConfig, /SCRCPY_MAX_FPS:\s*"\$\{SCRCPY_MAX_FPS:-30\}"/, "compose must pin scrcpy max fps to 30");
-assert.match(composeConfig, /SCRCPY_VIDEO_BIT_RATE:/, "compose must expose scrcpy bitrate tuning");
-assert.match(composeConfig, /SCRCPY_PORT_RANGE:/, "compose must expose scrcpy tunnel port range tuning");
+assert.match(composeConfig, /VIDEO_MAX_FPS:\s*"\$\{VIDEO_MAX_FPS:-30\}"/, "compose must pin HTTP video max fps to 30");
+assert.match(composeConfig, /VIDEO_BIT_RATE:/, "compose must expose FFmpeg video bitrate tuning");
+assert.match(composeConfig, /X11_DISPLAY:\s*"\$\{X11_DISPLAY:-emulator:99\.0\}"/, "compose must point apkbridge at the emulator X display");
+assert.match(composeConfig, /X11_VIDEO_SIZE:\s*"\$\{X11_VIDEO_SIZE:-1080x1920\}"/, "compose must pass the FFmpeg capture rectangle");
+assert.doesNotMatch(composeConfig, /SCRCPY_PORT_RANGE:/, "compose must not expose scrcpy tunnel port tuning");
 assert.match(composeConfig, /ADB_INSTALL_ABI:\s*"\$\{ADB_INSTALL_ABI:-auto-ai\}"/, "compose must default to AI-aware ABI selection while preserving Android auto-selection for non-AI APKs");
 assert.match(composeConfig, /18080:80/, "frontend must own the public UI/API entrypoint");
 assert.doesNotMatch(composeConfig, /envoyproxy\/envoy|container_name:\s*google-emu-envoy/, "compose must not start the removed Envoy container");
@@ -129,6 +151,7 @@ const emulatorWrapper = readRepoFile("emulator/start-emulator.sh");
 assertNoActiveTurnConfig("emulator/Dockerfile", emulatorDockerfile);
 assertNoActiveTurnConfig("emulator/start-emulator.sh", emulatorWrapper);
 assert.match(emulatorDockerfile, /COPY start-emulator\.sh \/usr\/local\/bin\/start-emulator\.sh/, "emulator Dockerfile must install the wrapper");
+assert.match(emulatorDockerfile, /\bxvfb\b/, "emulator Dockerfile must install Xvfb for virtual display capture");
 assert.match(emulatorDockerfile, /ARG EMULATOR_SYSTEM_IMAGE=system-images;android-36;google_apis;x86_64/, "emulator Dockerfile must default to the API 36 Google APIs x86_64 system image");
 assert.match(emulatorDockerfile, /ARG EMULATOR_PLATFORM=platforms;android-36/, "emulator Dockerfile must default to the Android 36 platform package");
 assert.match(emulatorDockerfile, /EMULATOR_SYSTEM_IMAGE=\$\{EMULATOR_SYSTEM_IMAGE\}/, "emulator Dockerfile must pass the selected system image into runtime");
@@ -137,6 +160,10 @@ assert.match(emulatorDockerfile, /ENTRYPOINT \["\/usr\/local\/bin\/start-emulato
 assert.match(emulatorWrapper, /\[start-emulator\]/, "emulator wrapper logs must use the non-TURN prefix");
 assert.match(emulatorWrapper, /EMULATOR_LAUNCH_MODE="\$\{EMULATOR_LAUNCH_MODE:-direct\}"/, "emulator wrapper must keep direct launch as the default");
 assert.match(emulatorWrapper, /start_direct_adb_bridge_forwarder\(\)/, "emulator wrapper must keep the sibling-container ADB bridge");
+assert.match(emulatorWrapper, /start_virtual_x_display\(\)/, "emulator wrapper must start Xvfb for direct launch");
+assert.match(emulatorWrapper, /Xvfb "\$\{EMULATOR_X_DISPLAY\}"/, "emulator wrapper must launch the configured virtual X display");
+assert.match(emulatorWrapper, /-skin "\$\{EMULATOR_X_CAPTURE_SIZE\}"/, "emulator wrapper must size the emulator window to the capture rectangle");
+assert.match(emulatorWrapper, /-fixed-scale/, "emulator wrapper must keep the emulator window at a stable 1:1 scale");
 assert.match(emulatorWrapper, /append_param_if_missing "-no-metrics"/, "emulator wrapper must suppress emulator metrics prompts by default");
 assert.match(emulatorWrapper, /EMULATOR_AVD_READ_ONLY="\$\{EMULATOR_AVD_READ_ONLY:-1\}"/, "emulator wrapper must default to duplicate-lock-tolerant read-only AVD startup");
 assert.match(emulatorWrapper, /EMULATOR_SYSTEM_IMAGE="\$\{EMULATOR_SYSTEM_IMAGE:-system-images;android-36;google_apis;x86_64\}"/, "emulator wrapper must default to the API 36 Google APIs x86_64 system image");

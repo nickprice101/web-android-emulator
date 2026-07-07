@@ -26,8 +26,8 @@
   <rect x="42" y="566" width="228" height="86" rx="12" fill="#09111C" fill-opacity="0.86"/>
   <text x="58" y="590" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Video is streamed as fragmented</text>
   <text x="58" y="608" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">MP4 over ordinary HTTP(S).</text>
-  <text x="58" y="626" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">The server stays close to adb</text>
-  <text x="58" y="644" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">and scrcpy, like Guacamole.</text>
+  <text x="58" y="626" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">The server records the virtual</text>
+  <text x="58" y="644" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">X display with FFmpeg.</text>
   <rect x="284" y="566" width="180" height="118" rx="12" fill="#09111C" fill-opacity="0.86"/>
   <text x="300" y="590" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">mode: HTTP tunnel</text>
   <text x="300" y="610" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">target: 30fps</text>
@@ -50,14 +50,14 @@
   <rect x="560" y="318" width="842" height="104" rx="12" fill="#111823" stroke="#2B313D"/>
   <text x="578" y="344" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Last message</text>
   <text x="578" y="370" fill="#D7DFED" font-family="Consolas, monospace" font-size="13">Connected to Guacamole-style HTTP video tunnel.</text>
-  <text x="578" y="390" fill="#D7DFED" font-family="Consolas, monospace" font-size="13">Streaming scrcpy or adb screenrecord fragmented MP4 at a 30fps target.</text>
+  <text x="578" y="390" fill="#D7DFED" font-family="Consolas, monospace" font-size="13">Streaming FFmpeg X display capture as fragmented MP4 at a 30fps target.</text>
   <rect x="560" y="440" width="842" height="158" rx="12" fill="#111823" stroke="#2B313D"/>
   <text x="578" y="466" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Display diagnostics</text>
   <text x="578" y="510" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Emulator screen: 1080x1920</text>
-  <text x="578" y="536" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Video frame: Guacamole-style scrcpy MP4 over ordinary HTTPS fetch (30fps target, 720p)</text>
-  <text x="578" y="562" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">If scrcpy cannot bind its tunnel, adb screenrecord keeps the same HTTP video surface alive.</text>
+  <text x="578" y="536" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Video frame: FFmpeg X display MP4 over ordinary HTTPS fetch (30fps target, 720p)</text>
+  <text x="578" y="562" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">If X display capture cannot start, adb screenrecord keeps the same HTTP video surface alive.</text>
   <rect x="560" y="616" width="842" height="212" rx="12" fill="#111823" stroke="#2B313D"/>
-  <text x="578" y="642" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">Scrcpy HTTP video diagnostics</text>
+  <text x="578" y="642" fill="#A8B3C7" font-family="Segoe UI, Arial, sans-serif" font-size="13">FFmpeg X display diagnostics</text>
   <text x="578" y="668" fill="#D7DFED" font-family="Consolas, monospace" font-size="12">http: 200 OK | content-type: video/mp4</text>
   <text x="578" y="688" fill="#D7DFED" font-family="Consolas, monospace" font-size="12">stream: 14.2 MB / 512 chunks | mse: open / appended 512</text>
   <text x="578" y="708" fill="#D7DFED" font-family="Consolas, monospace" font-size="12">target: 30fps / 720p | current fps: 29.8</text>

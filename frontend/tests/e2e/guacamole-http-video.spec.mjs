@@ -28,10 +28,10 @@ test("deployed Guacamole-style HTTP path renders real video frames", async ({ pa
   await expect(page.getByText("Emulator state", { exact: true })).toBeVisible({
     timeout: VIDEO_WAIT_TIMEOUT_MS,
   });
-  await expect(page.getByText("Scrcpy HTTP video diagnostics", { exact: true })).toBeVisible({
+  await expect(page.getByText("FFmpeg X display diagnostics", { exact: true })).toBeVisible({
     timeout: VIDEO_WAIT_TIMEOUT_MS,
   });
-  await expect(page.locator('[data-testid="scrcpy-fps-overlay"]')).toContainText("fps", {
+  await expect(page.locator('[data-testid="display-fps-overlay"]')).toContainText("fps", {
     timeout: VIDEO_WAIT_TIMEOUT_MS,
   });
   await expect(page.locator('label:has-text("Quality") select')).toHaveValue("720", {
@@ -53,7 +53,7 @@ test("deployed Guacamole-style HTTP path renders real video frames", async ({ pa
       }, null);
       const bodyText = document.body?.innerText ?? "";
       const failureDetected =
-        bodyText.includes("Scrcpy HTTP video failed") ||
+        bodyText.includes("Display HTTP video failed") ||
         bodyText.includes("last event: error");
 
       if (!(video instanceof HTMLVideoElement)) {
@@ -98,10 +98,10 @@ test("deployed Guacamole-style HTTP path renders real video frames", async ({ pa
   const emulatorState = readFieldFromBody(bodyText, "Emulator state");
   const bridgeApiState = readFieldFromBody(bodyText, "Bridge API");
   const lastMessage = readSectionFromBody(bodyText, "Last message", "Display diagnostics");
-  const scrcpyDiagnosticsText = readSectionFromBody(bodyText, "Scrcpy HTTP video diagnostics", "Android system logs");
+  const displayDiagnosticsText = readSectionFromBody(bodyText, "FFmpeg X display diagnostics", "Android system logs");
   const videoStats = mediaOutcome?.videoStats ?? null;
   const browserDiagnostics = await page.evaluate(() => window.__EMU_E2E__ || null);
-  const activeTransport = browserDiagnostics?.activeTransport || "scrcpy-http";
+  const activeTransport = browserDiagnostics?.activeTransport || "display-http";
   const streamMaxSize = browserDiagnostics?.streamMaxSize || 720;
 
   const diagnosticsPayload = {
@@ -110,7 +110,7 @@ test("deployed Guacamole-style HTTP path renders real video frames", async ({ pa
     lastMessage,
     activeTransport,
     streamMaxSize,
-    scrcpyDiagnosticsText,
+    displayDiagnosticsText,
     browserDiagnostics,
     mediaOutcome,
     videoStats,
@@ -132,7 +132,7 @@ test("deployed Guacamole-style HTTP path renders real video frames", async ({ pa
   expect(mediaOutcome?.outcome, `Expected usable video, got ${JSON.stringify(mediaOutcome)}`).toBe("ready");
   expect(emulatorState.toLowerCase()).toContain("connected");
   expect(bridgeApiState.toLowerCase()).toContain("ready");
-  expect(activeTransport).toBe("scrcpy-http");
+  expect(activeTransport).toBe("display-http");
   expect(streamMaxSize).toBe(720);
   expect(videoStats?.readyState ?? 0).toBeGreaterThanOrEqual(HAVE_CURRENT_DATA);
   expect(videoStats?.videoWidth ?? 0).toBeGreaterThanOrEqual(MIN_RENDERABLE_VIDEO_DIMENSION);
@@ -141,8 +141,8 @@ test("deployed Guacamole-style HTTP path renders real video frames", async ({ pa
     ((videoStats?.totalVideoFrames ?? 0) > 0) || (videoStats?.currentTime ?? 0) > 0,
     `Expected decoded frames or playback progress, got ${JSON.stringify(videoStats)}`
   ).toBeTruthy();
-  expect(scrcpyDiagnosticsText).toContain("stream:");
-  expect(scrcpyDiagnosticsText).toContain("target:");
-  expect(scrcpyDiagnosticsText).toContain("current fps:");
-  expect(scrcpyDiagnosticsText).toContain("mse:");
+  expect(displayDiagnosticsText).toContain("stream:");
+  expect(displayDiagnosticsText).toContain("target:");
+  expect(displayDiagnosticsText).toContain("current fps:");
+  expect(displayDiagnosticsText).toContain("mse:");
 });

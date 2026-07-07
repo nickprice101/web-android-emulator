@@ -1,30 +1,33 @@
 # Web-based Android Emulator
 
-Designed for app development without requiring Android Studio locally. The stack runs a Dockerized Android emulator, a small APK/ADB bridge API, Envoy, and a React frontend.
+Designed for app development without requiring Android Studio locally. The stack runs a Dockerized Android emulator, a small APK/ADB bridge API, and a React frontend.
 
-The display path is a Guacamole-style HTTP tunnel: the server stays close to the emulator and streams scrcpy-captured video to the browser as fragmented MP4 over ordinary HTTP(S). Input goes back through normal HTTP API calls. No browser WebRTC, emulator gRPC-Web, or relay negotiation is used.
+The display path is a Guacamole-style HTTP tunnel: the emulator runs in a virtual X display, the bridge records that display with FFmpeg, and the browser receives fragmented MP4 over ordinary HTTP(S). Input goes back through normal HTTP API calls. No browser WebRTC, emulator gRPC-Web, scrcpy tunnel, or relay negotiation is used.
 
 ## Default Video Path
 
-The frontend defaults to `Guacamole HTTP (30fps)` at `720p`. A toolbar quality selector can switch the scrcpy stream between `720p` and `1080p`.
+The frontend defaults to `Guacamole HTTP (30fps)` at `720p`. A toolbar quality selector can switch the FFmpeg display stream between `720p` and `1080p`.
 
-`apkbridge` runs scrcpy against the emulator, records a low-latency Matroska stream into a FIFO, and ffmpeg remuxes it into fragmented MP4 for browser MediaSource playback. The default stream target is:
+The emulator container starts Xvfb on `:99`, launches the Android emulator into a framebuffer-sized window, and exposes that X display only on the internal Docker network. `apkbridge` records `emulator:99.0` with FFmpeg `x11grab`, encodes low-latency H.264, and muxes fragmented MP4 for browser MediaSource playback. The default stream target is:
 
-* `SCRCPY_MAX_FPS=30`
-* `SCRCPY_VIDEO_BIT_RATE=6000000`
-* `SCRCPY_MAX_SIZE=720`
-* `SCRCPY_PORT_RANGE=27183:27283`
+* `VIDEO_MAX_FPS=30`
+* `VIDEO_BIT_RATE=6000000`
+* `VIDEO_MAX_SIZE=720`
+* `X11_DISPLAY=emulator:99.0`
+* `X11_VIDEO_SIZE=1080x1920`
 
 The emulator container defaults to `EMULATOR_GPU_MODE=swiftshader_indirect` for
 stable headless rendering across container hosts. It still maps `/dev/dri`, so
 deployments with a known-good render device can opt into host acceleration with
 `EMULATOR_GPU_MODE=host`. Startup also passes `-no-metrics` and runs the AVD in
 read-only mode by default to avoid metrics prompts and duplicate-AVD lock
-failures during container restarts.
+failures during container restarts. `EMULATOR_VIRTUAL_DISPLAY=1` is enabled by
+default; set it to `0` only when deliberately returning to the old `-no-window`
+emulator launch.
 
 When each video capture starts, `apkbridge` sends a tiny top-left tap nudge to
 force the Android compositor to emit initial frames even when the display is
-otherwise idle. If scrcpy still cannot start before video bytes are produced,
+otherwise idle. If FFmpeg cannot capture the virtual display before video bytes are produced,
 `apkbridge` falls back to remuxing `adb exec-out screenrecord --output-format=h264 -`
 into the same fragmented MP4 response. PNG preview remains available for
 inspection or recovery.

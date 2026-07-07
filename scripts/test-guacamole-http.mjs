@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 function readRepoFile(relativePath) {
-  return readFileSync(resolve(repoRoot, relativePath), "utf8");
+  return readFileSync(resolve(repoRoot, relativePath), "utf8").replace(/\r\n/g, "\n");
 }
 
 function assertNoActiveTurnConfig(name, text) {

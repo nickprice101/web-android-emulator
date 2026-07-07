@@ -22,24 +22,8 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <text x="1009" y="34" text-anchor="middle" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="13">720p stream</text>
 
   <rect x="16" y="78" width="500" height="790" rx="20" fill="#05070B" stroke="#202634"/>
-  <rect x="16" y="78" width="500" height="48" rx="20" fill="#0B1018"/>
-  <text x="34" y="108" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="14">Guacamole-style HTTP tunnel</text>
-  <text x="292" y="108" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="13">state: connected | transport: HTTPS fetch</text>
-  <rect x="42" y="146" width="448" height="520" rx="26" fill="#02040A" stroke="#202634"/>
-  <rect x="72" y="190" width="388" height="432" rx="18" fill="url(#screen)"/>
-  <rect x="348" y="204" width="98" height="28" rx="8" fill="#05070B" fill-opacity="0.78" stroke="#566173"/>
-  <text x="397" y="222" text-anchor="middle" fill="#F2F5F9" font-family="Consolas, monospace" font-size="12">29.8 fps 720p</text>
-  <rect x="42" y="566" width="228" height="86" rx="12" fill="#09111C" fill-opacity="0.86"/>
-  <text x="58" y="590" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">Video is streamed as fragmented</text>
-  <text x="58" y="608" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">MP4 over ordinary HTTP(S).</text>
-  <text x="58" y="626" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">The server records the virtual</text>
-  <text x="58" y="644" fill="#9DB0CC" font-family="Segoe UI, Arial, sans-serif" font-size="12">X display with FFmpeg.</text>
-  <rect x="284" y="566" width="180" height="118" rx="12" fill="#09111C" fill-opacity="0.86"/>
-  <text x="300" y="590" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">mode: HTTP tunnel</text>
-  <text x="300" y="610" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">target: 30fps</text>
-  <text x="300" y="628" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">bitrate: 6 Mbps</text>
-  <text x="300" y="648" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">quality: 720p selectable</text>
-  <text x="300" y="668" fill="#D7DFED" font-family="Segoe UI, Arial, sans-serif" font-size="12">fallback: screenrecord MP4</text>
+  <rect x="44" y="78" width="444" height="790" rx="18" fill="#02040A" stroke="#202634"/>
+  <rect x="44" y="78" width="444" height="790" rx="18" fill="url(#screen)"/>
 
   <rect x="538" y="78" width="886" height="790" rx="18" fill="#171A21"/>
   <rect x="560" y="102" width="842" height="86" rx="12" fill="#111823" stroke="#2B313D"/>
@@ -69,7 +53,7 @@ const svg = `<?xml version="1.0" encoding="UTF-8"?>
   <text x="578" y="708" fill="#D7DFED" font-family="Consolas, monospace" font-size="12">target: 30fps / 720p | current fps: 29.8</text>
   <text x="578" y="728" fill="#D7DFED" font-family="Consolas, monospace" font-size="12">video: ready 4, net 2, 720x1280 | frames: total 894, dropped 2</text>
   <defs>
-    <linearGradient id="screen" x1="72" y1="190" x2="460" y2="622" gradientUnits="userSpaceOnUse">
+    <linearGradient id="screen" x1="44" y1="78" x2="488" y2="868" gradientUnits="userSpaceOnUse">
       <stop stop-color="#1E4D3A"/>
       <stop offset="0.45" stop-color="#1C2E40"/>
       <stop offset="1" stop-color="#0A1018"/>

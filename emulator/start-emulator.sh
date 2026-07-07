@@ -242,6 +242,9 @@ append_param_if_missing "-no-sim"
 # subsystem initialization, delaying port binding. Disable audio by default
 # since it is not needed for ADB/HTTP emulator use.
 append_param_if_missing "-no-audio"
+if virtual_display_enabled && ! param_has_flag "-skin" && ! param_has_flag "-no-skin" && ! param_has_flag "-noskin"; then
+  append_param_if_missing "-no-skin"
+fi
 EMULATOR_AVD_READ_ONLY="${EMULATOR_AVD_READ_ONLY:-1}"
 case "${EMULATOR_AVD_READ_ONLY}" in
   1|true|TRUE|yes|YES)

@@ -162,7 +162,7 @@ assert.match(emulatorWrapper, /EMULATOR_LAUNCH_MODE="\$\{EMULATOR_LAUNCH_MODE:-d
 assert.match(emulatorWrapper, /start_direct_adb_bridge_forwarder\(\)/, "emulator wrapper must keep the sibling-container ADB bridge");
 assert.match(emulatorWrapper, /start_virtual_x_display\(\)/, "emulator wrapper must start Xvfb for direct launch");
 assert.match(emulatorWrapper, /Xvfb "\$\{EMULATOR_X_DISPLAY\}"/, "emulator wrapper must launch the configured virtual X display");
-assert.match(emulatorWrapper, /-skin "\$\{EMULATOR_X_CAPTURE_SIZE\}"/, "emulator wrapper must size the emulator window to the capture rectangle");
+assert.match(emulatorWrapper, /append_param_if_missing "-no-skin"/, "emulator wrapper must remove the emulator skin for aligned X display capture");
 assert.match(emulatorWrapper, /-fixed-scale/, "emulator wrapper must keep the emulator window at a stable 1:1 scale");
 assert.match(emulatorWrapper, /append_param_if_missing "-no-metrics"/, "emulator wrapper must suppress emulator metrics prompts by default");
 assert.match(emulatorWrapper, /EMULATOR_AVD_READ_ONLY="\$\{EMULATOR_AVD_READ_ONLY:-1\}"/, "emulator wrapper must default to duplicate-lock-tolerant read-only AVD startup");

@@ -22,10 +22,12 @@ deployments with a known-good render device can opt into host acceleration with
 read-only mode by default to avoid metrics prompts and duplicate-AVD lock
 failures during container restarts.
 
-If scrcpy cannot start before video bytes are produced, `apkbridge` falls back
-to remuxing `adb exec-out screenrecord --output-format=h264 -` into the same
-fragmented MP4 response. PNG preview remains available for inspection or
-recovery.
+When each video capture starts, `apkbridge` sends a tiny top-left tap nudge to
+force the Android compositor to emit initial frames even when the display is
+otherwise idle. If scrcpy still cannot start before video bytes are produced,
+`apkbridge` falls back to remuxing `adb exec-out screenrecord --output-format=h264 -`
+into the same fragmented MP4 response. PNG preview remains available for
+inspection or recovery.
 
 The old WebRTC/STUN/TURN implementation has been removed. The stack no longer mints relay credentials, generates emulator `-turncfg`, runs a TURN connectivity harness, exposes emulator gRPC-Web, or depends on a public relay route.
 
@@ -55,9 +57,9 @@ http://YOUR_HOST:18080
 
 ## Emulator Image
 
-The default emulator build uses Google's public emulator base image and then installs the pinned Android emulator package plus an Android 16 (API 36) Google APIs `x86_64` system image during build. The default platform package is `platforms;android-36`. The Dockerfile creates a `Pixel2` AVD backed by the `pixel_5` profile and starts the emulator through `emulator/start-emulator.sh`.
+The default emulator build uses Google's public emulator base image and then installs the pinned Android emulator package plus an Android 14 (API 34) Google APIs `x86_64` system image during build. The default platform package is `platforms;android-34`. The Dockerfile creates a `Pixel2` AVD backed by the `pixel_5` profile and starts the emulator through `emulator/start-emulator.sh`.
 
-The stack uses an `x86_64` guest image because the Linux x64 emulator cannot boot an `arm64-v8a` system image on an x86_64 host. Modern Google APIs x86_64 images advertise ARM64 native binary translation, so ARM64-only app libraries can still be tested without trying to boot an ARM64 guest. `apkbridge` defaults `ADB_INSTALL_ABI=arm64-v8a`, which makes installs use `adb install --abi arm64-v8a` for apps such as StarbuckNoteTaker whose Llama/MLC runtime artifacts are ARM64-only. Set `ADB_INSTALL_ABI=auto` or leave it empty if you want Android to choose the default ABI for a different app.
+The stack uses an `x86_64` guest image because the Linux x64 emulator cannot boot an `arm64-v8a` system image on an x86_64 host. `apkbridge` defaults `ADB_INSTALL_ABI=auto`, so Android chooses the install ABI that matches the selected image. If you need to test ARM64-only app libraries on a newer translated x86_64 image, opt in with `EMULATOR_SYSTEM_IMAGE=system-images;android-36;google_apis;x86_64`, `EMULATOR_PLATFORM=platforms;android-36`, and `ADB_INSTALL_ABI=arm64-v8a`.
 
 The selected `EMULATOR_SYSTEM_IMAGE` and `EMULATOR_PLATFORM` are passed into the runtime container too. At startup, `emulator/start-emulator.sh` derives the AVD `image.sysdir.1` path from `EMULATOR_SYSTEM_IMAGE`, so custom SDK packages do not need a hard-coded AVD sysdir patch.
 
@@ -67,8 +69,8 @@ To pin a different emulator base image or SDK package, build with:
 
 ```bash
 EMULATOR_IMAGE=us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297 \
-EMULATOR_SYSTEM_IMAGE=system-images\;android-36\;google_apis\;x86_64 \
-EMULATOR_PLATFORM=platforms\;android-36 \
+EMULATOR_SYSTEM_IMAGE=system-images\;android-34\;google_apis\;x86_64 \
+EMULATOR_PLATFORM=platforms\;android-34 \
 docker compose build emulator
 ```
 

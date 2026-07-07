@@ -177,6 +177,23 @@ class ScrcpyStreamLockTests(unittest.TestCase):
 
 
 class ScrcpyVideoEndpointTests(unittest.TestCase):
+    def test_video_startup_nudge_taps_top_left_after_wake(self):
+        adb_calls = []
+
+        def fake_adb(*args, **kwargs):
+            adb_calls.append((args, kwargs))
+            return "ok"
+
+        with patch("app.VIDEO_STARTUP_NUDGE_REPEATS", 2), patch(
+            "app.VIDEO_STARTUP_NUDGE_INTERVAL_SECONDS", 0.001
+        ), patch("app.adb", side_effect=fake_adb):
+            app_module.nudge_display_for_video_startup()
+
+        self.assertEqual(adb_calls[0][0], ("shell", "input", "keyevent", "224"))
+        self.assertEqual(adb_calls[1][0], ("shell", "wm", "dismiss-keyguard"))
+        self.assertEqual(adb_calls[2][0], ("shell", "input", "tap", "0", "0"))
+        self.assertEqual(adb_calls[3][0], ("shell", "input", "tap", "0", "0"))
+
     def test_scrcpy_video_returns_json_when_prerequisites_are_missing(self):
         client = app.test_client()
         with patch("app.video_prerequisite_error", return_value=("Emulator ADB target emulator:5555 is not ready", 503)):
@@ -224,13 +241,16 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             "app.tempfile.gettempdir", return_value="/tmp"
         ), patch("app.os.mkfifo", create=True), patch("app.os.O_NONBLOCK", 0, create=True), patch("app.os.open", return_value=123), patch(
             "app.os.set_blocking"
-        ), patch("app.os.fdopen", return_value=io.BytesIO()), patch("app.subprocess.Popen", side_effect=fake_popen):
+        ), patch("app.os.fdopen", return_value=io.BytesIO()), patch("app.subprocess.Popen", side_effect=fake_popen), patch(
+            "app.schedule_video_startup_nudge"
+        ) as nudge_mock:
             response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
             first_chunk = next(response.response)
             response.response.close()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(first_chunk, b"ftyp")
+        nudge_mock.assert_called_once()
         self.assertIn("video/mp4", response.mimetype)
         self.assertEqual(response.headers.get("X-Accel-Buffering"), "no")
         self.assertTrue(
@@ -324,19 +344,31 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             "app.os.O_NONBLOCK", 0, create=True
         ), patch("app.os.open", return_value=123), patch("app.os.set_blocking"), patch("app.os.fdopen", return_value=io.BytesIO()), patch(
             "app.subprocess.Popen", side_effect=fake_popen
-        ), patch("app.adb_popen", side_effect=fake_adb_popen):
+        ), patch("app.adb_popen", side_effect=fake_adb_popen), patch("app.schedule_video_startup_nudge") as nudge_mock:
             response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
             first_chunk = next(response.response)
             response.response.close()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(first_chunk, b"ftyp-fallback")
+        self.assertEqual(nudge_mock.call_count, 2)
         self.assertTrue(any(call[0] == "scrcpy" for call in popen_calls))
-        self.assertTrue(any(call[0] == "ffmpeg" and "-f" in call and "h264" in call for call in popen_calls))
+        self.assertTrue(
+            any(
+                call[0] == "ffmpeg"
+                and "-f" in call
+                and "h264" in call
+                and "-probesize" in call
+                and "65536" in call
+                and "+genpts+nobuffer" not in call
+                for call in popen_calls
+            )
+        )
         self.assertIn(
             (
                 "exec-out",
                 "screenrecord",
+                "--bugreport",
                 "--output-format=h264",
                 "--bit-rate",
                 "1000000",
@@ -358,13 +390,16 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
         client = app.test_client()
         with patch("app.video_prerequisite_error", return_value=None), patch("app.scrcpy_stream_lock", return_value=BusyLock()), patch(
             "app.subprocess.Popen"
-        ) as popen_mock, patch("app.adb_popen") as adb_popen_mock:
+        ) as popen_mock, patch("app.adb_popen") as adb_popen_mock, patch(
+            "app.schedule_video_startup_nudge"
+        ) as nudge_mock:
             response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
 
         self.assertEqual(response.status_code, 409)
         self.assertIn("another scrcpy video stream is already active", response.get_json()["error"])
         popen_mock.assert_not_called()
         adb_popen_mock.assert_not_called()
+        nudge_mock.assert_not_called()
 
     def test_scrcpy_video_returns_json_when_scrcpy_and_fallback_produce_no_frames(self):
         class FakePipe:
@@ -418,12 +453,13 @@ class ScrcpyVideoEndpointTests(unittest.TestCase):
             "app.os.set_blocking"
         ), patch("app.os.fdopen", return_value=io.BytesIO()), patch("app.subprocess.Popen", side_effect=fake_popen), patch(
             "app.adb_popen", side_effect=fake_adb_popen
-        ):
+        ), patch("app.schedule_video_startup_nudge") as nudge_mock:
             started_at = time.monotonic()
             response = client.get("/scrcpy-video?bit_rate=1000000&max_size=720&max_fps=24", buffered=False)
 
         self.assertEqual(response.status_code, 503)
         self.assertIn("scrcpy failed and adb screenrecord fallback produced no video", response.get_json()["error"])
+        self.assertEqual(nudge_mock.call_count, 2)
         self.assertLess(time.monotonic() - started_at, 1.0)
 
 

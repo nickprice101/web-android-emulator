@@ -34,6 +34,12 @@ inspection or recovery.
 
 The old WebRTC/STUN/TURN implementation has been removed. The stack no longer mints relay credentials, generates emulator `-turncfg`, runs a TURN connectivity harness, exposes emulator gRPC-Web, or depends on a public relay route.
 
+## Phone and TV Testing
+
+The toolbar includes a `Device` selector for switching the connected emulator between `Phone` and `TV` test profiles without rebuilding the stack. `Phone` uses a tall `1080x2340` viewport for normal launcher apps. `TV` changes the emulator to a `1920x1080` landscape viewport and makes app launch prefer `android.intent.category.LEANBACK_LAUNCHER`, falling back to the normal launcher category when needed.
+
+Set `EMULATOR_DEVICE_PROFILE=tv` before `docker compose up` to make TV the default profile for a deployment. The profile can still be changed from the UI while the bridge is running.
+
 ## Minimal Exposed Ports
 
 The default stack exposes only:

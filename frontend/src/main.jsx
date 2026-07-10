@@ -16,8 +16,13 @@ const STREAM_MODE_OPTIONS = [
   { value: DISPLAY_HTTP_MODE, label: "Guacamole HTTP (30fps)" },
   { value: "png", label: "PNG preview" },
 ];
+const DEVICE_PROFILE_OPTIONS = [
+  { value: "phone", label: "Phone" },
+  { value: "tv", label: "TV" },
+];
 const STREAM_MODE_VALUES = new Set(STREAM_MODE_OPTIONS.map((option) => option.value));
 const STREAM_QUALITY_VALUES = new Set(STREAM_QUALITY_OPTIONS.map((option) => option.value));
+const DEVICE_PROFILE_VALUES = new Set(DEVICE_PROFILE_OPTIONS.map((option) => option.value));
 const DISPLAY_MP4_MIME_CANDIDATES = [
   'video/mp4; codecs="avc1.42C02A"',
   'video/mp4; codecs="avc1.42C029"',
@@ -45,6 +50,10 @@ function delay(ms) {
 function resolveStreamMaxSize(value) {
   const numericValue = Number(value);
   return STREAM_QUALITY_VALUES.has(numericValue) ? numericValue : DEFAULT_GUACAMOLE_HTTP_MAX_SIZE;
+}
+
+function resolveDeviceProfile(value) {
+  return DEVICE_PROFILE_VALUES.has(value) ? value : "phone";
 }
 
 function resolveVideoViewport(container, mediaWidth, mediaHeight, fitMode = "contain") {
@@ -783,6 +792,7 @@ function App() {
   const [emuState, setEmuState] = useState("connecting");
   const [bridgeState, setBridgeState] = useState("checking");
   const [deviceInfo, setDeviceInfo] = useState(null);
+  const [deviceProfile, setDeviceProfile] = useState("phone");
   const [streamMode, setStreamMode] = useState(DISPLAY_HTTP_MODE);
   const [streamMaxSize, setStreamMaxSize] = useState(DEFAULT_GUACAMOLE_HTTP_MAX_SIZE);
   const [displayDiagnostics, setDisplayDiagnostics] = useState(null);
@@ -827,9 +837,10 @@ function App() {
       emulatorState: emuState,
       bridgeApiState: bridgeState,
       deviceInfo,
+      deviceProfile,
       streamMaxSize,
     };
-  }, [bridgeState, deviceInfo, emuState, displayDiagnostics, streamMaxSize, streamMode]);
+  }, [bridgeState, deviceInfo, deviceProfile, emuState, displayDiagnostics, streamMaxSize, streamMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -859,6 +870,7 @@ function App() {
         const data = await parseJsonResponse(await fetch("/api/device-info"), "/api/device-info");
         if (!cancelled) {
           setDeviceInfo(data);
+          setDeviceProfile(resolveDeviceProfile(data.device_profile?.id));
         }
       } catch {
         if (!cancelled) {
@@ -1039,6 +1051,34 @@ function App() {
     setStreamMaxSize(resolvedMaxSize);
   }
 
+  async function handleDeviceProfileChange(nextProfile) {
+    const resolvedProfile = resolveDeviceProfile(nextProfile);
+    const selectedOption = DEVICE_PROFILE_OPTIONS.find((option) => option.value === resolvedProfile);
+    setDeviceProfile(resolvedProfile);
+    setDisplayDiagnostics(null);
+    setEmuState("connecting");
+    setMessage(`Switching emulator test profile to ${selectedOption?.label || resolvedProfile}...`);
+    try {
+      const data = await executeApi("/api/device-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile: resolvedProfile }),
+      });
+      if (data.active) {
+        setDeviceProfile(resolveDeviceProfile(data.active.id));
+        setDeviceInfo((current) => ({
+          ...(current || {}),
+          screen: data.active.screen,
+          device_profile: data.active,
+          device_profiles: data.profiles || current?.device_profiles || DEVICE_PROFILE_OPTIONS,
+        }));
+      }
+    } catch {
+      setDeviceProfile(resolveDeviceProfile(deviceInfo?.device_profile?.id));
+      setEmuState("error");
+    }
+  }
+
   const displaySize = useMemo(() => {
     const screen = deviceInfo?.screen || {};
     const aspect = screen.width && screen.height ? screen.width / screen.height : EMULATOR_ASPECT;
@@ -1067,6 +1107,16 @@ function App() {
         <button onClick={fullscreen}>Fullscreen</button>
         <button onClick={reconnect}>Reconnect</button>
         <button onClick={() => browse("")}>Browse APKs</button>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+          Device
+          <select value={deviceProfile} onChange={(event) => handleDeviceProfileChange(event.target.value)} disabled={busy}>
+            {DEVICE_PROFILE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           Stream
           <select value={streamMode} onChange={(event) => handleStreamModeChange(event.target.value)}>
@@ -1156,6 +1206,7 @@ function App() {
           <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Display diagnostics</div>
             <div style={{ fontSize: 12, color: "#a8b3c7", lineHeight: 1.6 }}>
+              <div>Device profile: {deviceInfo?.device_profile?.label || DEVICE_PROFILE_OPTIONS.find((option) => option.value === deviceProfile)?.label || "Phone"}</div>
               <div>Emulator screen: {deviceInfo?.screen?.width && deviceInfo?.screen?.height ? `${deviceInfo.screen.width}x${deviceInfo.screen.height}` : "unavailable"}</div>
               <div>Video frame: {streamMode === DISPLAY_HTTP_MODE ? `FFmpeg X display MP4 over ordinary HTTP fetch (${GUACAMOLE_HTTP_TARGET_FPS}fps target, ${streamMaxSize}p)` : "PNG preview over the emulator HTTP endpoint"}</div>
               <div>Input path: keyboard, mouse, and touch events are posted through /api/input-event</div>

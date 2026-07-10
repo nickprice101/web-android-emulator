@@ -39,6 +39,10 @@ assert.match(
   /value: DISPLAY_HTTP_MODE, label: "Guacamole HTTP \(30fps\)"/,
   "stream selector must expose the 30fps HTTP tunnel as the primary mode"
 );
+assert.match(frontendMain, /const DEVICE_PROFILE_OPTIONS = \[/, "frontend must define phone/TV device profile options");
+assert.match(frontendMain, /value: "phone", label: "Phone"/, "device selector must expose the phone profile");
+assert.match(frontendMain, /value: "tv", label: "TV"/, "device selector must expose the TV profile");
+assert.match(frontendMain, /\/api\/device-profile/, "frontend must call the bridge device-profile endpoint when switching target devices");
 const streamModeOptions = frontendMain.match(/const STREAM_MODE_OPTIONS = \[[\s\S]*?\];/)?.[0] || "";
 assert.ok(streamModeOptions, "frontend must define stream mode options");
 assert.match(streamModeOptions, /value: "png", label: "PNG preview"/, "stream selector must retain PNG preview");
@@ -94,6 +98,9 @@ const apkbridgeDockerfile = readRepoFile("apkbridge/Dockerfile");
 assert.match(apkbridgeApp, /VIDEO_MAX_FPS = .*"30"/, "apkbridge must default HTTP video to 30fps");
 assert.match(apkbridgeApp, /VIDEO_BIT_RATE = [\s\S]*?"6000000"/, "apkbridge must default to a tunnel-friendly bitrate");
 assert.match(apkbridgeApp, /X11_DISPLAY = .*"emulator:99\.0\+100,100"/, "apkbridge must default to the phone viewport inside the emulator container X display");
+assert.match(apkbridgeApp, /DEVICE_PROFILES = \{[\s\S]*"phone"[\s\S]*"tv"/, "apkbridge must define phone and TV testing profiles");
+assert.match(apkbridgeApp, /@app\.post\("\/device-profile"\)/, "apkbridge must expose a device-profile switch endpoint");
+assert.match(apkbridgeApp, /android\.intent\.category\.LEANBACK_LAUNCHER/, "apkbridge must prefer Leanback launch categories for TV apps");
 assert.match(apkbridgeApp, /def schedule_video_startup_nudge/, "apkbridge must nudge the display when starting video capture");
 const x11FfmpegCommand = apkbridgeApp.match(/def x11_ffmpeg_command[\s\S]*?\n\n/)?.[0] || "";
 assert.ok(x11FfmpegCommand, "apkbridge must define an FFmpeg X display command for the HTTP tunnel");
@@ -152,6 +159,7 @@ assert.match(composeConfig, /VIDEO_MAX_FPS:\s*"\$\{VIDEO_MAX_FPS:-30\}"/, "compo
 assert.match(composeConfig, /VIDEO_BIT_RATE:/, "compose must expose FFmpeg video bitrate tuning");
 assert.match(composeConfig, /X11_DISPLAY:\s*"\$\{X11_DISPLAY:-emulator:99\.0\+100,100\}"/, "compose must point apkbridge at the phone viewport inside the emulator X display");
 assert.match(composeConfig, /X11_VIDEO_SIZE:\s*"\$\{X11_VIDEO_SIZE:-1080x2340\}"/, "compose must pass the FFmpeg capture rectangle");
+assert.match(composeConfig, /EMULATOR_DEVICE_PROFILE:\s*"\$\{EMULATOR_DEVICE_PROFILE:-phone\}"/, "compose must default the bridge to the phone testing profile");
 assert.doesNotMatch(composeConfig, /SCRCPY_PORT_RANGE:/, "compose must not expose scrcpy tunnel port tuning");
 assert.match(composeConfig, /ADB_INSTALL_ABI:\s*"\$\{ADB_INSTALL_ABI:-auto-ai\}"/, "compose must default to AI-aware ABI selection while preserving Android auto-selection for non-AI APKs");
 assert.match(composeConfig, /18080:80/, "frontend must own the public UI/API entrypoint");

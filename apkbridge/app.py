@@ -26,6 +26,10 @@ app = Flask(__name__)
 
 ADB_TARGET = os.environ.get("ADB_TARGET", "emulator:5555")
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace")).resolve()
+EMULATOR_DEVICE_PROFILE = os.environ.get("EMULATOR_DEVICE_PROFILE", "phone").strip().lower()
+EMULATOR_DEVICE_PROFILE_STATE_PATH = Path(
+    os.environ.get("EMULATOR_DEVICE_PROFILE_STATE_PATH", str(Path(tempfile.gettempdir()) / "apkbridge-device-profile.json"))
+)
 SCREENRECORD_BIT_RATE = max(1_000_000, int(os.environ.get("SCREENRECORD_BIT_RATE", "12000000")))
 SCREENRECORD_TIME_LIMIT = max(10, min(180, int(os.environ.get("SCREENRECORD_TIME_LIMIT", "180"))))
 SCREENRECORD_MAX_CONSECUTIVE_FAILURES = 3
@@ -110,8 +114,27 @@ KEY_NAME_MAP = {
     "Delete": "112",
 }
 VIDEO_STREAM_THREAD_LOCK = threading.Lock()
+DEVICE_PROFILE_APPLY_LOCK = threading.Lock()
 AUTO_INSTALL_ABI_MODES = {"", "auto", "none", "default"}
 AUTO_AI_INSTALL_ABI_MODES = {"ai", "auto-ai", "prefer-ai", "mlc-ai"}
+DEVICE_PROFILES = {
+    "phone": {
+        "id": "phone",
+        "label": "Phone",
+        "description": "Tall phone viewport for standard Android launcher apps.",
+        "screen": {"width": 1080, "height": 2340},
+        "density": 420,
+        "launch_categories": ["android.intent.category.LAUNCHER", "android.intent.category.LEANBACK_LAUNCHER"],
+    },
+    "tv": {
+        "id": "tv",
+        "label": "TV",
+        "description": "Landscape TV viewport with Leanback launch preference for Android TV apps.",
+        "screen": {"width": 1920, "height": 1080},
+        "density": 320,
+        "launch_categories": ["android.intent.category.LEANBACK_LAUNCHER", "android.intent.category.LAUNCHER"],
+    },
+}
 
 
 class VideoStreamBusy(RuntimeError):
@@ -120,6 +143,69 @@ class VideoStreamBusy(RuntimeError):
 
 class VideoStreamSuperseded(RuntimeError):
     """Raised when a newer client has replaced this display stream."""
+
+
+def normalize_device_profile(value):
+    profile_id = str(value or "").strip().lower()
+    return profile_id if profile_id in DEVICE_PROFILES else "phone"
+
+
+def device_profile_payload(profile_id=None):
+    profile = DEVICE_PROFILES[normalize_device_profile(profile_id or active_device_profile())]
+    return {
+        "id": profile["id"],
+        "label": profile["label"],
+        "description": profile["description"],
+        "screen": profile["screen"],
+        "density": profile["density"],
+    }
+
+
+def active_device_profile():
+    try:
+        state = json.loads(EMULATOR_DEVICE_PROFILE_STATE_PATH.read_text(encoding="utf-8"))
+        return normalize_device_profile(state.get("profile"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return normalize_device_profile(EMULATOR_DEVICE_PROFILE)
+
+
+def device_profile_state_exists():
+    try:
+        return EMULATOR_DEVICE_PROFILE_STATE_PATH.is_file()
+    except OSError:
+        return False
+
+
+def write_active_device_profile(profile_id):
+    EMULATOR_DEVICE_PROFILE_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"profile": normalize_device_profile(profile_id), "updated_at": time.time()}
+    temp_path = EMULATOR_DEVICE_PROFILE_STATE_PATH.with_name(
+        f"{EMULATOR_DEVICE_PROFILE_STATE_PATH.name}.{uuid.uuid4().hex}.tmp"
+    )
+    temp_path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    os.replace(temp_path, EMULATOR_DEVICE_PROFILE_STATE_PATH)
+
+
+def apply_device_profile(profile_id):
+    resolved_profile = DEVICE_PROFILES[normalize_device_profile(profile_id)]
+    screen = resolved_profile["screen"]
+    adb("shell", "wm", "size", f"{screen['width']}x{screen['height']}")
+    adb("shell", "wm", "density", str(resolved_profile["density"]))
+    adb("shell", "settings", "put", "system", "accelerometer_rotation", "0")
+    adb("shell", "settings", "put", "system", "user_rotation", "0")
+    wake_and_unlock()
+    write_active_device_profile(resolved_profile["id"])
+    shutdown_existing_video_stream()
+    return device_profile_payload(resolved_profile["id"])
+
+
+def ensure_initial_device_profile_applied():
+    if device_profile_state_exists() or normalize_device_profile(EMULATOR_DEVICE_PROFILE) == "phone":
+        return
+    with DEVICE_PROFILE_APPLY_LOCK:
+        if device_profile_state_exists():
+            return
+        apply_device_profile(EMULATOR_DEVICE_PROFILE)
 
 
 def run(cmd, timeout=90):
@@ -701,7 +787,14 @@ def schedule_video_startup_nudge():
 
 def launch_package(pkg):
     wake_and_unlock()
-    return adb("shell", "monkey", "-p", pkg, "-c", "android.intent.category.LAUNCHER", "1")
+    errors = []
+    categories = DEVICE_PROFILES[active_device_profile()]["launch_categories"]
+    for category in categories:
+        rc, out, err = run(["adb", "-s", ADB_TARGET, "shell", "monkey", "-p", pkg, "-c", category, "1"])
+        if rc == 0:
+            return out or err or f"Launched {pkg} with {category}"
+        errors.append(err or out or f"{category} launch failed")
+    raise RuntimeError("; ".join(errors) or f"Unable to launch {pkg}")
 
 
 def get_screen_size():
@@ -884,7 +977,39 @@ def video_prerequisite_error():
 @app.get("/health")
 def health():
     try:
-        return jsonify({"ok": "device" in adb("devices"), "target": ADB_TARGET})
+        ensure_initial_device_profile_applied()
+        return jsonify({"ok": "device" in adb("devices"), "target": ADB_TARGET, "device_profile": device_profile_payload()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/device-profile")
+def get_device_profile():
+    return jsonify(
+        {
+            "ok": True,
+            "active": device_profile_payload(),
+            "profiles": [device_profile_payload(profile_id) for profile_id in DEVICE_PROFILES],
+        }
+    )
+
+
+@app.post("/device-profile")
+def set_device_profile():
+    data = request.get_json(force=True, silent=True) or {}
+    requested_profile = data.get("profile", "")
+    if normalize_device_profile(requested_profile) != str(requested_profile or "").strip().lower():
+        return jsonify({"ok": False, "error": "Unsupported device profile"}), 400
+    try:
+        profile = apply_device_profile(requested_profile)
+        return jsonify(
+            {
+                "ok": True,
+                "active": profile,
+                "profiles": [device_profile_payload(profile_id) for profile_id in DEVICE_PROFILES],
+                "message": f"Switched emulator test profile to {profile['label']} ({profile['screen']['width']}x{profile['screen']['height']}).",
+            }
+        )
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -1471,6 +1596,7 @@ def screenrecord():
 @app.get("/device-info")
 def device_info():
     try:
+        ensure_initial_device_profile_applied()
         size = get_screen_size()
         abi_error = None
         try:
@@ -1478,7 +1604,14 @@ def device_info():
         except Exception as exc:
             abis = []
             abi_error = str(exc)
-        payload = {"ok": True, "screen": size, "target": ADB_TARGET, "abis": abis}
+        payload = {
+            "ok": True,
+            "screen": size,
+            "target": ADB_TARGET,
+            "abis": abis,
+            "device_profile": device_profile_payload(),
+            "device_profiles": [device_profile_payload(profile_id) for profile_id in DEVICE_PROFILES],
+        }
         if abi_error:
             payload["abi_error"] = abi_error
         return jsonify(payload)

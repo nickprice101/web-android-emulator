@@ -118,6 +118,20 @@ class InstallAbiTests(unittest.TestCase):
         self.assertEqual(plan["args"], ["install", "-r", "-t", "-g", str(apk_path)])
 
 
+class ScreenSizeTests(unittest.TestCase):
+    def test_get_screen_size_prefers_wm_override_size(self):
+        with patch("app.adb", return_value="Physical size: 1080x2340\nOverride size: 1920x1080\n"):
+            size = app_module.get_screen_size()
+
+        self.assertEqual(size, {"width": 1920, "height": 1080})
+
+    def test_get_screen_size_falls_back_to_physical_size(self):
+        with patch("app.adb", return_value="Physical size: 1080x2340\n"):
+            size = app_module.get_screen_size()
+
+        self.assertEqual(size, {"width": 1080, "height": 2340})
+
+
 class InputEventEndpointTests(unittest.TestCase):
     def test_input_event_accepts_tap_ratios_from_http_video_surface(self):
         adb_calls = []

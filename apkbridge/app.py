@@ -799,15 +799,23 @@ def launch_package(pkg):
 
 def get_screen_size():
     output = adb("shell", "wm", "size")
+    parsed_size = None
     for line in output.splitlines():
         cleaned = line.strip()
+        label = ""
         if ":" in cleaned:
-            cleaned = cleaned.split(":", 1)[1].strip()
+            label, cleaned = cleaned.split(":", 1)
+            label = label.strip().lower()
+            cleaned = cleaned.strip()
         if "x" not in cleaned:
             continue
         left, right = cleaned.lower().split("x", 1)
         if left.isdigit() and right.isdigit():
-            return {"width": int(left), "height": int(right)}
+            parsed_size = {"width": int(left), "height": int(right)}
+            if label == "override size":
+                return parsed_size
+    if parsed_size:
+        return parsed_size
     raise RuntimeError("Unable to determine emulator screen size")
 
 

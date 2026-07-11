@@ -797,6 +797,99 @@ def launch_package(pkg):
     raise RuntimeError("; ".join(errors) or f"Unable to launch {pkg}")
 
 
+def shortcut_label_for_package(pkg):
+    return str(pkg or "").strip().rsplit(".", 1)[-1] or str(pkg or "").strip()
+
+
+def launcher_intent_uri(pkg, category, component=""):
+    parts = [
+        "#Intent",
+        "action=android.intent.action.MAIN",
+        f"category={category}",
+        f"package={pkg}",
+    ]
+    if component:
+        parts.append(f"component={component}")
+    parts.append("end")
+    return ";".join(parts)
+
+
+def resolve_launcher_activity(pkg):
+    categories = DEVICE_PROFILES[active_device_profile()]["launch_categories"]
+    for category in categories:
+        rc, out, err = run(
+            [
+                "adb",
+                "-s",
+                ADB_TARGET,
+                "shell",
+                "cmd",
+                "package",
+                "resolve-activity",
+                "--brief",
+                "-a",
+                "android.intent.action.MAIN",
+                "-c",
+                category,
+                pkg,
+            ],
+            timeout=10,
+        )
+        if rc != 0:
+            continue
+        lines = [line.strip() for line in (out or err).splitlines() if line.strip()]
+        component = next((line for line in reversed(lines) if "/" in line and not line.startswith("priority=")), "")
+        if component:
+            return {"category": category, "component": component}
+    return {"category": categories[0], "component": ""}
+
+
+def add_package_to_home_screen(pkg):
+    pkg = str(pkg or "").strip()
+    if not pkg:
+        return {"ok": False, "message": "No package name available for home-screen shortcut."}
+
+    launcher_activity = resolve_launcher_activity(pkg)
+    shortcut_intent = launcher_intent_uri(
+        pkg,
+        launcher_activity["category"],
+        launcher_activity.get("component", ""),
+    )
+    label = shortcut_label_for_package(pkg)
+    try:
+        out = adb(
+            "shell",
+            "am",
+            "broadcast",
+            "-a",
+            "com.android.launcher.action.INSTALL_SHORTCUT",
+            "--es",
+            "android.intent.extra.shortcut.NAME",
+            label,
+            "--es",
+            "android.intent.extra.shortcut.INTENT",
+            shortcut_intent,
+            "--ez",
+            "duplicate",
+            "false",
+            timeout=10,
+        )
+        return {
+            "ok": True,
+            "message": out,
+            "intent": shortcut_intent,
+            "label": label,
+        }
+    except Exception as exc:
+        app.logger.warning("could not request launcher shortcut for %s: %s", pkg, exc)
+        return {
+            "ok": False,
+            "message": str(exc),
+            "intent": shortcut_intent,
+            "label": label,
+        }
+
+
 def get_screen_size():
     output = adb("shell", "wm", "size")
     parsed_size = None
@@ -968,6 +1061,29 @@ def infer_installed_package(previous_packages):
     return ""
 
 
+def install_response_payload(apk_path, package_hint="", before_packages=None):
+    previous_packages = before_packages if before_packages is not None else list_installed_packages()
+    detected_pkg = detect_package_name(apk_path)
+    final_pkg = package_hint or detected_pkg
+    install_plan = adb_install_plan(apk_path)
+    out = adb(*install_plan["args"])
+    if not final_pkg:
+        final_pkg = infer_installed_package(previous_packages)
+
+    home_screen = add_package_to_home_screen(final_pkg) if final_pkg else {
+        "ok": False,
+        "message": "No package name available for home-screen shortcut.",
+    }
+    return {
+        "ok": True,
+        "message": out,
+        "package": final_pkg,
+        **install_abi_response_fields(install_plan),
+        "home_screen": home_screen,
+        "launch": launch_package(final_pkg) if final_pkg else None,
+    }
+
+
 def video_prerequisite_error():
     missing = [tool for tool in ("adb", "ffmpeg") if not shutil.which(tool)]
     if missing:
@@ -1068,21 +1184,7 @@ def install():
         with tempfile.NamedTemporaryFile(suffix=".apk", delete=False) as tmp:
             f.save(tmp.name)
             tmp_path = tmp.name
-        detected_pkg = detect_package_name(tmp_path)
-        final_pkg = pkg or detected_pkg
-        install_plan = adb_install_plan(tmp_path)
-        out = adb(*install_plan["args"])
-        if not final_pkg:
-            final_pkg = infer_installed_package(before_packages)
-        return jsonify(
-            {
-                "ok": True,
-                "message": out,
-                "package": final_pkg,
-                **install_abi_response_fields(install_plan),
-                "launch": launch_package(final_pkg) if final_pkg else None,
-            }
-        )
+        return jsonify(install_response_payload(tmp_path, pkg, before_packages))
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
     finally:
@@ -1100,21 +1202,7 @@ def install_built():
         before_packages = list_installed_packages()
         apk = safe_workspace_path(data.get("relative_path", ""))
         pkg = data.get("package", "").strip()
-        detected_pkg = detect_package_name(apk)
-        final_pkg = pkg or detected_pkg
-        install_plan = adb_install_plan(apk)
-        out = adb(*install_plan["args"])
-        if not final_pkg:
-            final_pkg = infer_installed_package(before_packages)
-        return jsonify(
-            {
-                "ok": True,
-                "message": out,
-                "package": final_pkg,
-                **install_abi_response_fields(install_plan),
-                "launch": launch_package(final_pkg) if final_pkg else None,
-            }
-        )
+        return jsonify(install_response_payload(apk, pkg, before_packages))
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

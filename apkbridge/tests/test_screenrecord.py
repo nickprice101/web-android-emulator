@@ -132,6 +132,48 @@ class ScreenSizeTests(unittest.TestCase):
         self.assertEqual(size, {"width": 1080, "height": 2340})
 
 
+class HomeScreenShortcutTests(unittest.TestCase):
+    def test_add_package_to_home_screen_requests_launcher_shortcut(self):
+        adb_calls = []
+
+        def fake_adb(*args, **kwargs):
+            adb_calls.append((args, kwargs))
+            return "Broadcast completed: result=0"
+
+        with patch("app.active_device_profile", return_value="tv"), patch(
+            "app.run",
+            return_value=(0, "com.example/.TvActivity\n", ""),
+        ), patch("app.adb", side_effect=fake_adb):
+            result = app_module.add_package_to_home_screen("com.example")
+
+        self.assertTrue(result["ok"])
+        self.assertIn("android.intent.category.LEANBACK_LAUNCHER", result["intent"])
+        self.assertIn("component=com.example/.TvActivity", result["intent"])
+        self.assertEqual(adb_calls[0][0][0:5], ("shell", "am", "broadcast", "-a", "com.android.launcher.action.INSTALL_SHORTCUT"))
+
+    def test_install_response_keeps_install_success_when_home_screen_shortcut_fails(self):
+        with patch("app.detect_package_name", return_value="com.example"), patch(
+            "app.adb_install_plan",
+            return_value={
+                "args": ["install", "-r", "/tmp/app.apk"],
+                "resolved_abi": None,
+                "mode": "auto",
+                "reason": "test",
+                "device_abis": [],
+                "apk_ai_abis": {},
+            },
+        ), patch("app.adb", return_value="Success"), patch(
+            "app.add_package_to_home_screen",
+            return_value={"ok": False, "message": "launcher denied shortcut"},
+        ), patch("app.launch_package", return_value="Launched com.example"):
+            result = app_module.install_response_payload("/tmp/app.apk", "", set())
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["package"], "com.example")
+        self.assertFalse(result["home_screen"]["ok"])
+        self.assertEqual(result["launch"], "Launched com.example")
+
+
 class InputEventEndpointTests(unittest.TestCase):
     def test_input_event_accepts_tap_ratios_from_http_video_surface(self):
         adb_calls = []

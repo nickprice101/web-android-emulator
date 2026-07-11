@@ -296,6 +296,46 @@ function stateColor(value) {
   return "#f85149";
 }
 
+function NavIcon({ type }) {
+  if (type === "back") {
+    return (
+      <span aria-hidden="true" style={{ width: 20, height: 20, position: "relative", display: "inline-block" }}>
+        <span style={{ position: "absolute", left: 3, top: 9, width: 14, height: 2, background: "currentColor", borderRadius: 2 }} />
+        <span style={{ position: "absolute", left: 3, top: 5, width: 9, height: 9, borderLeft: "2px solid currentColor", borderBottom: "2px solid currentColor", transform: "rotate(45deg)", transformOrigin: "center" }} />
+      </span>
+    );
+  }
+
+  if (type === "home") {
+    return (
+      <span aria-hidden="true" style={{ width: 20, height: 20, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ width: 12, height: 12, border: "2px solid currentColor", borderRadius: "50%", boxSizing: "border-box" }} />
+      </span>
+    );
+  }
+
+  return (
+    <span aria-hidden="true" style={{ width: 20, height: 20, display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3 }}>
+      <span style={{ width: 14, height: 2, background: "currentColor", borderRadius: 2 }} />
+      <span style={{ width: 14, height: 2, background: "currentColor", borderRadius: 2 }} />
+      <span style={{ width: 14, height: 2, background: "currentColor", borderRadius: 2 }} />
+    </span>
+  );
+}
+
+function NavButton({ type, label, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      style={{ width: 38, height: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+    >
+      <NavIcon type={type} />
+    </button>
+  );
+}
+
 function ApiVideoInputSurface({
   containerRef,
   mediaWidth,
@@ -400,9 +440,10 @@ function ApiVideoInputSurface({
   );
 }
 
-function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onMessage, onDiagnosticsChange, onInput }) {
+function DisplayHttpVideoPane({ width, height, streamMaxSize, deviceInfo, onStateChange, onMessage, onDiagnosticsChange, onInput }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
+  const [streamAttempt, setStreamAttempt] = useState(0);
   const [, setStatus] = useState("connecting");
   const [detail, setDetail] = useState(
     `Opening HTTP tunnel from the emulator X display at ${GUACAMOLE_HTTP_TARGET_FPS}fps / ${streamMaxSize}p...`
@@ -430,6 +471,7 @@ function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onM
     let reader = null;
     let frameCallbackId = null;
     let fpsTimer = null;
+    let reconnectTimer = null;
     let lastPlaybackFrameCount = 0;
     let lastPlaybackFrameTime = performance.now();
     const frameTimes = [];
@@ -535,6 +577,19 @@ function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onM
         { immediate: true }
       );
     };
+    const scheduleReconnect = (reason, delayMs = 750) => {
+      if (cancelled) return;
+      setStatus("connecting");
+      setHasVideo(false);
+      setDetail(`${reason} Reconnecting live display stream...`);
+      updateDebug({ lastEvent: "reconnect:scheduled", lastError: reason }, { immediate: true });
+      onStateChange?.("connecting");
+      reconnectTimer = setTimeout(() => {
+        if (!cancelled) {
+          setStreamAttempt((value) => value + 1);
+        }
+      }, delayMs);
+    };
 
     if (video) {
       video.src = objectUrl;
@@ -608,7 +663,10 @@ function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onM
 
         while (!cancelled) {
           const { value, done } = await reader.read();
-          if (done) break;
+          if (done) {
+            scheduleReconnect("Display video stream ended.");
+            break;
+          }
           if (!value?.byteLength) continue;
 
           chunksReceived += 1;
@@ -650,6 +708,7 @@ function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onM
           updateDebug({ lastEvent: "error", lastError: error.message }, { immediate: true });
           onStateChange?.("error");
           onMessage?.(`Display HTTP video failed: ${error.message}`);
+          scheduleReconnect(`Display HTTP video failed: ${error.message}`, 1250);
         }
       }
     }
@@ -665,6 +724,9 @@ function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onM
       abortController.abort();
       if (debugFlushTimer) {
         clearTimeout(debugFlushTimer);
+      }
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
       }
       if (fpsTimer) {
         clearInterval(fpsTimer);
@@ -684,9 +746,10 @@ function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onM
       }
       URL.revokeObjectURL(objectUrl);
     };
-  }, [onMessage, onStateChange, streamMaxSize]);
+  }, [onMessage, onStateChange, streamAttempt, streamMaxSize]);
 
   const inlineDebugSummary = `${formatBytes(debug.bytesReceived)} / ${debug.chunksReceived} chunks`;
+  const screen = deviceInfo?.screen || null;
 
   return (
     <div
@@ -695,8 +758,8 @@ function DisplayHttpVideoPane({ width, height, streamMaxSize, onStateChange, onM
     >
       <ApiVideoInputSurface
         containerRef={containerRef}
-        mediaWidth={videoRef.current?.videoWidth || width}
-        mediaHeight={videoRef.current?.videoHeight || height}
+        mediaWidth={screen?.width || videoRef.current?.videoWidth || width}
+        mediaHeight={screen?.height || videoRef.current?.videoHeight || height}
         fitMode="cover"
         onInput={onInput}
         onMessage={onMessage}
@@ -795,6 +858,7 @@ function App() {
   const [deviceProfile, setDeviceProfile] = useState("phone");
   const [streamMode, setStreamMode] = useState(DISPLAY_HTTP_MODE);
   const [streamMaxSize, setStreamMaxSize] = useState(DEFAULT_GUACAMOLE_HTTP_MAX_SIZE);
+  const [streamRevision, setStreamRevision] = useState(0);
   const [displayDiagnostics, setDisplayDiagnostics] = useState(null);
   const [logs, setLogs] = useState([]);
   const [logFilter, setLogFilter] = useState("");
@@ -839,8 +903,9 @@ function App() {
       deviceInfo,
       deviceProfile,
       streamMaxSize,
+      streamRevision,
     };
-  }, [bridgeState, deviceInfo, deviceProfile, emuState, displayDiagnostics, streamMaxSize, streamMode]);
+  }, [bridgeState, deviceInfo, deviceProfile, emuState, displayDiagnostics, streamMaxSize, streamMode, streamRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -949,6 +1014,15 @@ function App() {
     }
   }
 
+  function restartDisplayStream(nextMessage) {
+    setDisplayDiagnostics(null);
+    setEmuState("connecting");
+    if (nextMessage) {
+      setMessage(nextMessage);
+    }
+    setStreamRevision((value) => value + 1);
+  }
+
   async function uploadApk(event) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -959,9 +1033,9 @@ function App() {
     const data = await executeApi("/api/install", { method: "POST", body: form });
     if (data.package) {
       setPackageName(data.package);
-      setMessage(`Ready to launch. Installed ${file.name} as ${data.package}`);
+      restartDisplayStream(`Installed ${file.name} as ${data.package}. Live display reconnecting to the launched app...`);
     } else {
-      setMessage(`Ready to launch. Installed ${file.name}`);
+      restartDisplayStream(`Installed ${file.name}. Live display reconnecting...`);
     }
     event.target.value = "";
   }
@@ -975,9 +1049,9 @@ function App() {
     });
     if (data.package) {
       setPackageName(data.package);
-      setMessage(`Ready to launch. Installed ${relativePath} as ${data.package}`);
+      restartDisplayStream(`Installed ${relativePath} as ${data.package}. Live display reconnecting to the launched app...`);
     } else {
-      setMessage(`Ready to launch. Installed ${relativePath}`);
+      restartDisplayStream(`Installed ${relativePath}. Live display reconnecting...`);
     }
   }
 
@@ -987,6 +1061,7 @@ function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ package: packageName }),
     });
+    restartDisplayStream(`Launched ${packageName}. Live display reconnecting...`);
   }
 
   async function wakeDevice() {
@@ -1032,7 +1107,7 @@ function App() {
   }
 
   function reconnect() {
-    window.location.reload();
+    restartDisplayStream("Reconnecting live display stream...");
   }
 
   function handleStreamModeChange(nextMode) {
@@ -1099,9 +1174,9 @@ function App() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", background: "#11141a", color: "#d7dfed", fontFamily: "Segoe UI, Arial, sans-serif" }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #2b313d", background: "#171a21", flexShrink: 0 }}>
-        <button onClick={() => sendKey("GoBack")} title="Back" aria-label="Back">Back</button>
-        <button onClick={() => sendKey("GoHome")} title="Home" aria-label="Home">Home</button>
-        <button onClick={() => sendKey("AppSwitch")} title="Recents" aria-label="Recents">Recents</button>
+        <NavButton type="back" label="Back" onClick={() => sendKey("GoBack")} />
+        <NavButton type="home" label="Home" onClick={() => sendKey("GoHome")} />
+        <NavButton type="recents" label="Recents" onClick={() => sendKey("AppSwitch")} />
         <button onClick={wakeDevice} disabled={busy}>Wake</button>
         <button onClick={rebootDevice} disabled={busy}>Reboot</button>
         <button onClick={fullscreen}>Fullscreen</button>
@@ -1149,9 +1224,11 @@ function App() {
         <div ref={displaySurfaceRef} style={{ width: `${displayPercent}%`, display: "flex", alignItems: "center", justifyContent: "center", padding: 8, overflow: "hidden", userSelect: "none" }}>
           {streamMode === DISPLAY_HTTP_MODE ? (
             <DisplayHttpVideoPane
+              key={`display-http-${streamMaxSize}-${deviceProfile}-${streamRevision}`}
               width={displaySize.width}
               height={displaySize.height}
               streamMaxSize={streamMaxSize}
+              deviceInfo={deviceInfo}
               onStateChange={setEmuState}
               onMessage={setMessage}
               onDiagnosticsChange={setDisplayDiagnostics}
@@ -1159,6 +1236,7 @@ function App() {
             />
           ) : (
             <PngPreviewPane
+              key={`png-${deviceProfile}-${streamRevision}`}
               width={displaySize.width}
               height={displaySize.height}
               deviceInfo={deviceInfo}

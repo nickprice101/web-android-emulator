@@ -82,6 +82,10 @@ assert.match(
   /Sent \$\{name\} through Guacamole-style HTTP input/,
   "toolbar keys must route through HTTP input"
 );
+assert.match(frontendMain, /function NavIcon/, "frontend toolbar must render Android-style symbol navigation controls");
+assert.match(frontendMain, /deviceInfo=\{deviceInfo\}/, "HTTP video input mapping must receive the active device screen dimensions");
+assert.match(frontendMain, /setStreamRevision\(\(value\) => value \+ 1\)/, "frontend must reconnect the live stream without a browser refresh");
+assert.doesNotMatch(frontendMain, /window\.location\.reload\(\)/, "frontend reconnect must not refresh the browser shell");
 
 const frontendPackage = readRepoFile("frontend/package.json");
 const frontendViteConfig = readRepoFile("frontend/vite.config.js");
@@ -101,6 +105,8 @@ assert.match(apkbridgeApp, /X11_DISPLAY = .*"emulator:99\.0\+100,100"/, "apkbrid
 assert.match(apkbridgeApp, /DEVICE_PROFILES = \{[\s\S]*"phone"[\s\S]*"tv"/, "apkbridge must define phone and TV testing profiles");
 assert.match(apkbridgeApp, /@app\.post\("\/device-profile"\)/, "apkbridge must expose a device-profile switch endpoint");
 assert.match(apkbridgeApp, /android\.intent\.category\.LEANBACK_LAUNCHER/, "apkbridge must prefer Leanback launch categories for TV apps");
+assert.match(apkbridgeApp, /com\.android\.launcher\.action\.INSTALL_SHORTCUT/, "apkbridge must request a launcher shortcut after installing an app");
+assert.match(apkbridgeApp, /"home_screen": home_screen/, "install responses must report home-screen shortcut status");
 assert.match(apkbridgeApp, /def schedule_video_startup_nudge/, "apkbridge must nudge the display when starting video capture");
 const x11FfmpegCommand = apkbridgeApp.match(/def x11_ffmpeg_command[\s\S]*?\n\n/)?.[0] || "";
 assert.ok(x11FfmpegCommand, "apkbridge must define an FFmpeg X display command for the HTTP tunnel");

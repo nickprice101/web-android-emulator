@@ -4,6 +4,7 @@ import fnmatch
 import json
 import os
 import queue
+import re
 import signal
 import shlex
 import shutil
@@ -143,6 +144,28 @@ class VideoStreamBusy(RuntimeError):
 
 class VideoStreamSuperseded(RuntimeError):
     """Raised when a newer client has replaced this display stream."""
+
+
+def parse_log_filter(expression):
+    """Parse uppercase AND/OR operators into OR groups of AND terms."""
+    expression = str(expression or "").strip()
+    if not expression:
+        return []
+
+    return [
+        [term.strip().lower() for term in re.split(r"\s+AND\s+", group) if term.strip()]
+        for group in re.split(r"\s+OR\s+", expression)
+        if group.strip()
+    ]
+
+
+def log_line_matches_filter(line, expression):
+    filter_groups = parse_log_filter(expression)
+    if not filter_groups:
+        return True
+
+    normalized_line = str(line).lower()
+    return any(all(term in normalized_line for term in group) for group in filter_groups)
 
 
 def normalize_device_profile(value):
@@ -1731,7 +1754,8 @@ def logcat():
     except ValueError:
         limit = 100
 
-    text_filter = request.args.get("filter", "").strip().lower()
+    text_filter = request.args.get("filter", "").strip()
+    filter_mode = request.args.get("filter_mode", "include").strip().lower()
     errors_only = request.args.get("errors_only", "0") in {"1", "true", "yes", "on"}
     include_crash = request.args.get("include_crash", "1") in {"1", "true", "yes", "on"}
     fatal_only = request.args.get("fatal_only", "0") in {"1", "true", "yes", "on"}
@@ -1778,7 +1802,12 @@ def logcat():
                 combined_lines = []
 
         if text_filter:
-            combined_lines = [line for line in combined_lines if text_filter in line.lower()]
+            include_matches = filter_mode != "exclude"
+            combined_lines = [
+                line
+                for line in combined_lines
+                if log_line_matches_filter(line, text_filter) == include_matches
+            ]
 
         return jsonify({"ok": True, "entries": combined_lines[-limit:]})
     except Exception as e:

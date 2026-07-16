@@ -8,6 +8,7 @@ const GUACAMOLE_HTTP_BIT_RATE = 6_000_000;
 const DEFAULT_GUACAMOLE_HTTP_MAX_SIZE = 720;
 const DISPLAY_HTTP_MODE = "display-http";
 const PNG_REFRESH_MS = 1000;
+const LOG_FILTER_HELP = "Filter text is case-insensitive. Use uppercase AND to require every term and uppercase OR to match any term. AND is evaluated before OR. Example: ActivityManager AND crash OR timeout.";
 const STREAM_QUALITY_OPTIONS = [
   { value: 720, label: "720p" },
   { value: 1080, label: "1080p" },
@@ -862,6 +863,8 @@ function App() {
   const [displayDiagnostics, setDisplayDiagnostics] = useState(null);
   const [logs, setLogs] = useState([]);
   const [logFilter, setLogFilter] = useState("");
+  const [logFilterMode, setLogFilterMode] = useState("include");
+  const [logFilterHelpOpen, setLogFilterHelpOpen] = useState(false);
   const [errorsOnly, setErrorsOnly] = useState(false);
   const [fatalOnly, setFatalOnly] = useState(false);
   const [logsPaused, setLogsPaused] = useState(false);
@@ -958,6 +961,7 @@ function App() {
       const params = new URLSearchParams({
         limit: String(logRows),
         filter: logFilter,
+        filter_mode: logFilterMode,
         errors_only: errorsOnly ? "1" : "0",
         fatal_only: fatalOnly ? "1" : "0",
       });
@@ -978,7 +982,7 @@ function App() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [errorsOnly, fatalOnly, logFilter, logRows, logsPaused]);
+  }, [errorsOnly, fatalOnly, logFilter, logFilterMode, logRows, logsPaused]);
 
   const sendInput = useCallback(async (payload) => {
     const response = await fetch("/api/input-event", {
@@ -1323,7 +1327,96 @@ function App() {
           <div style={{ marginBottom: 12, padding: 12, border: "1px solid #2b313d", borderRadius: 8 }}>
             <div style={{ fontSize: 12, color: "#a8b3c7", marginBottom: 8 }}>Android system logs ({logsPaused ? "paused" : "live"}, last {logRows})</div>
             <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
-              <input type="text" value={logFilter} onChange={(event) => setLogFilter(event.target.value)} placeholder="Filter text (e.g. package name)" style={{ flex: 1, minWidth: 180 }} />
+              <div style={{ display: "flex", flex: "1 1 430px", minWidth: 300, gap: 8, alignItems: "center" }}>
+                <div style={{ position: "relative", flex: 1, minWidth: 190 }}>
+                  <input
+                    aria-label="Log text filter"
+                    type="text"
+                    value={logFilter}
+                    onChange={(event) => setLogFilter(event.target.value)}
+                    placeholder="Filter text (e.g. package AND crash)"
+                    style={{ width: "100%", boxSizing: "border-box", paddingRight: 38 }}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Filter syntax information"
+                    aria-describedby={logFilterHelpOpen ? "log-filter-help" : undefined}
+                    onMouseEnter={() => setLogFilterHelpOpen(true)}
+                    onMouseLeave={() => setLogFilterHelpOpen(false)}
+                    onFocus={() => setLogFilterHelpOpen(true)}
+                    onBlur={() => setLogFilterHelpOpen(false)}
+                    style={{
+                      position: "absolute",
+                      right: 7,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      width: 24,
+                      height: 24,
+                      padding: 0,
+                      borderRadius: "50%",
+                      color: "#b8c7e0",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      cursor: "help",
+                    }}
+                  >
+                    i
+                  </button>
+                  {logFilterHelpOpen && (
+                    <div
+                      id="log-filter-help"
+                      role="tooltip"
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        top: "calc(100% + 8px)",
+                        zIndex: 10,
+                        width: 320,
+                        maxWidth: "100%",
+                        boxSizing: "border-box",
+                        padding: 10,
+                        border: "1px solid #46536b",
+                        borderRadius: 8,
+                        background: "#111823",
+                        color: "#d7dfed",
+                        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
+                        fontSize: 12,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {LOG_FILTER_HELP}
+                    </div>
+                  )}
+                </div>
+                <div
+                  role="group"
+                  aria-label="Log text filter mode"
+                  style={{ display: "inline-flex", border: "1px solid #2b313d", borderRadius: 8, overflow: "hidden", flexShrink: 0 }}
+                >
+                  {["include", "exclude"].map((mode) => {
+                    const selected = logFilterMode === mode;
+                    return (
+                      <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setLogFilterMode(mode)}
+                        style={{
+                          border: 0,
+                          borderRadius: 0,
+                          background: selected ? "#315c38" : "#1b2130",
+                          color: selected ? "#f0fff2" : "#a8b3c7",
+                          fontSize: 12,
+                          fontWeight: selected ? 600 : 400,
+                        }}
+                      >
+                        {mode === "include" ? "Include" : "Exclude"}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
                 <input type="checkbox" checked={errorsOnly} onChange={(event) => setErrorsOnly(event.target.checked)} />
                 Errors only

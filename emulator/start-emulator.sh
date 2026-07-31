@@ -146,6 +146,24 @@ virtual_display_enabled() {
   esac
 }
 
+prepare_packet_streamer_runtime() {
+  if [ -z "${EMULATOR_PACKET_STREAMER_ENDPOINT}" ]; then
+    log "Bluetooth packet streamer disabled by EMULATOR_PACKET_STREAMER_ENDPOINT."
+    return 0
+  fi
+
+  if [ ! -x "${ANDROID_SDK_ROOT}/emulator/netsimd" ]; then
+    log "ERROR: Bluetooth packet streamer requested, but netsimd is unavailable at ${ANDROID_SDK_ROOT}/emulator/netsimd."
+    exit 1
+  fi
+
+  XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/android-emulator-runtime}"
+  mkdir -p "${XDG_RUNTIME_DIR}"
+  chmod 700 "${XDG_RUNTIME_DIR}"
+  export XDG_RUNTIME_DIR
+  log "Bluetooth packet streamer runtime: XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
+}
+
 display_number_from_name() {
   printf '%s' "$1" | sed 's/^.*://; s/\..*$//'
 }
@@ -268,6 +286,7 @@ export PATH="${ANDROID_SDK_ROOT}/platform-tools:${ANDROID_SDK_ROOT}/emulator:${P
 EMULATOR_LAUNCH_MODE="${EMULATOR_LAUNCH_MODE:-direct}"
 EMULATOR_RADIO_DEVICE="${EMULATOR_RADIO_DEVICE:-null}"
 EMULATOR_USE_RADIO_OVERRIDE="${EMULATOR_USE_RADIO_OVERRIDE:-0}"
+EMULATOR_PACKET_STREAMER_ENDPOINT="${EMULATOR_PACKET_STREAMER_ENDPOINT-default}"
 EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE:-system-images;android-36;google_apis;x86_64}"
 EMULATOR_PLATFORM="${EMULATOR_PLATFORM:-platforms;android-36}"
 EMULATOR_X_CAPTURE_SIZE="${EMULATOR_X_CAPTURE_SIZE:-1080x2340}"
@@ -380,6 +399,7 @@ EOF
 
 ensure_ipv6_loopback_host
 ensure_ipv6_loopback_interface
+prepare_packet_streamer_runtime
 ensure_pixel2_avd_aliases
 remove_stale_pixel2_avd_locks
 
@@ -629,6 +649,10 @@ launch_direct_emulator() {
     _radio_override_applied=1
   fi
 
+  if [ -n "${EMULATOR_PACKET_STREAMER_ENDPOINT}" ]; then
+    set -- "$@" -packet-streamer-endpoint "${EMULATOR_PACKET_STREAMER_ENDPOINT}"
+  fi
+
   if [ -n "${EMULATOR_PARAMS_VALUE}" ]; then
     # EMULATOR_PARAMS is a user-controlled shell-style flag string.
     # Split it once here so direct mode preserves current compose behavior.
@@ -654,6 +678,11 @@ launch_direct_emulator() {
     log "Direct emulator radio override: ${EMULATOR_RADIO_DEVICE}"
   else
     log "Direct emulator radio override: disabled for emulator '${DIRECT_EMULATOR_VERSION:-unknown}'"
+  fi
+  if [ -n "${EMULATOR_PACKET_STREAMER_ENDPOINT}" ]; then
+    log "Direct emulator Bluetooth packet streamer endpoint: ${EMULATOR_PACKET_STREAMER_ENDPOINT}"
+  else
+    log "Direct emulator Bluetooth packet streamer endpoint: disabled"
   fi
   exec "$@"
 }

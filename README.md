@@ -16,6 +16,13 @@ The emulator container starts Xvfb on `:99`, launches the Android emulator into 
 * `X11_DISPLAY=emulator:99.0+100,100`
 * `X11_VIDEO_SIZE=1080x2340`
 
+The image pins Android Emulator `37.1.11` from Google's stable channel so its bundled
+`netsimd` stays compatible with the Android 16 Bluetooth stack. The launcher
+also provisions a private `XDG_RUNTIME_DIR` and explicitly connects
+the guest Bluetooth HCI transport to the emulator's bundled `netsimd` controller.
+`EMULATOR_PACKET_STREAMER_ENDPOINT` defaults to `default`; set it to an empty
+value only when intentionally supplying no virtual Bluetooth controller.
+
 The emulator container defaults to `EMULATOR_GPU_MODE=swiftshader_indirect` for
 stable headless rendering across container hosts. It still maps `/dev/dri`, so
 deployments with a known-good render device can opt into host acceleration with

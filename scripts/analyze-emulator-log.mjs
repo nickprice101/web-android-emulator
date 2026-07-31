@@ -29,6 +29,14 @@ const findings = {
     /\[start-emulator\] Direct emulator radio override: disabled/.test(logText),
   directLaunchAdbServerStarted:
     /\[start-emulator\] ADB server is running on port 5037 for direct emulator launch/.test(logText),
+  packetStreamerConfigured:
+    /\[start-emulator\] Direct emulator Bluetooth packet streamer endpoint: (?!disabled\b)\S+/.test(logText),
+  packetStreamerActivated: /Activated packet streamer for bluetooth emulation/.test(logText),
+  bluetoothControllerStartupCrash:
+    /Can't start stack, last instance: starting Controller/.test(logText),
+  bluetoothStackStartupCrash:
+    /Can't start stack, last instance: starting .+/.test(logText) ||
+    /Fatal signal 6 \(SIGABRT\).*bt_stack_manage/.test(logText),
   metricsPromptWarning: /WARNING - ACTION REQUIRED/.test(logText),
   unsupportedHostGpu: /Your GPU cannot be used for hardware rendering/.test(logText),
   vulkanIncompatibleDriver: /VK_ERROR_INCOMPATIBLE_DRIVER/.test(logText),
@@ -123,6 +131,14 @@ if (
   rootCause = "unsupported-host-gpu-rendering";
   explanation =
     "The emulator tried to use host GPU rendering, but the container host did not expose a compatible GLES/Vulkan driver. Use swiftshader_indirect for container video streaming.";
+} else if (findings.bluetoothControllerStartupCrash) {
+  rootCause = "bluetooth-controller-unavailable";
+  explanation =
+    "The Android Bluetooth service repeatedly aborted because the emulator did not provide a working packet-streamer controller.";
+} else if (findings.bluetoothStackStartupCrash) {
+  rootCause = "bluetooth-stack-startup-failure";
+  explanation =
+    "The Android Bluetooth service repeatedly aborted while starting a stack module, indicating an emulator/controller compatibility failure.";
 }
 
 const summary = {
@@ -140,6 +156,7 @@ const summary = {
     !findings.duplicateAvdLockFatal &&
     !findings.unsupportedHostGpu &&
     !findings.vulkanIncompatibleDriver &&
+    !findings.bluetoothStackStartupCrash &&
     !findings.repeatedRestartLoop,
   findings,
 };
@@ -159,6 +176,7 @@ if (
   findings.duplicateAvdLockFatal ||
   findings.unsupportedHostGpu ||
   findings.vulkanIncompatibleDriver ||
+  findings.bluetoothStackStartupCrash ||
   findings.repeatedRestartLoop
 ) {
   console.error("Detected an emulator restart loop, but the exact signature was not classified.");

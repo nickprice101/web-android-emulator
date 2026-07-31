@@ -4,9 +4,9 @@ ARG EMULATOR_IMAGE
 
 ARG EMULATOR_SYSTEM_IMAGE=system-images;android-36;google_apis;x86_64
 ARG EMULATOR_PLATFORM=platforms;android-36
-ARG EMULATOR_PACKAGE_VERSION=36.5.10
-ARG EMULATOR_PACKAGE_URL=https://dl.google.com/android/repository/emulator-linux_x64-15081367.zip
-ARG EMULATOR_PACKAGE_SHA1=9f03296214df837c608d0d101e5e03ebcebb4343
+ARG EMULATOR_PACKAGE_VERSION=37.1.11
+ARG EMULATOR_PACKAGE_URL=https://dl.google.com/android/repository/emulator-linux_x64-15917651.zip
+ARG EMULATOR_PACKAGE_SHA1=1b1f78891abf8ec268264356e1365c25519e8379
 
 ENV ANDROID_USER_HOME=/root/.android \
     ANDROID_EMULATOR_HOME=/root/.android \
@@ -82,7 +82,7 @@ RUN set -eux; \
   _emulator_pkg_xml_old="${ANDROID_SDK_ROOT}/emulator/package.xml"; \
   if [ -f "${_emulator_pkg_xml_old}" ]; then \
     cp "${_emulator_pkg_xml_old}" "${TMP_DIR}/emulator/package.xml"; \
-    sed -i '/<revision>/,/<\/revision>/c\    <revision>\n      <major>36</major>\n      <minor>5</minor>\n      <micro>10</micro>\n    </revision>' "${TMP_DIR}/emulator/package.xml"; \
+    sed -i '/<revision>/,/<\/revision>/c\    <revision>\n      <major>37</major>\n      <minor>1</minor>\n      <micro>11</micro>\n    </revision>' "${TMP_DIR}/emulator/package.xml"; \
   fi; \
   rm -rf "${ANDROID_SDK_ROOT}/emulator"; \
   mv "${TMP_DIR}/emulator" "${ANDROID_SDK_ROOT}/emulator"; \

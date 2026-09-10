@@ -12,20 +12,22 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
 
     env:
-      SSH_IP: ${{ secrets.SSH_IP }}
+      DEPLOY_HOST: deploy.corsicanescape.com
       SSH_USER: ${{ secrets.SSH_USER }}
       SSH_PATH: ${{ secrets.SSH_PATH }}
       BUILD_ONLY: ${{ inputs.build_only && 'true' || 'false' }}
+
       # Emulator runtime base image is pulled from Google's Artifact Registry.
       EMULATOR_IMAGE_PRIMARY: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
       EMULATOR_IMAGE_FALLBACK: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
       EMULATOR_IMAGE: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64-no-metrics:7148297
-      # Android 14 (API 34) guest packages are pulled by sdkmanager from
-      # https://dl.google.com/android/repository/ during the emulator image build.
+
+      # Android 14 (API 34) guest packages are pulled by sdkmanager.
       EMULATOR_SYSTEM_IMAGE: system-images;android-34;google_apis;x86_64
       EMULATOR_PLATFORM: platforms;android-34
       REQUIRE_API34_PRIMARY: "false"
@@ -35,19 +37,23 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Verify emulator image references are resolvable
+        shell: bash
         run: |
           set -euo pipefail
 
           image_is_resolvable() {
             local image="$1"
+
             for attempt in 1 2 3; do
               if docker manifest inspect "${image}" > /dev/null 2>&1; then
                 return 0
               fi
+
               if [[ "${attempt}" -lt 3 ]]; then
                 sleep 5
               fi
             done
+
             return 1
           }
 
@@ -77,50 +83,96 @@ jobs:
             exit 1
           fi
 
-      - name: Set up SSH key and known_hosts
+      - name: Install cloudflared
         if: ${{ !inputs.build_only }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CLOUDFLARED_VERSION="2026.5.1"
+
+          curl -L \
+            "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" \
+            -o /usr/local/bin/cloudflared
+
+          chmod +x /usr/local/bin/cloudflared
+
+          cloudflared --version
+
+      - name: Configure SSH through Cloudflare
+        if: ${{ !inputs.build_only }}
+        shell: bash
         env:
           SSH_B64: ${{ secrets.SSH_B64 }}
-          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
-          SSH_KEY_FILE="$(mktemp)"
-          printf '%s' "${SSH_B64}" | base64 --decode > "${SSH_KEY_FILE}"
-          chmod 600 "${SSH_KEY_FILE}"
-          echo "SSH_KEY_FILE=${SSH_KEY_FILE}" >> "$GITHUB_ENV"
+          set -euo pipefail
 
-          KNOWN_HOSTS_FILE="${HOME}/.ssh/known_hosts"
-          mkdir -p "${HOME}/.ssh"
-          chmod 700 "${HOME}/.ssh"
-          if [[ -n "${SSH_KNOWN_HOSTS}" ]]; then
-            printf '%s\n' "${SSH_KNOWN_HOSTS}" >> "${KNOWN_HOSTS_FILE}"
-            echo "SSH_STRICT=yes" >> "$GITHUB_ENV"
-          else
-            echo "WARNING: SSH_KNOWN_HOSTS secret is not set; host key verification is disabled." >&2
-            echo "SSH_STRICT=no" >> "$GITHUB_ENV"
-          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          echo "${SSH_B64}" \
+            | tr -d '\r\n' \
+            | base64 --decode \
+            > ~/.ssh/id_ed25519
+
+          chmod 600 ~/.ssh/id_ed25519
+
+          echo "Validating SSH key..."
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null
+          echo "SSH key OK"
+
+          cat > ~/.ssh/config <<EOF
+          Host starbuck-deploy
+            HostName ${DEPLOY_HOST}
+            User ${SSH_USER}
+            IdentityFile ~/.ssh/id_ed25519
+            IdentitiesOnly yes
+            BatchMode yes
+            ConnectTimeout 30
+            ServerAliveInterval 10
+            ServerAliveCountMax 6
+            StrictHostKeyChecking accept-new
+            ProxyCommand cloudflared access ssh --hostname %h --service-token-id "${CF_ACCESS_CLIENT_ID}" --service-token-secret "${CF_ACCESS_CLIENT_SECRET}"
+          EOF
+
+          chmod 600 ~/.ssh/config
+
+      - name: Test Cloudflare SSH connection
+        if: ${{ !inputs.build_only }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ssh -vv starbuck-deploy \
+            "echo CLOUDFLARE_SSH_CONNECTED && hostname && whoami"
 
       - name: Ensure destination directory exists
         if: ${{ !inputs.build_only }}
+        shell: bash
         run: |
-          ssh -i "${SSH_KEY_FILE}" \
-            -o StrictHostKeyChecking="${SSH_STRICT}" \
-            -o BatchMode=yes \
-            "${SSH_USER}@${SSH_IP}" \
+          set -euo pipefail
+
+          ssh starbuck-deploy \
             "mkdir -p '${SSH_PATH}'"
 
       - name: Check Docker version on remote
         if: ${{ !inputs.build_only }}
+        shell: bash
         run: |
-          ssh -i "${SSH_KEY_FILE}" \
-            -o StrictHostKeyChecking="${SSH_STRICT}" \
-            -o BatchMode=yes \
-            "${SSH_USER}@${SSH_IP}" \
+          set -euo pipefail
+
+          ssh starbuck-deploy \
             bash -l -s <<'REMOTE'
           set -euo pipefail
+
           echo "=== docker version ==="
           docker version || echo "docker version failed"
+
           echo "=== docker info ==="
           docker info || echo "docker info failed"
+
           echo "=== compose availability ==="
           docker compose version 2>/dev/null \
             || docker-compose version 2>/dev/null \
@@ -129,13 +181,14 @@ jobs:
 
       - name: Validate Docker prerequisites on remote
         if: ${{ !inputs.build_only }}
+        shell: bash
         run: |
-          ssh -i "${SSH_KEY_FILE}" \
-            -o StrictHostKeyChecking="${SSH_STRICT}" \
-            -o BatchMode=yes \
-            "${SSH_USER}@${SSH_IP}" \
+          set -euo pipefail
+
+          ssh starbuck-deploy \
             bash -l -s <<'REMOTE'
           set -euo pipefail
+
           if ! command -v docker > /dev/null 2>&1; then
             echo "Docker is not installed on the remote host." >&2
             echo "Install Docker on the target server before running this deploy workflow." >&2
@@ -167,11 +220,12 @@ jobs:
           import os, re
 
           build_only = os.environ.get("BUILD_ONLY", "").strip().lower() == "true"
+
           if build_only:
               adb_key = """-----BEGIN PRIVATE KEY-----
-              MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
-              DUMMY_BUILD_ONLY_DEPLOY_WORKFLOW
-              -----END PRIVATE KEY-----"""
+          MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
+          DUMMY_BUILD_ONLY_DEPLOY_WORKFLOW
+          -----END PRIVATE KEY-----"""
               turn_key = "dummy-turn-key-build-only"
           else:
               adb_key = os.environ.get("ADB_KEY", "").strip()
@@ -181,13 +235,13 @@ jobs:
 
           if not adb_key:
               raise SystemExit("Error: ADB_KEY secret is not set")
+
           if not turn_key:
               raise SystemExit("Error: TURN_KEY secret is not set")
+
           if turn_key.upper().startswith(placeholder_patterns):
               raise SystemExit("Error: TURN_KEY still looks like a placeholder value")
 
-          # Capture the leading whitespace so the replacement works at any indentation level.
-          # ADB_KEY must be the full PEM key including -----BEGIN/END PRIVATE KEY----- lines.
           def replace_adb_key(match):
               indent = match.group(1)
               return "\n".join(indent + line for line in adb_key.splitlines())
@@ -195,114 +249,156 @@ jobs:
           for compose_path in ("docker-compose.yml",):
               if not os.path.exists(compose_path):
                   continue
+
               with open(compose_path, "r", encoding="utf-8") as fh:
                   content = fh.read()
-              content = re.sub(r"^( *)PLACEHOLDER_ADB_KEY$", replace_adb_key, content, flags=re.MULTILINE)
+
+              content = re.sub(
+                  r"^( *)PLACEHOLDER_ADB_KEY$",
+                  replace_adb_key,
+                  content,
+                  flags=re.MULTILINE
+              )
+
               content = content.replace("PLACEHOLDER_TURN_KEY", turn_key)
+
               if "PLACEHOLDER_ADB_KEY" in content:
-                  raise SystemExit(f"Error: ADB placeholder still present in {compose_path} after injection")
+                  raise SystemExit(
+                      f"Error: ADB placeholder still present in {compose_path} after injection"
+                  )
+
               if "PLACEHOLDER_TURN_KEY" in content:
-                  raise SystemExit(f"Error: TURN placeholder still present in {compose_path} after injection")
+                  raise SystemExit(
+                      f"Error: TURN placeholder still present in {compose_path} after injection"
+                  )
+
               with open(compose_path, "w", encoding="utf-8") as fh:
                   fh.write(content)
           PYEOF
 
       - name: Verify rendered configuration on runner
+        shell: bash
         run: |
-          if grep -R -n "PLACEHOLDER_ADB_KEY\|PLACEHOLDER_TURN_KEY" docker-compose.yml; then
+          set -euo pipefail
+
+          if grep -R -n \
+            "PLACEHOLDER_ADB_KEY\|PLACEHOLDER_TURN_KEY" \
+            docker-compose.yml
+          then
             echo "Rendered configuration still contains placeholders." >&2
             exit 1
           fi
 
       - name: Upload repository files
         if: ${{ !inputs.build_only }}
+        shell: bash
         run: |
+          set -euo pipefail
+
           rsync -az \
             --exclude='*.md' \
             --exclude='.git/' \
-            -e "ssh -i ${SSH_KEY_FILE} -o StrictHostKeyChecking=${SSH_STRICT} -o BatchMode=yes" \
             ./ \
-            "${SSH_USER}@${SSH_IP}:${SSH_PATH}/"
+            "starbuck-deploy:${SSH_PATH}/"
 
       - name: Verify rendered configuration on remote
         if: ${{ !inputs.build_only }}
+        shell: bash
         run: |
-          ssh -i "${SSH_KEY_FILE}" \
-            -o StrictHostKeyChecking="${SSH_STRICT}" \
-            -o BatchMode=yes \
-            "${SSH_USER}@${SSH_IP}" \
+          set -euo pipefail
+
+          ssh starbuck-deploy \
             REMOTE_PATH="${SSH_PATH}/docker-compose.yml" \
             bash -l -s <<'REMOTE'
           set -euo pipefail
-          if grep -n "PLACEHOLDER_ADB_KEY\|PLACEHOLDER_TURN_KEY" "${REMOTE_PATH}"; then
+
+          if grep -n \
+            "PLACEHOLDER_ADB_KEY\|PLACEHOLDER_TURN_KEY" \
+            "${REMOTE_PATH}"
+          then
             echo "Remote docker-compose.yml still contains placeholders." >&2
             exit 1
           fi
+
           echo "Remote docker-compose.yml placeholders cleared."
           REMOTE
 
       - name: Verify emulator startup wrapper revision on remote
         if: ${{ !inputs.build_only }}
+        shell: bash
         run: |
-          ssh -i "${SSH_KEY_FILE}" \
-            -o StrictHostKeyChecking="${SSH_STRICT}" \
-            -o BatchMode=yes \
-            "${SSH_USER}@${SSH_IP}" \
+          set -euo pipefail
+
+          ssh starbuck-deploy \
             REMOTE_ROOT="${SSH_PATH}" \
             bash -l -s <<'REMOTE'
           set -euo pipefail
+
           WRAPPER_PATH="${REMOTE_ROOT}/emulator/start-emulator-with-turn.sh"
+
           if [[ ! -f "${WRAPPER_PATH}" ]]; then
             echo "Missing emulator wrapper on remote: ${WRAPPER_PATH}" >&2
             exit 1
           fi
+
           echo "Remote wrapper sha256:"
           sha256sum "${WRAPPER_PATH}"
+
           echo "Remote wrapper diagnostic markers:"
-          grep -n "turncfg.runtime.log\|turncfg.generated.json\|\\[turncfg-runtime\\]" "${WRAPPER_PATH}" || {
-            echo "Expected TURN diagnostic markers were not found in remote wrapper." >&2
-            exit 1
-          }
+          grep -n \
+            "turncfg.runtime.log\|turncfg.generated.json\|\\[turncfg-runtime\\]" \
+            "${WRAPPER_PATH}" || {
+              echo "Expected TURN diagnostic markers were not found in remote wrapper." >&2
+              exit 1
+            }
           REMOTE
 
       - name: Validate emulator base image is resolvable
         if: ${{ !inputs.build_only }}
+        shell: bash
         run: |
           set -euo pipefail
+
           resolve_image_on_remote() {
             local candidate="$1"
-            ssh -i "${SSH_KEY_FILE}" \
-              -o StrictHostKeyChecking="${SSH_STRICT}" \
-              -o BatchMode=yes \
-              "${SSH_USER}@${SSH_IP}" \
+
+            ssh starbuck-deploy \
               EMULATOR_IMAGE="${candidate}" \
               bash -l -s <<'REMOTE'
             set -euo pipefail
+
             for attempt in 1 2 3; do
               if docker pull "${EMULATOR_IMAGE}" > /dev/null 2>&1 \
-                 && docker image inspect "${EMULATOR_IMAGE}" > /dev/null 2>&1; then
+                 && docker image inspect "${EMULATOR_IMAGE}" > /dev/null 2>&1
+              then
                 echo "ok"
                 exit 0
               fi
+
               if [[ "${attempt}" -lt 3 ]]; then
                 sleep 10
               fi
             done
+
             echo "fail"
             exit 0
           REMOTE
           }
 
           selected_image="${EMULATOR_IMAGE_PRIMARY}"
+
           if [[ "$(resolve_image_on_remote "${EMULATOR_IMAGE_PRIMARY}")" == "ok" ]]; then
             echo "Using primary emulator image: ${EMULATOR_IMAGE_PRIMARY}"
+
           elif [[ "${REQUIRE_API34_PRIMARY}" == "true" ]]; then
             echo "Primary API 34 emulator image could not be pulled on the remote host." >&2
             echo "Primary: ${EMULATOR_IMAGE_PRIMARY}" >&2
             exit 1
+
           elif [[ "$(resolve_image_on_remote "${EMULATOR_IMAGE_FALLBACK}")" == "ok" ]]; then
             selected_image="${EMULATOR_IMAGE_FALLBACK}"
             echo "Primary image unavailable; falling back to: ${EMULATOR_IMAGE_FALLBACK}"
+
           else
             echo "Neither emulator image is resolvable on the remote host." >&2
             echo "Primary:  ${EMULATOR_IMAGE_PRIMARY}" >&2
@@ -314,34 +410,44 @@ jobs:
 
       - name: Validate emulator base image on runner
         if: ${{ inputs.build_only }}
+        shell: bash
         run: |
           set -euo pipefail
+
           resolve_image_on_runner() {
             local candidate="$1"
+
             for attempt in 1 2 3; do
               if docker pull "${candidate}" > /dev/null 2>&1 \
-                 && docker image inspect "${candidate}" > /dev/null 2>&1; then
+                 && docker image inspect "${candidate}" > /dev/null 2>&1
+              then
                 echo "ok"
                 return 0
               fi
+
               if [[ "${attempt}" -lt 3 ]]; then
                 sleep 10
               fi
             done
+
             echo "fail"
             return 0
           }
 
           selected_image="${EMULATOR_IMAGE_PRIMARY}"
+
           if [[ "$(resolve_image_on_runner "${EMULATOR_IMAGE_PRIMARY}")" == "ok" ]]; then
             echo "Using primary emulator image: ${EMULATOR_IMAGE_PRIMARY}"
+
           elif [[ "${REQUIRE_API34_PRIMARY}" == "true" ]]; then
             echo "Primary API 34 emulator image could not be pulled on the GitHub runner." >&2
             echo "Primary: ${EMULATOR_IMAGE_PRIMARY}" >&2
             exit 1
+
           elif [[ "$(resolve_image_on_runner "${EMULATOR_IMAGE_FALLBACK}")" == "ok" ]]; then
             selected_image="${EMULATOR_IMAGE_FALLBACK}"
             echo "Primary image unavailable on runner; falling back to: ${EMULATOR_IMAGE_FALLBACK}"
+
           else
             echo "Neither emulator image is resolvable on the GitHub runner." >&2
             echo "Primary:  ${EMULATOR_IMAGE_PRIMARY}" >&2
@@ -353,12 +459,17 @@ jobs:
 
       - name: Build full docker compose stack on runner
         if: ${{ inputs.build_only }}
+        shell: bash
         run: |
           set -euo pipefail
+
           docker version
           docker compose version
+
           for attempt in 1 2 3; do
-            if EMULATOR_IMAGE="${EMULATOR_IMAGE}" docker compose build --no-cache; then
+            if EMULATOR_IMAGE="${EMULATOR_IMAGE}" \
+              docker compose build --no-cache
+            then
               break
             fi
 
@@ -370,27 +481,34 @@ jobs:
             echo "docker compose build attempt ${attempt} failed; retrying in 15s..." >&2
             sleep 15
           done
-          echo "    docker compose builds complete."
+
+          echo "docker compose builds complete."
 
       - name: Build full docker compose stack
         if: ${{ !inputs.build_only }}
+        shell: bash
         run: |
-          ssh -i "${SSH_KEY_FILE}" \
-            -o StrictHostKeyChecking="${SSH_STRICT}" \
-            -o BatchMode=yes \
-            "${SSH_USER}@${SSH_IP}" \
+          set -euo pipefail
+
+          ssh starbuck-deploy \
             COMPOSE_DIR="${SSH_PATH}" \
             EMULATOR_IMAGE="${EMULATOR_IMAGE}" \
             bash -l -s <<'REMOTE'
           set -euo pipefail
+
           cd "${COMPOSE_DIR}"
+
           for attempt in 1 2 3; do
             if docker compose version > /dev/null 2>&1; then
-              if EMULATOR_IMAGE="${EMULATOR_IMAGE}" docker compose build --no-cache; then
+              if EMULATOR_IMAGE="${EMULATOR_IMAGE}" \
+                docker compose build --no-cache
+              then
                 break
               fi
             else
-              if EMULATOR_IMAGE="${EMULATOR_IMAGE}" docker-compose build --no-cache; then
+              if EMULATOR_IMAGE="${EMULATOR_IMAGE}" \
+                docker-compose build --no-cache
+              then
                 break
               fi
             fi
@@ -403,39 +521,45 @@ jobs:
             echo "docker compose build attempt ${attempt} failed; retrying in 15s..." >&2
             sleep 15
           done
-          echo "    docker compose builds complete."
+
+          echo "docker compose builds complete."
           REMOTE
 
       - name: Launch full docker compose stack
         if: ${{ !inputs.build_only }}
+        shell: bash
         run: |
-          ssh -i "${SSH_KEY_FILE}" \
-            -o StrictHostKeyChecking="${SSH_STRICT}" \
-            -o BatchMode=yes \
-            "${SSH_USER}@${SSH_IP}" \
+          set -euo pipefail
+
+          ssh starbuck-deploy \
             COMPOSE_DIR="${SSH_PATH}" \
             bash -l -s <<'REMOTE'
           set -euo pipefail
+
           cd "${COMPOSE_DIR}"
+
           if docker compose version > /dev/null 2>&1; then
             docker compose up -d --remove-orphans
           else
             docker-compose up -d --remove-orphans
           fi
-          echo "    docker compose deploy complete."
+
+          echo "docker compose deploy complete."
           REMOTE
 
       - name: Verify deployed services
         if: ${{ !inputs.build_only }}
+        shell: bash
         run: |
-          ssh -i "${SSH_KEY_FILE}" \
-            -o StrictHostKeyChecking="${SSH_STRICT}" \
-            -o BatchMode=yes \
-            "${SSH_USER}@${SSH_IP}" \
+          set -euo pipefail
+
+          ssh starbuck-deploy \
             COMPOSE_DIR="${SSH_PATH}" \
             bash -l -s <<'REMOTE'
           set -euo pipefail
+
           cd "${COMPOSE_DIR}"
+
           if docker compose version > /dev/null 2>&1; then
             docker compose ps
           else
@@ -445,4 +569,6 @@ jobs:
 
       - name: Clean up SSH key
         if: ${{ always() && !inputs.build_only }}
-        run: shred -u "${SSH_KEY_FILE}" 2>/dev/null || rm -f "${SSH_KEY_FILE}"
+        shell: bash
+        run: |
+          shred -u ~/.ssh/id_ed25519 2>/dev/null || rm -f ~/.ssh/id_ed25519

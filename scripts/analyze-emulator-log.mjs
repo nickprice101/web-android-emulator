@@ -53,6 +53,7 @@ const findings = {
   shellUnsetVariableCrash: /start-emulator\.sh:\s*\d+:\s*_emulator_version: parameter not set/.test(logText),
   modemIpv6Failure: /qemu-system-[^:\s]+: .*id=modem: address resolution failed for ::1/.test(logText),
   invalidRadioOption: /qemu-system-[^:\s]+: -radio: invalid option/.test(logText),
+  xvfbStartupFailure: /\[start-emulator\] ERROR: Xvfb exited(?: with status \d+)? before creating \/tmp\/\.X11-unix\/X\d+\./.test(logText),
   directAdbBridgeForwarderStarted: /\[start-emulator\] Started direct adb bridge forwarder on .*:5555 -> 127\.0\.0\.1:5555\./.test(logText),
   adbPortGuardHeartbeatCount: (logText.match(/\[adb-port-guard\] alive: iter=/g) || []).length,
   repeatedRestartLoop:
@@ -123,6 +124,10 @@ if (
   rootCause = "direct-launch-missing-adb-host-server";
   explanation =
     "Direct launch reached the selected API level and disabled the modem backend, but the runtime lacked a usable adb binary, so the emulator could not connect to the host adb server on port 5037 and the container restarted.";
+} else if (findings.xvfbStartupFailure) {
+  rootCause = "stale-x-display-lock";
+  explanation =
+    "Xvfb exited before the emulator launched, which is consistent with a stale /tmp/.X<display>-lock file left in the stopped container filesystem.";
 } else if (findings.duplicateAvdLockFatal) {
   rootCause = "duplicate-avd-lock";
   explanation =
@@ -153,6 +158,7 @@ const summary = {
     !findings.shellUnsetVariableCrash &&
     !findings.adbHostServerFailure &&
     !findings.missingAdbBinary &&
+    !findings.xvfbStartupFailure &&
     !findings.duplicateAvdLockFatal &&
     !findings.unsupportedHostGpu &&
     !findings.vulkanIncompatibleDriver &&
@@ -173,6 +179,7 @@ if (
   findings.invalidRadioOption ||
   findings.shellUnsetVariableCrash ||
   findings.ipv6LiteralResolutionFailed ||
+  findings.xvfbStartupFailure ||
   findings.duplicateAvdLockFatal ||
   findings.unsupportedHostGpu ||
   findings.vulkanIncompatibleDriver ||

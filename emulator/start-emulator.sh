@@ -180,6 +180,7 @@ start_virtual_x_display() {
       ;;
   esac
   _x_socket="/tmp/.X11-unix/X${_x_display_number}"
+  _x_lock="/tmp/.X${_x_display_number}-lock"
   _x_log="${EMULATOR_X_LOG:-/tmp/xvfb-emulator.log}"
 
   if ! command -v Xvfb >/dev/null 2>&1; then
@@ -189,11 +190,34 @@ start_virtual_x_display() {
 
   mkdir -p /tmp/.X11-unix
   chmod 1777 /tmp/.X11-unix 2>/dev/null || true
-  rm -f "${_x_socket}" 2>/dev/null || true
+  if [ -e "${_x_lock}" ]; then
+    _x_lock_pid="$(tr -d '[:space:]' < "${_x_lock}" 2>/dev/null || true)"
+    _x_lock_process=""
+    case "${_x_lock_pid}" in
+      ''|*[!0-9]*) ;;
+      *)
+        if kill -0 "${_x_lock_pid}" 2>/dev/null; then
+          _x_lock_process="$(cat "/proc/${_x_lock_pid}/comm" 2>/dev/null || true)"
+        fi
+        ;;
+    esac
+
+    case "${_x_lock_process}" in
+      Xvfb|Xorg)
+        log "ERROR: X display ${EMULATOR_X_DISPLAY} is already owned by ${_x_lock_process} pid ${_x_lock_pid}."
+        exit 1
+        ;;
+      *)
+        rm -f "${_x_lock}" "${_x_socket}" 2>/dev/null || true
+        log "Removed stale X display lock ${_x_lock} left by pid ${_x_lock_pid:-unknown}."
+        ;;
+    esac
+  elif [ -e "${_x_socket}" ]; then
+    rm -f "${_x_socket}" 2>/dev/null || true
+    log "Removed stale X display socket ${_x_socket}."
+  fi
+
   : > "${_x_log}"
-  (
-    tail -n +1 -F "${_x_log}" 2>/dev/null | sed 's/^/[xvfb] /' >&2
-  ) &
 
   Xvfb "${EMULATOR_X_DISPLAY}" \
     -screen "${EMULATOR_X_SCREEN}" "${EMULATOR_X_SCREEN_SIZE}" \
@@ -207,11 +231,19 @@ start_virtual_x_display() {
   while [ "${_x_wait}" -lt 50 ]; do
     if [ -S "${_x_socket}" ]; then
       log "Started Xvfb display ${EMULATOR_X_DISPLAY} (${EMULATOR_X_SCREEN_SIZE}); TCP capture endpoint is port $((6000 + _x_display_number))."
-      unset _x_display_number _x_socket _x_log _x_wait
+      (
+        tail -n +1 -F "${_x_log}" 2>/dev/null | sed 's/^/[xvfb] /' >&2
+      ) &
+      unset _x_display_number _x_socket _x_lock _x_lock_pid _x_lock_process _x_log _x_wait
       return 0
     fi
     if ! kill -0 "${EMULATOR_XVFB_PID}" 2>/dev/null; then
-      log "ERROR: Xvfb exited before creating ${_x_socket}."
+      _x_status=0
+      wait "${EMULATOR_XVFB_PID}" || _x_status="$?"
+      log "ERROR: Xvfb exited with status ${_x_status} before creating ${_x_socket}."
+      if [ -s "${_x_log}" ]; then
+        sed 's/^/[xvfb] /' "${_x_log}" >&2
+      fi
       exit 1
     fi
     _x_wait=$((_x_wait + 1))

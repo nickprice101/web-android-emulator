@@ -30,7 +30,9 @@ deployments with a known-good render device can opt into host acceleration with
 read-only mode by default to avoid metrics prompts and duplicate-AVD lock
 failures during container restarts. `EMULATOR_VIRTUAL_DISPLAY=1` is enabled by
 default; set it to `0` only when deliberately returning to the old `-no-window`
-emulator launch.
+emulator launch. When an existing stopped container is started again, the
+launcher also removes the stale X display lock and socket left in `/tmp` before
+starting Xvfb on `:99`.
 
 When each video capture starts, `apkbridge` sends a tiny top-left tap nudge to
 force the Android compositor to emit initial frames even when the display is

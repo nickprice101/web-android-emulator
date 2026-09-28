@@ -188,6 +188,8 @@ assert.match(emulatorWrapper, /EMULATOR_LAUNCH_MODE="\$\{EMULATOR_LAUNCH_MODE:-d
 assert.match(emulatorWrapper, /start_direct_adb_bridge_forwarder\(\)/, "emulator wrapper must keep the sibling-container ADB bridge");
 assert.match(emulatorWrapper, /start_virtual_x_display\(\)/, "emulator wrapper must start Xvfb for direct launch");
 assert.match(emulatorWrapper, /Xvfb "\$\{EMULATOR_X_DISPLAY\}"/, "emulator wrapper must launch the configured virtual X display");
+assert.match(emulatorWrapper, /_x_lock="\/tmp\/\.X\$\{_x_display_number\}-lock"/, "emulator wrapper must locate the X display lock persisted across container stops");
+assert.match(emulatorWrapper, /rm -f "\$\{_x_lock\}" "\$\{_x_socket\}"/, "emulator wrapper must clear stale X display state before restarting Xvfb");
 assert.match(emulatorWrapper, /append_param_if_missing "-no-skin"/, "emulator wrapper must remove the emulator skin for aligned X display capture");
 assert.match(emulatorWrapper, /-fixed-scale/, "emulator wrapper must keep the emulator window at a stable 1:1 scale");
 assert.match(emulatorWrapper, /append_param_if_missing "-no-metrics"/, "emulator wrapper must suppress emulator metrics prompts by default");

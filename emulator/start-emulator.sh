@@ -321,6 +321,13 @@ EMULATOR_USE_RADIO_OVERRIDE="${EMULATOR_USE_RADIO_OVERRIDE:-0}"
 EMULATOR_PACKET_STREAMER_ENDPOINT="${EMULATOR_PACKET_STREAMER_ENDPOINT-default}"
 EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE:-system-images;android-36;google_apis;x86_64}"
 EMULATOR_PLATFORM="${EMULATOR_PLATFORM:-platforms;android-36}"
+EMULATOR_DATA_SIZE_MB="${EMULATOR_DATA_SIZE_MB:-16384}"
+case "${EMULATOR_DATA_SIZE_MB}" in
+  ''|0*|*[!0-9]*)
+    log "Unsupported EMULATOR_DATA_SIZE_MB='${EMULATOR_DATA_SIZE_MB}'; expected a positive number of megabytes."
+    exit 1
+    ;;
+esac
 EMULATOR_X_CAPTURE_SIZE="${EMULATOR_X_CAPTURE_SIZE:-1080x2340}"
 mkdir -p "${ANDROID_USER_HOME}" "${ANDROID_AVD_HOME}"
 
@@ -471,7 +478,7 @@ else
 fi
 unset _emulator_bin _emulator_version _system_image_props _system_image_sysdir _props_path _prop_line
 
-# Apply critical AVD config.ini patches before the emulator is launched.
+# Apply AVD config.ini patches before the emulator is launched.
 #
 # (a) hw.gsmModem=no  — prevents QEMU from creating the modem chardev socket
 #     bound to ::1 (IPv6 loopback), which causes a fatal "address resolution
@@ -486,14 +493,19 @@ unset _emulator_bin _emulator_version _system_image_props _system_image_sysdir _
 #     also maintain a second copy at /Pixel2.avd/config.ini that is the
 #     authoritative file read by launch-emulator.sh at runtime.  Patching all
 #     discovered config files here is the safe fallback.
+#
+# (c) disk.dataPartition.size — gives Android apps room for installs and
+#     database writes on /data. The default compose launch initializes userdata.
 _patch_single_avd_config() {
   _cfg="$1"
   _sdk="${ANDROID_SDK_ROOT:-/android/sdk}"
   _image_sysdir="$(emulator_system_image_sysdir)"
   sed -i '/^hw\.gsmModem=/d' "${_cfg}" 2>/dev/null || true
   sed -i '/^hw\.ramSize=/d' "${_cfg}" 2>/dev/null || true
+  sed -i '/^disk\.dataPartition\.size[[:space:]]*=/d' "${_cfg}"
   printf 'hw.gsmModem=%s\n' 'no' >> "${_cfg}"
   printf 'hw.ramSize=%s\n' "${EMULATOR_RAM_SIZE_MB}" >> "${_cfg}"
+  printf 'disk.dataPartition.size=%sM\n' "${EMULATOR_DATA_SIZE_MB}" >> "${_cfg}"
   if [ -d "${_sdk}/${_image_sysdir}" ]; then
     sed -i '/^image\.sysdir\.1=/d' "${_cfg}" 2>/dev/null || true
     printf 'image.sysdir.1=%s\n' "${_image_sysdir}" >> "${_cfg}"
@@ -503,7 +515,7 @@ _patch_single_avd_config() {
   fi
 }
 
-log "Patching AVD config.ini files (hw.gsmModem=no + ${EMULATOR_RAM_SIZE_MB} MB RAM + ${EMULATOR_SYSTEM_IMAGE} system image):"
+log "Patching AVD config.ini files (hw.gsmModem=no + ${EMULATOR_RAM_SIZE_MB} MB RAM + ${EMULATOR_DATA_SIZE_MB} MB userdata + ${EMULATOR_SYSTEM_IMAGE} system image):"
 _avd_patched=0
 for _cfg_candidate in \
     "${ANDROID_AVD_HOME}/Pixel2.avd/config.ini" \

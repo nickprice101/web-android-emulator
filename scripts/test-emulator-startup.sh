@@ -9,7 +9,8 @@
 #   3. A sibling-container adb client can also connect to that forwarded bridge
 #      target over Docker bridge networking.
 #   4. The Android guest can optionally be probed over ADB without blocking
-#      startup classification when guest boot is merely slow.
+#      startup classification when guest boot is merely slow. When boot is
+#      observed, verify the guest has sufficient space on /data.
 #   5. The container remains running and becomes healthy after validation.
 #
 # Usage:
@@ -29,6 +30,7 @@
 #                            Expected Android Emulator package version.
 #   EXPECTED_EMULATOR_RAM_SIZE_MB
 #                            Expected Android guest RAM in megabytes.
+#   EMULATOR_DATA_SIZE_MB    Android guest userdata partition size in megabytes.
 #   EXPECTED_PACKET_STREAMER_ENDPOINT
 #                            Expected Bluetooth packet-streamer endpoint.
 #   BLUETOOTH_STABILITY_WAIT_SECONDS
@@ -65,6 +67,7 @@ EXPECTED_GUEST_API="${EXPECTED_GUEST_API:-36}"
 EXPECTED_EMULATOR_VERSION="${EXPECTED_EMULATOR_VERSION:-37.1.11}"
 EXPECTED_RADIO_OVERRIDE_MODE="${EXPECTED_RADIO_OVERRIDE_MODE:-disabled}"
 EXPECTED_EMULATOR_RAM_SIZE_MB="${EXPECTED_EMULATOR_RAM_SIZE_MB:-6144}"
+EMULATOR_DATA_SIZE_MB="${EMULATOR_DATA_SIZE_MB:-16384}"
 EXPECTED_PACKET_STREAMER_ENDPOINT="${EXPECTED_PACKET_STREAMER_ENDPOINT:-default}"
 BLUETOOTH_STABILITY_WAIT_SECONDS="${BLUETOOTH_STABILITY_WAIT_SECONDS:-60}"
 ADB_READY_TIMEOUT="${ADB_READY_TIMEOUT:-240}"
@@ -224,12 +227,16 @@ docker run -d \
   --device /dev/kvm:/dev/kvm \
   --shm-size 6g \
   -e EMULATOR_RAM_SIZE_MB="${EXPECTED_EMULATOR_RAM_SIZE_MB}" \
+  -e EMULATOR_DATA_SIZE_MB="${EMULATOR_DATA_SIZE_MB}" \
   -e EMULATOR_SYSTEM_IMAGE="${EMULATOR_SYSTEM_IMAGE}" \
   -e EMULATOR_PLATFORM="${EMULATOR_PLATFORM}" \
   -e EMULATOR_PACKET_STREAMER_ENDPOINT="${EXPECTED_PACKET_STREAMER_ENDPOINT}" \
   -e EMULATOR_PARAMS="-no-metrics -no-audio -no-snapshot-load -wipe-data -dns-server 1.1.1.1,8.8.8.8 -gpu swiftshader_indirect -read-only -no-boot-anim -camera-back none -camera-front none -no-snapshot-save" \
   -e ADBKEY="PLACEHOLDER_ADB_KEY" \
   "${EMULATOR_IMAGE_TAG}" 2>&1 | head -1
+
+log "Checking free space on the filesystems backing the AVD and its temporary files..."
+docker exec "${CONTAINER_NAME}" sh -c 'df -h "$ANDROID_AVD_HOME" "${TMPDIR:-/tmp}"'
 
 CONTAINER_IP="$(container_ipv4)"
 if [ -z "${CONTAINER_IP}" ]; then
@@ -368,6 +375,18 @@ fi
 if [ "${guest_api}" = "${EXPECTED_GUEST_API}" ] && [ "${boot_completed}" = "1" ]; then
   log "Waiting ${BLUETOOTH_STABILITY_WAIT_SECONDS}s after guest boot to catch delayed Bluetooth stack restarts..."
   sleep "${BLUETOOTH_STABILITY_WAIT_SECONDS}"
+  if ! timeout 30 docker exec "${CONTAINER_NAME}" adb -s "${EMULATOR_ADB_SERIAL}" shell df -k /data \
+      > "${ARTIFACT_DIR}/guest-data-disk.txt"; then
+    fail "Unable to read Android /data capacity"
+  fi
+  cat "${ARTIFACT_DIR}/guest-data-disk.txt"
+  # Filesystem metadata reduces the reported capacity below the raw image size.
+  if ! awk -v size_mb="${EMULATOR_DATA_SIZE_MB}" '
+    NR == 2 && $2 >= size_mb * 1024 * 0.9 && $4 >= 2 * 1024 * 1024 { ok = 1 }
+    END { exit !ok }
+  ' "${ARTIFACT_DIR}/guest-data-disk.txt"; then
+    fail "Expected Android /data capacity near ${EMULATOR_DATA_SIZE_MB} MB with at least 2 GiB free"
+  fi
 else
   log "WARNING: skipping the post-boot Bluetooth stability window because guest boot was not observed."
 fi
@@ -375,6 +394,9 @@ fi
 log "Checking container logs for stale binaries and fatal guest startup errors..."
 RUNTIME_LOG_PATH="${ARTIFACT_DIR}/container.log"
 docker logs "${CONTAINER_NAME}" > "${RUNTIME_LOG_PATH}" 2>&1 || true
+if grep -Eq 'SQLiteFullException|SQLITE_FULL' "${RUNTIME_LOG_PATH}"; then
+  fail "Android logged a SQLite storage-full error during startup"
+fi
 if grep -Eq 'version: AndroidVersion\.ApiLevel=30|Pkg\.Dependencies=emulator#30\.0\.4' "${RUNTIME_LOG_PATH}"; then
   fail "Container logs still show the base launcher resolving an API 30 guest"
 fi

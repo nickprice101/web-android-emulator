@@ -101,6 +101,8 @@ The selected `EMULATOR_SYSTEM_IMAGE` and `EMULATOR_PLATFORM` are passed into the
 
 The emulator defaults to `EMULATOR_RAM_SIZE_MB=6144`, and compose gives the emulator service `shm_size: "6gb"`, so memory-heavy AI apps have more than 4GB of Android guest RAM available. Set `EMULATOR_RAM_SIZE_MB` to a higher value before `docker compose up` if a test app needs more.
 
+The Android `/data` partition defaults to 16 GiB (`EMULATOR_DATA_SIZE_MB=16384`) for APKs, app data, and database writes. Set `EMULATOR_DATA_SIZE_MB` before recreating the emulator container if a workload needs more. The default Compose launch initializes a fresh userdata image. Leave room for that image on Docker's storage filesystem and check guest free space with `adb shell df -h /data` after boot.
+
 To pin a different emulator base image or SDK package, build with:
 
 ```bash
